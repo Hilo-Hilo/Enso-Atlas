@@ -578,11 +578,10 @@ def create_cv_folds(
 ) -> List[Tuple[List[str], List[str]]]:
     """
     Create stratified k-fold cross-validation splits.
-    Patient-level (no data leakage).
+    Patient-level splits to avoid data leakage, then expand to slide IDs.
     """
     from sklearn.model_selection import StratifiedKFold
     
-    id_col = "slide_id" if "slide_id" in labels_df.columns else "patient_id"
     label_col = "label" if "label" in labels_df.columns else "treatment_response"
     
     if labels_df[label_col].dtype == object:
@@ -590,16 +589,38 @@ def create_cv_folds(
         labels_df["_label"] = (labels_df[label_col] == "responder").astype(int)
         label_col = "_label"
     
-    patient_ids = np.array(labels_df[id_col].tolist())
-    labels = np.array(labels_df[label_col].tolist())
-    
-    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_seed)
-    
-    folds = []
-    for train_idx, val_idx in skf.split(patient_ids, labels):
-        train_ids = patient_ids[train_idx].tolist()
-        val_ids = patient_ids[val_idx].tolist()
-        folds.append((train_ids, val_ids))
+    # Use patient_id for splitting to avoid data leakage
+    if "patient_id" in labels_df.columns and "slide_id" in labels_df.columns:
+        # Get unique patients with their labels
+        patient_labels = labels_df.groupby("patient_id")[label_col].first().reset_index()
+        patient_ids = np.array(patient_labels["patient_id"].tolist())
+        labels = np.array(patient_labels[label_col].tolist())
+        
+        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_seed)
+        
+        folds = []
+        for train_idx, val_idx in skf.split(patient_ids, labels):
+            train_patients = patient_ids[train_idx].tolist()
+            val_patients = patient_ids[val_idx].tolist()
+            
+            # Expand to slide IDs
+            train_slides = labels_df[labels_df["patient_id"].isin(train_patients)]["slide_id"].tolist()
+            val_slides = labels_df[labels_df["patient_id"].isin(val_patients)]["slide_id"].tolist()
+            
+            folds.append((train_slides, val_slides))
+    else:
+        # Fallback: use slide_id directly
+        id_col = "slide_id" if "slide_id" in labels_df.columns else "patient_id"
+        patient_ids = np.array(labels_df[id_col].tolist())
+        labels = np.array(labels_df[label_col].tolist())
+        
+        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_seed)
+        
+        folds = []
+        for train_idx, val_idx in skf.split(patient_ids, labels):
+            train_ids = patient_ids[train_idx].tolist()
+            val_ids = patient_ids[val_idx].tolist()
+            folds.append((train_ids, val_ids))
     
     return folds
 
