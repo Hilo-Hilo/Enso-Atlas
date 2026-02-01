@@ -100,18 +100,15 @@ export function SimilarCasesPanel({
         <div className="space-y-2">
           {visibleCases.map((similarCase, index) => (
             <SimilarCaseItem
-              key={`${similarCase.caseId}-${similarCase.patchId}`}
+              key={`${similarCase.caseId || similarCase.slideId}-${similarCase.patchId || index}`}
               case_={similarCase}
               rank={index + 1}
-              isExpanded={expandedCase === similarCase.caseId}
-              onToggleExpand={() =>
-                setExpandedCase(
-                  expandedCase === similarCase.caseId
-                    ? null
-                    : similarCase.caseId
-                )
-              }
-              onViewCase={() => onCaseClick?.(similarCase.caseId)}
+              isExpanded={expandedCase === (similarCase.caseId || similarCase.slideId)}
+              onToggleExpand={() => {
+                const caseKey = similarCase.caseId || similarCase.slideId;
+                setExpandedCase(expandedCase === caseKey ? null : caseKey);
+              }}
+              onViewCase={() => onCaseClick?.(similarCase.caseId || similarCase.slideId || "")}
             />
           ))}
         </div>
@@ -193,7 +190,7 @@ function SimilarCaseItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-gray-900 truncate">
-              Case {case_.caseId.slice(0, 12)}
+              Case {(case_.caseId || case_.slideId || "unknown").slice(0, 12)}
             </span>
             {case_.label && (
               <Badge
@@ -242,7 +239,7 @@ function SimilarCaseItem({
             <div>
               <span className="text-gray-500">Slide ID:</span>
               <span className="ml-1 font-mono text-gray-700">
-                {case_.slideId.slice(0, 16)}
+                {(case_.slideId || "unknown").slice(0, 16)}
               </span>
             </div>
             <div>
