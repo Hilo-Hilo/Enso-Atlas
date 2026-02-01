@@ -63,11 +63,36 @@ async function fetchApi<T>(
 
 // API Client functions
 
+// Backend slide info (different from frontend type)
+interface BackendSlideInfo {
+  slide_id: string;
+  patient_id?: string;
+  has_embeddings: boolean;
+  label?: string;
+  num_patches?: number;
+}
+
 /**
  * Fetch list of available slides
  */
 export async function getSlides(): Promise<SlidesListResponse> {
-  return fetchApi<SlidesListResponse>("/api/slides");
+  // Backend returns array with different schema, adapt it
+  const slides = await fetchApi<BackendSlideInfo[]>("/api/slides");
+  return {
+    slides: slides.map(s => ({
+      id: s.slide_id,
+      filename: `${s.slide_id}.svs`,
+      dimensions: { width: 0, height: 0 },
+      magnification: 40,
+      mpp: 0.25,
+      createdAt: new Date().toISOString(),
+      // Extended fields from backend
+      label: s.label,
+      hasEmbeddings: s.has_embeddings,
+      numPatches: s.num_patches,
+    })),
+    total: slides.length,
+  };
 }
 
 /**
@@ -77,16 +102,78 @@ export async function getSlide(slideId: string): Promise<SlideInfo> {
   return fetchApi<SlideInfo>(`/api/slides/${slideId}`);
 }
 
+// Backend analysis response
+interface BackendAnalysisResponse {
+  slide_id: string;
+  prediction: string;
+  score: number;
+  confidence: number;
+  patches_analyzed: number;
+  top_evidence: Array<{
+    rank: number;
+    patch_index: number;
+    attention_weight: number;
+    coordinates?: [number, number];
+  }>;
+  similar_cases: Array<{
+    slide_id: string;
+    similarity_score: number;
+    distance?: number;
+  }>;
+}
+
 /**
  * Analyze a slide with the pathology model
  */
 export async function analyzeSlide(
   request: AnalysisRequest
 ): Promise<AnalysisResponse> {
-  return fetchApi<AnalysisResponse>("/api/analyze", {
+  const backend = await fetchApi<BackendAnalysisResponse>("/api/analyze", {
     method: "POST",
-    body: JSON.stringify(request),
+    body: JSON.stringify({ slide_id: request.slideId }),
   });
+  
+  // Adapt backend response to frontend format
+  return {
+    slideInfo: {
+      id: backend.slide_id,
+      filename: `${backend.slide_id}.svs`,
+      dimensions: { width: 0, height: 0 },
+      magnification: 40,
+      mpp: 0.25,
+      createdAt: new Date().toISOString(),
+    },
+    prediction: {
+      label: backend.prediction,
+      score: backend.score,
+      confidence: backend.confidence,
+      calibrationNote: "Model probability requires external validation.",
+    },
+    evidencePatches: backend.top_evidence.map(e => ({
+      id: `patch_${e.patch_index}`,
+      coordinates: {
+        x: e.coordinates?.[0] ?? 0,
+        y: e.coordinates?.[1] ?? 0,
+        width: 224,
+        height: 224,
+      },
+      attentionScore: e.attention_weight,
+      rank: e.rank,
+    })),
+    similarCases: backend.similar_cases.map(s => ({
+      slideId: s.slide_id,
+      similarity: s.similarity_score,
+      label: "unknown",
+      thumbnailUrl: `/api/heatmap/${s.slide_id}`,
+    })),
+    heatmap: {
+      imageUrl: `/api/heatmap/${backend.slide_id}`,
+      minValue: 0,
+      maxValue: 1,
+      colorScale: "viridis",
+    },
+    processingTimeMs: 0,
+  };
 }
 
 /**

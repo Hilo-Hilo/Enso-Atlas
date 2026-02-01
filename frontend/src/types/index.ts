@@ -13,6 +13,10 @@ export interface SlideInfo {
   mpp: number; // microns per pixel
   thumbnailUrl?: string;
   createdAt: string;
+  // Extended fields from backend
+  label?: string;
+  hasEmbeddings?: boolean;
+  numPatches?: number;
 }
 
 // Patch coordinates and metadata
@@ -36,28 +40,32 @@ export interface EvidencePatch {
 
 // Similar case from FAISS retrieval
 export interface SimilarCase {
-  caseId: string;
+  caseId?: string;
   slideId: string;
-  patchId: string;
-  distance: number;
+  patchId?: string;
+  similarity: number;
+  distance?: number;
   label?: string;
-  thumbnailUrl: string;
-  coordinates: PatchCoordinates;
+  thumbnailUrl?: string;
+  coordinates?: PatchCoordinates;
 }
 
 // Prediction result from MIL model
 export interface PredictionResult {
   label: string;
-  probability: number;
-  confidence: "high" | "moderate" | "low";
+  score: number;
+  confidence: number;
   calibrationNote?: string;
 }
 
 // Heatmap data for visualization
 export interface HeatmapData {
   imageUrl: string;
-  opacity: number;
-  bounds: {
+  minValue?: number;
+  maxValue?: number;
+  colorScale?: string;
+  opacity?: number;
+  bounds?: {
     x: number;
     y: number;
     width: number;
