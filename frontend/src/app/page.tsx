@@ -79,14 +79,14 @@ export default function HomePage() {
 
   // Handle patch click - navigate viewer
   const handlePatchClick = useCallback((coords: PatchCoordinates) => {
-    // The WSIViewer will handle navigation internally
-    console.log("Navigate to:", coords);
+    // The WSIViewer will handle navigation internally via state/props
+    setSelectedPatchId(`${coords.x}_${coords.y}`);
   }, []);
 
   // Handle similar case click
   const handleCaseClick = useCallback((caseId: string) => {
-    console.log("View case:", caseId);
-    // TODO: Implement case viewing in a modal or new tab
+    // Open similar case in new tab (placeholder - would navigate to case detail view)
+    window.open(`/case/${caseId}`, "_blank");
   }, []);
 
   // Handle report generation

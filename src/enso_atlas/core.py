@@ -31,13 +31,13 @@ class AnalysisResult:
     evidence_patches: List[dict]
     similar_cases: List[dict]
     report: dict
-    
+
     def save_heatmap(self, path: str) -> None:
         """Save heatmap overlay to file."""
         from PIL import Image
         img = Image.fromarray((self.heatmap * 255).astype(np.uint8))
         img.save(path)
-    
+
     def save_report(self, path: str, format: str = "json") -> None:
         """Save report to file."""
         import json
@@ -48,26 +48,26 @@ class AnalysisResult:
 class EnsoAtlas:
     """
     Main orchestrator for Enso Atlas pathology analysis.
-    
+
     Example:
         atlas = EnsoAtlas.from_config("config/default.yaml")
         result = atlas.analyze("path/to/slide.svs")
         print(result.score)
     """
-    
+
     def __init__(self, config: AtlasConfig):
         self.config = config
         self._setup_logging()
-        
+
         # Initialize components (lazy loading)
         self._wsi_processor: Optional[WSIProcessor] = None
         self._embedder: Optional[PathFoundationEmbedder] = None
         self._classifier: Optional[CLAMClassifier] = None
         self._evidence_generator: Optional[EvidenceGenerator] = None
         self._reporter: Optional[MedGemmaReporter] = None
-        
+
         logger.info(f"EnsoAtlas initialized with config")
-    
+
     def _setup_logging(self) -> None:
         """Setup logging configuration."""
         level = getattr(logging, self.config.deployment.log_level.upper())
@@ -75,48 +75,48 @@ class EnsoAtlas:
             level=level,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-    
+
     @classmethod
     def from_config(cls, config_path: str | Path) -> "EnsoAtlas":
         """Create EnsoAtlas from config file."""
         config = AtlasConfig.from_yaml(config_path)
         return cls(config)
-    
+
     @property
     def wsi_processor(self) -> WSIProcessor:
         """Lazy-load WSI processor."""
         if self._wsi_processor is None:
             self._wsi_processor = WSIProcessor(self.config.wsi)
         return self._wsi_processor
-    
+
     @property
     def embedder(self) -> PathFoundationEmbedder:
         """Lazy-load embedder."""
         if self._embedder is None:
             self._embedder = PathFoundationEmbedder(self.config.embedding)
         return self._embedder
-    
+
     @property
     def classifier(self) -> CLAMClassifier:
         """Lazy-load MIL classifier."""
         if self._classifier is None:
             self._classifier = CLAMClassifier(self.config.mil)
         return self._classifier
-    
+
     @property
     def evidence_generator(self) -> EvidenceGenerator:
         """Lazy-load evidence generator."""
         if self._evidence_generator is None:
             self._evidence_generator = EvidenceGenerator(self.config.evidence)
         return self._evidence_generator
-    
+
     @property
     def reporter(self) -> MedGemmaReporter:
         """Lazy-load MedGemma reporter."""
         if self._reporter is None:
             self._reporter = MedGemmaReporter(self.config.reporting)
         return self._reporter
-    
+
     def analyze(
         self,
         slide_path: str | Path,
@@ -125,35 +125,35 @@ class EnsoAtlas:
     ) -> AnalysisResult:
         """
         Analyze a single whole-slide image.
-        
+
         Args:
             slide_path: Path to the WSI file
             generate_report: Whether to generate MedGemma report
             save_cache: Whether to cache embeddings
-            
+
         Returns:
             AnalysisResult with score, evidence, and report
         """
         slide_path = Path(slide_path)
         logger.info(f"Analyzing slide: {slide_path.name}")
-        
+
         # Step 1: Extract patches
         logger.info("Extracting patches...")
         patches, coords = self.wsi_processor.extract_patches(slide_path)
         logger.info(f"Extracted {len(patches)} patches")
-        
+
         # Step 2: Generate embeddings
         logger.info("Generating embeddings...")
         embeddings = self.embedder.embed(patches, cache_key=str(slide_path))
         logger.info(f"Generated embeddings: {embeddings.shape}")
-        
+
         # Step 3: Run MIL classifier
         logger.info("Running classifier...")
         score, attention_weights = self.classifier.predict(embeddings)
         label = "responder" if score > 0.5 else "non-responder"
         confidence = abs(score - 0.5) * 2  # Convert to 0-1 confidence
         logger.info(f"Prediction: {label} (score={score:.3f})")
-        
+
         # Step 4: Generate evidence
         logger.info("Generating evidence...")
         heatmap = self.evidence_generator.create_heatmap(
@@ -165,7 +165,7 @@ class EnsoAtlas:
         similar_cases = self.evidence_generator.find_similar(
             embeddings, attention_weights, k=self.config.evidence.similarity_k
         )
-        
+
         # Step 5: Generate report (optional)
         report = {}
         if generate_report:
@@ -176,7 +176,7 @@ class EnsoAtlas:
                 label=label,
                 similar_cases=similar_cases,
             )
-        
+
         return AnalysisResult(
             slide_path=str(slide_path),
             score=score,
@@ -187,7 +187,7 @@ class EnsoAtlas:
             similar_cases=similar_cases,
             report=report,
         )
-    
+
     def batch_analyze(
         self,
         slide_dir: str | Path,
@@ -196,34 +196,34 @@ class EnsoAtlas:
     ) -> List[AnalysisResult]:
         """
         Analyze all slides in a directory.
-        
+
         Args:
             slide_dir: Directory containing WSI files
             output_dir: Directory to save results
             pattern: Glob pattern for slide files
-            
+
         Returns:
             List of AnalysisResult objects
         """
         slide_dir = Path(slide_dir)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         slides = list(slide_dir.glob(pattern))
         logger.info(f"Found {len(slides)} slides to analyze")
-        
+
         results = []
         for slide_path in slides:
             try:
                 result = self.analyze(slide_path)
-                
+
                 # Save outputs
                 slide_name = slide_path.stem
                 result.save_heatmap(output_dir / f"{slide_name}_heatmap.png")
                 result.save_report(output_dir / f"{slide_name}_report.json")
-                
+
                 results.append(result)
             except Exception as e:
                 logger.error(f"Failed to analyze {slide_path.name}: {e}")
-        
+
         return results

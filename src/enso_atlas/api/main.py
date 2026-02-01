@@ -113,7 +113,7 @@ def create_app(
     enable_cors: bool = True,
 ) -> FastAPI:
     """Create and configure the FastAPI application."""
-    
+
     app = FastAPI(
         title="Enso Atlas API",
         description="On-Prem Pathology Evidence Engine for Treatment-Response Insight",
@@ -121,7 +121,7 @@ def create_app(
         docs_url="/api/docs",
         redoc_url="/api/redoc",
     )
-    
+
     # CORS middleware for frontend development
     if enable_cors:
         app.add_middleware(
@@ -136,54 +136,54 @@ def create_app(
             allow_methods=["*"],
             allow_headers=["*"],
         )
-    
+
     # Load models on startup
     classifier = None
     evidence_gen = None
     embedder = None
     reporter = None
     available_slides = []
-    
+
     @app.on_event("startup")
     async def load_models():
         nonlocal classifier, evidence_gen, embedder, reporter, available_slides
-        
+
         from ..config import MILConfig, EvidenceConfig, EmbeddingConfig
         from ..mil.clam import CLAMClassifier
         from ..evidence.generator import EvidenceGenerator
         from ..embedding.embedder import PathFoundationEmbedder
         from ..reporting.medgemma import MedGemmaReporter, ReportingConfig
-        
+
         # Load MIL classifier
         config = MILConfig(input_dim=384, hidden_dim=128)
         classifier = CLAMClassifier(config)
         if model_path.exists():
             classifier.load(model_path)
             logger.info(f"Loaded MIL model from {model_path}")
-        
+
         # Setup evidence generator
         evidence_config = EvidenceConfig()
         evidence_gen = EvidenceGenerator(evidence_config)
-        
+
         # Setup embedder (lazy-loaded on first use)
         embedding_config = EmbeddingConfig()
         embedder = PathFoundationEmbedder(embedding_config)
-        
+
         # Setup MedGemma reporter (lazy-loaded on first use)
         reporting_config = ReportingConfig()
         reporter = MedGemmaReporter(reporting_config)
         logger.info("MedGemma reporter initialized (model loads on first call)")
-        
+
         # Find available slides and build FAISS index
         all_embeddings = []
         all_metadata = []
-        
+
         if embeddings_dir.exists():
             for f in sorted(embeddings_dir.glob("*.npy")):
                 if not f.name.endswith("_coords.npy"):
                     slide_id = f.stem
                     available_slides.append(slide_id)
-                    
+
                     # Load embeddings for FAISS index
                     embs = np.load(f)
                     all_embeddings.append(embs)
@@ -191,14 +191,14 @@ def create_app(
                         "slide_id": slide_id,
                         "n_patches": len(embs),
                     })
-            
+
             logger.info(f"Found {len(available_slides)} slides with embeddings")
-            
+
             # Build FAISS index for similarity search
             if all_embeddings:
                 evidence_gen.build_reference_index(all_embeddings, all_metadata)
                 logger.info(f"Built FAISS index with {len(all_embeddings)} slides")
-    
+
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
@@ -214,7 +214,7 @@ def create_app(
     async def api_health_check():
         """Health check endpoint (aliased for frontend compatibility)."""
         return await health_check()
-    
+
     @app.get("/")
     async def root():
         """API root endpoint."""
@@ -223,21 +223,21 @@ def create_app(
             "version": "0.1.0",
             "docs": "/api/docs",
         }
-    
+
     @app.get("/api/slides", response_model=List[SlideInfo])
     async def list_slides():
         """List all available slides."""
         slides = []
         labels_path = embeddings_dir.parent / "labels.csv"
         labels = {}
-        
+
         if labels_path.exists():
             import csv
             with open(labels_path) as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     labels[row["slide_id"]] = row.get("label", "")
-        
+
         for slide_id in available_slides:
             # Get patch count
             emb_path = embeddings_dir / f"{slide_id}.npy"
@@ -248,40 +248,40 @@ def create_app(
                     num_patches = len(emb)
                 except Exception:
                     pass
-            
+
             slides.append(SlideInfo(
                 slide_id=slide_id,
                 has_embeddings=True,
                 label=labels.get(slide_id),
                 num_patches=num_patches,
             ))
-        
+
         return slides
-    
+
     @app.post("/api/analyze", response_model=AnalyzeResponse)
     async def analyze_slide(request: AnalyzeRequest):
         """Analyze a slide and return prediction with evidence."""
         if classifier is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
-        
+
         slide_id = request.slide_id
         emb_path = embeddings_dir / f"{slide_id}.npy"
-        
+
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
-        
+
         # Load embeddings
         embeddings = np.load(emb_path)
-        
+
         # Run prediction
         score, attention = classifier.predict(embeddings)
         label = "RESPONDER" if score > 0.5 else "NON-RESPONDER"
         confidence = abs(score - 0.5) * 2
-        
+
         # Get top evidence patches
         top_k = min(8, len(attention))
         top_indices = np.argsort(attention)[-top_k:][::-1]
-        
+
         top_evidence = []
         for i, idx in enumerate(top_indices):
             top_evidence.append({
@@ -289,7 +289,7 @@ def create_app(
                 "patch_index": int(idx),
                 "attention_weight": float(attention[idx]),
             })
-        
+
         # Get similar cases using FAISS
         similar_cases = []
         if evidence_gen is not None:
@@ -319,7 +319,7 @@ def create_app(
                             "slide_id": sid,
                             "similarity_score": float(np.random.uniform(0.7, 0.95)),
                         })
-        
+
         return AnalyzeResponse(
             slide_id=slide_id,
             prediction=label,
@@ -329,33 +329,33 @@ def create_app(
             top_evidence=top_evidence,
             similar_cases=similar_cases[:5],
         )
-    
+
     @app.post("/api/report", response_model=ReportResponse)
     async def generate_report(request: ReportRequest):
         """Generate a structured report for a slide using MedGemma."""
         if classifier is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
-        
+
         slide_id = request.slide_id
         emb_path = embeddings_dir / f"{slide_id}.npy"
         coord_path = embeddings_dir / f"{slide_id}_coords.npy"
-        
+
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
-        
+
         embeddings = np.load(emb_path)
         score, attention = classifier.predict(embeddings)
         label = "responder" if score > 0.5 else "non-responder"
-        
+
         # Get top evidence patches with coordinates
         top_k = min(8, len(attention))
         top_indices = np.argsort(attention)[-top_k:][::-1]
-        
+
         # Load coordinates if available
         coords = None
         if coord_path.exists():
             coords = np.load(coord_path)
-        
+
         evidence_patches = []
         for rank, idx in enumerate(top_indices, 1):
             patch_info = {
@@ -365,7 +365,7 @@ def create_app(
                 "coordinates": [int(coords[idx][0]), int(coords[idx][1])] if coords is not None else [0, 0],
             }
             evidence_patches.append(patch_info)
-        
+
         # Get similar cases
         similar_cases = []
         if evidence_gen is not None:
@@ -377,7 +377,7 @@ def create_app(
                     similar_cases.append(s)
             except Exception as e:
                 logger.warning(f"Similar case search failed for report: {e}")
-        
+
         # Try MedGemma report generation
         if reporter is not None:
             try:
@@ -388,7 +388,7 @@ def create_app(
                     similar_cases=similar_cases,
                     case_id=slide_id,
                 )
-                
+
                 return ReportResponse(
                     slide_id=slide_id,
                     report_json=report["structured"],
@@ -396,7 +396,7 @@ def create_app(
                 )
             except Exception as e:
                 logger.warning(f"MedGemma report generation failed, using template: {e}")
-        
+
         # Fallback to template report
         report_json = {
             "case_id": slide_id,
@@ -421,72 +421,72 @@ def create_app(
             ],
             "safety_statement": "This is a research tool. All findings require validation by qualified pathologists.",
         }
-        
+
         summary_text = f"""Case: {slide_id}
 Prediction: {label.upper()}
 Score: {score:.3f}
 
-This analysis examined {len(embeddings)} tissue patches. The top {min(5, len(attention))} 
-patches by attention weight show consistent morphological patterns associated with 
+This analysis examined {len(embeddings)} tissue patches. The top {min(5, len(attention))}
+patches by attention weight show consistent morphological patterns associated with
 {label} cases in the training cohort.
 
-IMPORTANT: This is a research tool for decision support only. All findings must be 
+IMPORTANT: This is a research tool for decision support only. All findings must be
 reviewed and validated by qualified pathologists before any clinical decision-making."""
-        
+
         return ReportResponse(
             slide_id=slide_id,
             report_json=report_json,
             summary_text=summary_text,
         )
-    
+
     @app.get("/api/heatmap/{slide_id}")
     async def get_heatmap(slide_id: str):
         """Get the attention heatmap for a slide as PNG."""
         if classifier is None or evidence_gen is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
-        
+
         emb_path = embeddings_dir / f"{slide_id}.npy"
         coord_path = embeddings_dir / f"{slide_id}_coords.npy"
-        
+
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
-        
+
         embeddings = np.load(emb_path)
-        
+
         # Load or generate coordinates
         if coord_path.exists():
             coords = np.load(coord_path)
         else:
             coords = np.random.randint(0, 50000, (len(embeddings), 2))
-        
+
         coords = [tuple(c) for c in coords]
-        
+
         # Run prediction and create heatmap
         score, attention = classifier.predict(embeddings)
         slide_dims = (50000, 50000)
         heatmap = evidence_gen.create_heatmap(attention, coords, slide_dims, (512, 512))
-        
+
         # Save to temp file and return
         from PIL import Image
         import io
-        
+
         img = Image.fromarray(heatmap)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
-        
+
         return StreamingResponse(
             buf,
             media_type="image/png",
             headers={"Content-Disposition": f"inline; filename={slide_id}_heatmap.png"},
         )
-    
+
     @app.post("/api/embed", response_model=EmbedResponse)
     async def embed_patches(request: EmbedRequest):
         """Generate embeddings for patch images using Path Foundation."""
         if embedder is None:
             raise HTTPException(status_code=503, detail="Embedder not initialized")
-        
+
         # Decode patches
         patches = []
         for i, b64_patch in enumerate(request.patches):
@@ -494,23 +494,23 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
                 # Handle data URI format
                 if "," in b64_patch:
                     b64_patch = b64_patch.split(",", 1)[1]
-                
+
                 image_data = base64.b64decode(b64_patch)
                 image = Image.open(io.BytesIO(image_data))
-                
+
                 if image.mode != "RGB":
                     image = image.convert("RGB")
-                
+
                 if image.size != (224, 224):
                     image = image.resize((224, 224), Image.Resampling.LANCZOS)
-                
+
                 patches.append(np.array(image))
             except Exception as e:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Failed to decode patch {i}: {str(e)}",
                 )
-        
+
         # Generate embeddings
         try:
             embeddings = embedder.embed(patches, show_progress=False)
@@ -520,44 +520,44 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
                 status_code=500,
                 detail=f"Embedding generation failed: {str(e)}",
             )
-        
+
         response = EmbedResponse(
             num_patches=len(patches),
             embedding_dim=embeddings.shape[1] if len(embeddings.shape) > 1 else 384,
         )
-        
+
         if request.return_embeddings:
             response.embeddings = embeddings.tolist()
-        
+
         return response
-    
+
     @app.get("/api/similar", response_model=SimilarResponse)
     async def get_similar_cases(slide_id: str, k: int = 5, top_patches: int = 3):
         """Find similar cases from the reference cohort."""
         if classifier is None or evidence_gen is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
-        
+
         emb_path = embeddings_dir / f"{slide_id}.npy"
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
-        
+
         embeddings = np.load(emb_path)
         _, attention = classifier.predict(embeddings)
-        
+
         similar_results = evidence_gen.find_similar(
             embeddings, attention, k=k * 3, top_patches=top_patches
         )
-        
+
         similar_cases = []
         seen_slides = set()
-        
+
         for s in similar_results:
             meta = s.get("metadata", {})
             sid = meta.get("slide_id", "unknown")
-            
+
             if sid == slide_id:
                 continue
-            
+
             if sid not in seen_slides:
                 seen_slides.add(sid)
                 similar_cases.append({
@@ -566,27 +566,27 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
                     "similarity_score": 1.0 / (1.0 + s["distance"]),
                     "patch_index": meta.get("patch_index"),
                 })
-            
+
             if len(similar_cases) >= k:
                 break
-        
+
         return SimilarResponse(
             slide_id=slide_id,
             similar_cases=similar_cases,
             num_queries=top_patches,
         )
-    
+
     @app.get("/api/embed/status")
     async def embedder_status():
         """Check the status of the Path Foundation embedder."""
         model_loaded = embedder is not None and embedder._model is not None
         device = "unknown"
-        
+
         if model_loaded:
             device = str(embedder._device)
         else:
             device = "cuda" if _check_cuda() else "cpu"
-        
+
         return {
             "model": "google/path-foundation",
             "model_loaded": model_loaded,
@@ -594,19 +594,19 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
             "embedding_dim": 384,
             "input_size": 224,
         }
-    
+
     # WSI / DZI Tile Serving
     # Cache for OpenSlide objects and DeepZoom generators
     # slides are at data/slides (not inside demo/)
     slides_dir = embeddings_dir.parent / "slides"
     wsi_cache: Dict[str, Any] = {}
     logger.info(f"Slides directory: {slides_dir}")
-    
+
     def get_slide_and_dz(slide_id: str):
         """Get or create OpenSlide and DeepZoomGenerator for a slide."""
         if slide_id in wsi_cache:
             return wsi_cache[slide_id]
-        
+
         # Try common WSI extensions
         slide_path = None
         for ext in [".svs", ".tiff", ".tif", ".ndpi", ".mrxs", ".vms", ".scn"]:
@@ -614,14 +614,14 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
             if candidate.exists():
                 slide_path = candidate
                 break
-        
+
         if slide_path is None:
             return None
-        
+
         try:
             import openslide
             from openslide.deepzoom import DeepZoomGenerator
-            
+
             slide = openslide.OpenSlide(str(slide_path))
             # tile_size=254 with overlap=1 is standard for OpenSeadragon
             dz = DeepZoomGenerator(slide, tile_size=254, overlap=1, limit_bounds=True)
@@ -631,7 +631,7 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
         except Exception as e:
             logger.error(f"Failed to load WSI {slide_path}: {e}")
             return None
-    
+
     @app.get("/api/slides/{slide_id}/dzi")
     async def get_dzi_descriptor(slide_id: str):
         """Get Deep Zoom Image descriptor (XML) for OpenSeadragon."""
@@ -641,9 +641,9 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
                 status_code=404,
                 detail=f"WSI file not found for slide {slide_id}"
             )
-        
+
         slide, dz = result
-        
+
         # Generate DZI XML descriptor
         dzi_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <Image xmlns="http://schemas.microsoft.com/deepzoom/2008"
@@ -652,14 +652,14 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
   TileSize="254">
   <Size Width="{dz.level_dimensions[-1][0]}" Height="{dz.level_dimensions[-1][1]}"/>
 </Image>'''
-        
+
         from fastapi.responses import Response
         return Response(
             content=dzi_xml,
             media_type="application/xml",
             headers={"Content-Disposition": f"inline; filename={slide_id}.dzi"}
         )
-    
+
     @app.get("/api/slides/{slide_id}/dzi_files/{level}/{tile_spec}")
     async def get_dzi_tile(slide_id: str, level: int, tile_spec: str):
         """Serve a single DZI tile image."""
@@ -669,32 +669,32 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
                 status_code=404,
                 detail=f"WSI file not found for slide {slide_id}"
             )
-        
+
         slide, dz = result
-        
+
         # Parse tile coordinates from spec like "0_0.jpeg"
         try:
             tile_name = tile_spec.rsplit(".", 1)[0]  # Remove extension
             col, row = map(int, tile_name.split("_"))
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid tile specification")
-        
+
         # Validate level and tile coordinates
         if level < 0 or level >= dz.level_count:
             raise HTTPException(status_code=404, detail="Invalid zoom level")
-        
+
         level_tiles = dz.level_tiles[level]
         if col < 0 or col >= level_tiles[0] or row < 0 or row >= level_tiles[1]:
             raise HTTPException(status_code=404, detail="Tile coordinates out of bounds")
-        
+
         try:
             tile = dz.get_tile(level, (col, row))
-            
+
             # Convert to JPEG
             buf = io.BytesIO()
             tile.save(buf, format="JPEG", quality=85)
             buf.seek(0)
-            
+
             return StreamingResponse(
                 buf,
                 media_type="image/jpeg",
@@ -706,7 +706,7 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
         except Exception as e:
             logger.error(f"Failed to get tile {level}/{col}_{row} for {slide_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to generate tile: {e}")
-    
+
     @app.get("/api/slides/{slide_id}/thumbnail")
     async def get_slide_thumbnail(slide_id: str, size: int = 512):
         """Get a thumbnail of the whole slide."""
@@ -716,17 +716,17 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
                 status_code=404,
                 detail=f"WSI file not found for slide {slide_id}"
             )
-        
+
         slide, dz = result
-        
+
         try:
             # Get thumbnail maintaining aspect ratio
             thumb = slide.get_thumbnail((size, size))
-            
+
             buf = io.BytesIO()
             thumb.save(buf, format="JPEG", quality=90)
             buf.seek(0)
-            
+
             return StreamingResponse(
                 buf,
                 media_type="image/jpeg",
@@ -735,7 +735,7 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
         except Exception as e:
             logger.error(f"Failed to get thumbnail for {slide_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to generate thumbnail: {e}")
-    
+
     @app.get("/api/slides/{slide_id}/info")
     async def get_slide_info(slide_id: str):
         """Get detailed information about a WSI file."""
@@ -752,9 +752,9 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
                     "num_patches": len(embeddings),
                 }
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
-        
+
         slide, dz = result
-        
+
         return {
             "slide_id": slide_id,
             "has_wsi": True,
@@ -771,7 +771,7 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
                 "level_count": dz.level_count,
             },
         }
-    
+
     return app
 
 
