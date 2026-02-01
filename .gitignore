@@ -1,20 +1,89 @@
-.DS_Store
-.venv/
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Model weights (too large for git, download separately)
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Node.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.npm
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model weights (download separately)
 models/**/*.safetensors
 models/**/*.bin
 models/**/*.pt
 models/**/*.h5
 models/**/*.pb
 models/**/variables/
+*.ckpt
 
-# Demo embeddings (regenerate with scripts/create_demo_data.py)
-data/demo/embeddings/*.npy
+# Large data files
+data/slides/*.svs
+data/slides/*.ndpi
+data/slides/*.tiff
+data/slides/*.mrxs
+*.npy
+
+# But keep demo embeddings tracked if needed
+!data/demo/embeddings/.gitkeep
 
 # Logs and temp files
 *.log
+logs/
 /tmp/
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env*.local
+
+# Build artifacts
+*.whl
+*.tar.gz

@@ -34,43 +34,43 @@ def process_slide(
     from enso_atlas.config import AtlasConfig
     from enso_atlas.wsi.processor import WSIProcessor
     from enso_atlas.embedding.embedder import PathFoundationEmbedder
-    
+
     config = AtlasConfig.from_yaml(str(config_path))
-    
+
     # Check if already processed
     output_path = output_dir / f"{slide_path.stem}.npy"
     if output_path.exists():
         return {"slide": slide_path.name, "status": "skipped", "cached": True}
-    
+
     try:
         # Initialize processors
         wsi_processor = WSIProcessor(config.wsi)
         embedder = PathFoundationEmbedder(config.embedding)
-        
+
         # Extract patches
         patches, coords = wsi_processor.extract_patches(slide_path)
-        
+
         if len(patches) == 0:
             return {"slide": slide_path.name, "status": "failed", "error": "No patches extracted"}
-        
+
         # Generate embeddings
         import numpy as np
         embeddings = embedder.embed(patches, cache_key=str(slide_path))
-        
+
         # Save embeddings
         np.save(output_path, embeddings)
-        
+
         # Save coordinates
         coords_path = output_dir / f"{slide_path.stem}_coords.npy"
         np.save(coords_path, np.array(coords))
-        
+
         return {
             "slide": slide_path.name,
             "status": "success",
             "n_patches": len(patches),
             "embedding_shape": embeddings.shape,
         }
-        
+
     except Exception as e:
         return {"slide": slide_path.name, "status": "failed", "error": str(e)}
 
@@ -107,41 +107,41 @@ def main():
         default=1,
         help="Number of parallel workers (GPU bottleneck usually limits this)",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Find all slides
     slides = list(args.data_dir.glob(args.pattern))
     console.print(f"[bold]Found {len(slides)} slides to process[/]")
-    
+
     if len(slides) == 0:
         console.print("[yellow]No slides found. Check the data directory and pattern.[/]")
         return
-    
+
     # Create output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Process slides
     results = {"success": 0, "skipped": 0, "failed": 0}
-    
+
     with Progress() as progress:
         task = progress.add_task("[cyan]Processing slides...", total=len(slides))
-        
+
         for slide in slides:
             result = process_slide(slide, args.output_dir, args.config)
-            
+
             status = result["status"]
             results[status] = results.get(status, 0) + 1
-            
+
             if status == "success":
                 console.print(f"[green]✓[/] {result['slide']} ({result['n_patches']} patches)")
             elif status == "skipped":
                 console.print(f"[yellow]○[/] {result['slide']} (cached)")
             else:
                 console.print(f"[red]✗[/] {result['slide']}: {result.get('error', 'Unknown error')}")
-            
+
             progress.update(task, advance=1)
-    
+
     console.print(f"\n[bold]Processing complete![/]")
     console.print(f"  Success: {results['success']}")
     console.print(f"  Skipped: {results['skipped']}")

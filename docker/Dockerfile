@@ -22,6 +22,7 @@ ENV PATH=/usr/local/cuda/bin:$PATH
 RUN python -c "import torch; print(f'PyTorch: {torch.__version__} (CUDA: {torch.version.cuda})')"
 
 # Install system dependencies
+# Note: Using opencv-python-headless to avoid GL dependencies
 RUN apt-get update && apt-get install -y \
     openslide-tools \
     libopenslide0 \
@@ -49,7 +50,10 @@ RUN pip install --no-cache-dir \
     faiss-cpu \
     accelerate \
     openslide-python \
-    gradio
+    gradio \
+    fastapi \
+    uvicorn[standard] \
+    pydantic
 
 # Copy application code
 COPY src/ ./src/
@@ -65,12 +69,16 @@ ENV TRANSFORMERS_CACHE=/app/cache/huggingface
 ENV HF_HOME=/app/cache/huggingface
 ENV PYTHONPATH=/app/src
 
-# Expose port (Gradio temporary, will be React frontend)
-EXPOSE 7860
+# Expose ports (Gradio UI and FastAPI)
+EXPOSE 7860 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:7860/ || exit 1
+# Copy startup script
+COPY scripts/start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
-# Default command
-CMD ["python", "-m", "enso_atlas.ui.demo_app"]
+# Health check (check API endpoint)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Default command - runs both UI and API
+CMD ["/app/start.sh"]

@@ -1,0 +1,433 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Professional Clinical Application Styles */
+@layer base {
+  :root {
+    /* Core clinical variables */
+    --color-primary: 14 165 233;
+    --color-background: 255 255 255;
+    --color-foreground: 15 23 42;
+    
+    /* Semantic colors */
+    --color-responder: 4 120 87;
+    --color-non-responder: 185 28 28;
+    
+    /* Spacing rhythm */
+    --spacing-panel: 1rem;
+    --spacing-section: 0.75rem;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-surface-secondary text-gray-900;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* High-contrast accessible focus states */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-clinical-500 ring-offset-2;
+  }
+
+  /* Professional scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 rounded-full;
+    transition: background-color 0.2s;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400;
+  }
+
+  /* Custom selection colors */
+  ::selection {
+    @apply bg-clinical-200 text-clinical-900;
+  }
+}
+
+@layer components {
+  /* Professional card styling */
+  .clinical-card {
+    @apply bg-white rounded-lg border border-surface-border shadow-clinical;
+  }
+
+  .clinical-card-elevated {
+    @apply bg-white rounded-lg border border-surface-border shadow-clinical-md;
+  }
+
+  /* Panel header styling */
+  .panel-header {
+    @apply px-4 py-3 border-b border-surface-border bg-surface-secondary;
+  }
+
+  .panel-header-dark {
+    @apply px-4 py-3 border-b border-navy-700 bg-navy-800 text-white;
+  }
+
+  /* Section headers within panels */
+  .section-label {
+    @apply text-xs font-semibold text-gray-500 uppercase tracking-wider;
+  }
+
+  /* Status indicator dots */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+
+  .status-dot-positive {
+    @apply bg-status-positive;
+    box-shadow: 0 0 0 2px rgb(5 150 105 / 0.2);
+  }
+
+  .status-dot-negative {
+    @apply bg-status-negative;
+    box-shadow: 0 0 0 2px rgb(220 38 38 / 0.2);
+  }
+
+  .status-dot-warning {
+    @apply bg-status-warning;
+    box-shadow: 0 0 0 2px rgb(217 119 6 / 0.2);
+  }
+
+  .status-dot-neutral {
+    @apply bg-gray-400;
+    box-shadow: 0 0 0 2px rgb(156 163 175 / 0.2);
+  }
+
+  /* Connection status indicator with pulse */
+  .status-indicator {
+    @apply relative inline-flex h-2.5 w-2.5;
+  }
+
+  .status-indicator-online::before {
+    @apply absolute inline-flex h-full w-full rounded-full bg-status-positive opacity-75 animate-ping;
+    content: "";
+  }
+
+  .status-indicator-online::after {
+    @apply relative inline-flex rounded-full h-2.5 w-2.5 bg-status-positive;
+    content: "";
+  }
+
+  .status-indicator-offline::after {
+    @apply relative inline-flex rounded-full h-2.5 w-2.5 bg-status-negative;
+    content: "";
+  }
+
+  /* Professional toolbar styling */
+  .viewer-toolbar {
+    @apply flex items-center gap-1 bg-white/95 backdrop-blur-sm rounded-lg shadow-clinical-md border border-surface-border p-1;
+  }
+
+  .toolbar-button {
+    @apply p-2 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors;
+    @apply focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:ring-offset-1;
+  }
+
+  .toolbar-button-active {
+    @apply bg-clinical-50 text-clinical-700;
+  }
+
+  .toolbar-divider {
+    @apply w-px h-6 bg-gray-200 mx-1;
+  }
+
+  /* OpenSeadragon viewer container */
+  .osd-viewer {
+    @apply w-full h-full bg-navy-900 rounded-lg overflow-hidden;
+  }
+
+  /* Evidence patch thumbnail */
+  .patch-thumbnail {
+    @apply aspect-square rounded-lg overflow-hidden border-2 transition-all cursor-pointer;
+    @apply hover:border-clinical-500 hover:shadow-md hover:scale-[1.02];
+  }
+
+  .patch-thumbnail.selected {
+    @apply border-clinical-600 ring-2 ring-clinical-200;
+  }
+
+  /* Heatmap legend gradient - clinical standard */
+  .heatmap-legend {
+    background: linear-gradient(
+      to right,
+      rgba(59, 130, 246, 0.9),
+      rgba(34, 197, 94, 0.9),
+      rgba(234, 179, 8, 0.9),
+      rgba(239, 68, 68, 0.9)
+    );
+    @apply h-3 rounded-full;
+  }
+
+  /* Prediction result styling */
+  .prediction-responder {
+    @apply bg-responder-positive-bg border-responder-positive-border text-responder-positive;
+  }
+
+  .prediction-non-responder {
+    @apply bg-responder-negative-bg border-responder-negative-border text-responder-negative;
+  }
+
+  /* Probability bar styling */
+  .probability-bar {
+    @apply relative h-4 bg-gray-100 rounded-full overflow-hidden;
+  }
+
+  .probability-bar-fill {
+    @apply absolute left-0 top-0 h-full rounded-full transition-all duration-700 ease-out;
+  }
+
+  .probability-bar-threshold {
+    @apply absolute top-0 bottom-0 w-0.5 bg-gray-400;
+  }
+
+  /* Risk stratification visual */
+  .risk-indicator {
+    @apply flex items-center gap-2 px-3 py-2 rounded-lg border;
+  }
+
+  .risk-low {
+    @apply bg-green-50 border-green-200 text-green-800;
+  }
+
+  .risk-moderate {
+    @apply bg-amber-50 border-amber-200 text-amber-800;
+  }
+
+  .risk-high {
+    @apply bg-red-50 border-red-200 text-red-800;
+  }
+
+  /* Scale bar for viewer */
+  .scale-bar {
+    @apply flex items-center gap-2 bg-black/70 text-white px-2 py-1 rounded text-xs font-mono;
+  }
+
+  .scale-bar-line {
+    @apply h-0.5 bg-white;
+  }
+
+  /* Report section styling */
+  .report-section {
+    @apply border rounded-lg overflow-hidden transition-all;
+  }
+
+  .report-section-header {
+    @apply flex items-center justify-between w-full p-3 text-left transition-colors;
+  }
+
+  .report-section-content {
+    @apply p-4 border-t;
+  }
+
+  /* Clinical data table */
+  .clinical-table {
+    @apply w-full text-sm;
+  }
+
+  .clinical-table th {
+    @apply text-left py-2 px-3 bg-surface-secondary font-medium text-gray-600 border-b border-surface-border;
+  }
+
+  .clinical-table td {
+    @apply py-2 px-3 border-b border-surface-border;
+  }
+
+  .clinical-table tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* Confidence interval display */
+  .confidence-interval {
+    @apply inline-flex items-center gap-1 text-xs text-gray-500;
+  }
+
+  .confidence-interval-bar {
+    @apply h-1.5 bg-gray-200 rounded-full relative overflow-hidden;
+  }
+
+  .confidence-interval-range {
+    @apply absolute h-full bg-clinical-400 rounded-full;
+  }
+
+  /* Search input styling */
+  .search-input {
+    @apply w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm;
+    @apply placeholder:text-gray-400;
+    @apply focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:border-transparent;
+  }
+
+  /* Filter dropdown */
+  .filter-dropdown {
+    @apply relative inline-block;
+  }
+
+  .filter-dropdown-menu {
+    @apply absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-clinical-lg border border-surface-border py-1 z-50;
+  }
+
+  .filter-dropdown-item {
+    @apply w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors;
+  }
+}
+
+@layer utilities {
+  /* Text utilities for clinical content */
+  .text-clinical-body {
+    @apply text-sm text-gray-700 leading-relaxed;
+  }
+
+  .text-clinical-label {
+    @apply text-xs font-medium text-gray-500 uppercase tracking-wide;
+  }
+
+  .text-clinical-value {
+    @apply text-sm font-semibold text-gray-900;
+  }
+
+  .text-clinical-caption {
+    @apply text-xs text-gray-500;
+  }
+
+  /* Monospace values for data */
+  .text-data {
+    @apply font-mono text-sm tabular-nums;
+  }
+
+  /* Animation utilities */
+  .animate-fade-in {
+    animation: fadeIn 0.2s ease-out forwards;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out forwards;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Gradient overlay for thumbnails */
+  .gradient-overlay {
+    background: linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.7) 0%,
+      rgba(0, 0, 0, 0.3) 30%,
+      transparent 60%
+    );
+  }
+
+  /* Glass effect for floating controls */
+  .glass-effect {
+    @apply bg-white/95 backdrop-blur-sm shadow-clinical-md;
+  }
+
+  /* Subtle pattern background for empty states */
+  .pattern-dots {
+    background-image: radial-gradient(circle, #e2e8f0 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+
+  /* Hide scrollbar but keep scrollable */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* OpenSeadragon navigator styling */
+.openseadragon-navigator {
+  @apply border border-white/30 rounded-lg shadow-lg overflow-hidden !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+}
+
+.openseadragon-navigator .displayregion {
+  border: 2px solid rgb(14 165 233) !important;
+  background: rgba(14, 165, 233, 0.1) !important;
+}
+
+/* Print styles for report export */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    @apply text-black bg-white;
+    font-size: 11pt;
+    line-height: 1.4;
+  }
+
+  .clinical-card {
+    @apply shadow-none border-gray-300;
+    break-inside: avoid;
+  }
+
+  .report-section {
+    break-inside: avoid;
+  }
+
+  /* Show all sections in print */
+  .report-section-content {
+    display: block !important;
+  }
+
+  /* Professional header for printed reports */
+  @page {
+    margin: 2cm;
+  }
+
+  /* Ensure colors print */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 1280px) {
+  .sidebar-panel {
+    @apply w-72;
+  }
+}
+
+@media (max-width: 1024px) {
+  .sidebar-panel {
+    @apply w-64;
+  }
+}

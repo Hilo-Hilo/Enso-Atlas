@@ -99,7 +99,7 @@ class AtlasConfig:
     ui: UIConfig = field(default_factory=UIConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
-    
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> "AtlasConfig":
         """Load configuration from YAML file."""
@@ -108,10 +108,10 @@ class AtlasConfig:
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
-        
+
         with open(path) as f:
             data = yaml.safe_load(f)
-        
+
         return cls(
             wsi=WSIConfig(**data.get("wsi", {})),
             embedding=EmbeddingConfig(**data.get("embedding", {})),
@@ -122,14 +122,14 @@ class AtlasConfig:
             paths=PathsConfig(**data.get("paths", {})),
             deployment=DeploymentConfig(**data.get("deployment", {})),
         )
-    
+
     def to_yaml(self, path: str | Path) -> None:
         """Save configuration to YAML file."""
         import yaml
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         data = {
             "wsi": self.wsi.__dict__,
             "embedding": self.embedding.__dict__,
@@ -140,6 +140,6 @@ class AtlasConfig:
             "paths": self.paths.__dict__,
             "deployment": self.deployment.__dict__,
         }
-        
+
         with open(path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)

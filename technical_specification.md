@@ -1,5 +1,10 @@
 # Enso Atlas: Technical Specification and Implementation Plan
 
+## Implementation Status Legend
+- [DONE] - Fully implemented and working
+- [WIP] - Work in progress
+- [TODO] - Not yet started
+
 This document provides a detailed technical specification and implementation plan for the Enso Atlas project, an on-premise pathology evidence engine for treatment-response insight. The recommendations are based on extensive research into the latest open-source technologies, frameworks, and models in computational pathology.
 
 ## Table of Contents
@@ -93,9 +98,25 @@ The system is designed with a modular, service-oriented architecture to ensure s
 
 This section details the recommended technology stack for each component of the Enso Atlas pipeline, based on the comprehensive research conducted.
 
-### 3.1. WSI Processing & Tiling
+### Component Implementation Status
+
+| Component | Status | File Location |
+|-----------|--------|---------------|
+| WSI Processing | [DONE] | `src/enso_atlas/wsi/processor.py` |
+| Path Foundation Embedder | [DONE] | `src/enso_atlas/embedding/embedder.py` |
+| CLAM MIL Classifier | [DONE] | `src/enso_atlas/mil/clam.py` |
+| Evidence Generator | [DONE] | `src/enso_atlas/evidence/generator.py` |
+| MedGemma Reporter | [DONE] | `src/enso_atlas/reporting/medgemma.py` |
+| FastAPI Backend | [DONE] | `src/enso_atlas/api/main.py` |
+| Gradio Demo UI | [DONE] | `src/enso_atlas/ui/demo_app.py` |
+| Next.js Frontend | [DONE] | `frontend/` |
+| Docker Deployment | [WIP] | `docker/` |
+
+### 3.1. WSI Processing & Tiling [DONE]
 
 **Objective:** Efficiently read whole-slide images, identify tissue regions, and extract patches for feature extraction.
+
+**Implementation:** `src/enso_atlas/wsi/processor.py`
 
 **Recommended Technologies:**
 
@@ -211,43 +232,43 @@ This section details the recommended technology stack for each component of the 
 
 This project will be implemented in a phased approach, starting with a core MVP and progressively adding more advanced features.
 
-### Phase 0: Core MVP (4-6 Weeks)
+### Phase 0: Core MVP (4-6 Weeks) [DONE]
 
 **Goal:** Build a functional end-to-end prototype that demonstrates the core value proposition of Enso Atlas.
 
-*   **WSI Pipeline:** Implement the basic WSI processing pipeline using OpenSlide, Otsu thresholding, and grid-based patch sampling.
-*   **Feature Extraction:** Set up the Path Foundation model for feature extraction and implement HDF5-based embedding caching.
-*   **MIL Head:** Implement and train a baseline Attention-MIL model (can start with a simpler version before full CLAM) on the public bevacizumab-response dataset.
-*   **Basic UI:** Create a simple Gradio interface to upload a WSI, view the prediction score, and see a static heatmap image.
-*   **Deployment:** Package the application using Docker and Docker Compose for a single-machine deployment.
+*   [DONE] **WSI Pipeline:** Implement the basic WSI processing pipeline using OpenSlide, Otsu thresholding, and grid-based patch sampling.
+*   [DONE] **Feature Extraction:** Set up the Path Foundation model for feature extraction and implement numpy-based embedding caching.
+*   [DONE] **MIL Head:** Implemented full CLAM architecture with gated attention in `src/enso_atlas/mil/clam.py`.
+*   [DONE] **Basic UI:** Created Gradio demo interface in `src/enso_atlas/ui/demo_app.py`.
+*   [WIP] **Deployment:** Docker configuration exists but needs testing.
 
-### Phase 1: Enhanced Evidence & Reporting (4 Weeks)
+### Phase 1: Enhanced Evidence & Reporting (4 Weeks) [DONE]
 
 **Goal:** Improve the evidence generation capabilities and integrate the LLM reporting service.
 
-*   **Advanced MIL:** Upgrade the MIL head to the full CLAM architecture for improved performance and interpretability.
-*   **Similarity Search:** Integrate FAISS for similarity search against a small, pre-built reference cohort.
-*   **Interactive Viewer:** Integrate OpenSeadragon into the Gradio UI for interactive WSI viewing with a dynamic heatmap overlay.
-*   **MedGemma Integration:** Build the LLM reporting service using MedGemma 1.5 4B and integrate it into the UI to generate structured reports.
-*   **UI Polish:** Refine the UI to include the evidence gallery and similarity search results.
+*   [DONE] **Advanced MIL:** Full CLAM architecture with gated attention and instance clustering.
+*   [DONE] **Similarity Search:** FAISS integration in `src/enso_atlas/evidence/generator.py`.
+*   [DONE] **Interactive Viewer:** OpenSeadragon integrated in Next.js frontend.
+*   [DONE] **MedGemma Integration:** Full reporting service in `src/enso_atlas/reporting/medgemma.py`.
+*   [DONE] **Professional Frontend:** Next.js 14 app with TypeScript in `frontend/`.
 
-### Phase 2: Performance & Robustness (Ongoing)
+### Phase 2: Performance & Robustness (Ongoing) [WIP]
 
 **Goal:** Optimize the pipeline for performance and improve its robustness to variations in data.
 
-*   **GPU Acceleration:** Integrate cuCIM to accelerate WSI I/O.
-*   **Stain Normalization:** Implement a stain normalization technique (e.g., Macenko) to improve the model's robustness to stain variations [16].
-*   **Advanced Caching:** Explore using LanceDB for more efficient embedding management and querying.
-*   **Model Serving:** For multi-user or higher-throughput scenarios, investigate deploying the models on Triton Inference Server.
-*   **Cohort Management:** Build a UI for managing the local reference cohort used for similarity search.
+*   [TODO] **GPU Acceleration:** cuCIM integration for WSI I/O.
+*   [TODO] **Stain Normalization:** Macenko normalization.
+*   [TODO] **Advanced Caching:** LanceDB or vector database integration.
+*   [TODO] **Model Serving:** Triton Inference Server deployment.
+*   [TODO] **Cohort Management:** UI for managing reference cohort.
 
-### Phase 3: Enso Foundation Model Integration
+### Phase 3: Enso Foundation Model Integration [TODO]
 
 **Goal:** Swap the open-source Path Foundation model with Enso's proprietary foundation model.
 
-*   **Adapter Implementation:** Create a new `EnsoEmbedder` service that conforms to the same interface as the `PathFoundationEmbedder`.
-*   **Retraining & Evaluation:** Retrain the MIL head on the new embeddings and perform a comprehensive evaluation to quantify the performance improvement.
-*   **System Integration:** Integrate the new embedder into the main pipeline.
+*   [TODO] **Adapter Implementation:** Create a new `EnsoEmbedder` service that conforms to the same interface as the `PathFoundationEmbedder`.
+*   [TODO] **Retraining & Evaluation:** Retrain the MIL head on the new embeddings and perform a comprehensive evaluation to quantify the performance improvement.
+*   [TODO] **System Integration:** Integrate the new embedder into the main pipeline.
 
 ## 5. References
 

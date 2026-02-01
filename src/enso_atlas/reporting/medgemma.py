@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ReportingConfig:
     """MedGemma reporting configuration."""
-    model: str = "google/medgemma-4b-it"
+    # Use local path in container, fallback to HuggingFace ID
+    model: str = "/app/models/medgemma-4b-it"
     max_evidence_patches: int = 8
     max_output_tokens: int = 1024
     temperature: float = 0.3
@@ -66,27 +67,27 @@ REPORT_SCHEMA = {
 class MedGemmaReporter:
     """
     Report generator using MedGemma.
-    
+
     Produces structured, safety-aware reports grounded in the
     evidence patches and model predictions. Designed for tumor
     board discussion and clinical documentation.
     """
-    
+
     def __init__(self, config: ReportingConfig):
         self.config = config
         self._model = None
         self._tokenizer = None
         self._processor = None
         self._device = None
-    
+
     def _load_model(self) -> None:
         """Load MedGemma model."""
         if self._model is not None:
             return
-        
+
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor
-        
+
         # Determine device
         if torch.cuda.is_available():
             self._device = torch.device("cuda")
@@ -94,34 +95,34 @@ class MedGemmaReporter:
             self._device = torch.device("mps")
         else:
             self._device = torch.device("cpu")
-        
+
         logger.info(f"Loading MedGemma model on {self._device}")
-        
+
         # Load tokenizer and model
         model_id = self.config.model
-        
+
         self._tokenizer = AutoTokenizer.from_pretrained(model_id)
-        
+
         # Try to load processor for multimodal input
         try:
             self._processor = AutoProcessor.from_pretrained(model_id)
         except Exception:
             logger.warning("Could not load processor; using text-only mode")
             self._processor = None
-        
+
         # Load model with appropriate precision
         self._model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=torch.float16 if self._device.type == "cuda" else torch.float32,
             device_map="auto" if self._device.type == "cuda" else None,
         )
-        
+
         if self._device.type != "cuda":
             self._model = self._model.to(self._device)
-        
+
         self._model.eval()
         logger.info("MedGemma model loaded successfully")
-    
+
     def _build_prompt(
         self,
         evidence_patches: List[Dict],
@@ -131,14 +132,14 @@ class MedGemmaReporter:
         case_id: str = "unknown",
     ) -> str:
         """Build the prompt for MedGemma."""
-        
+
         # Build evidence description
         evidence_text = "\n".join([
             f"- Patch {p['rank']}: Attention weight {p['attention_weight']:.3f}, "
             f"coordinates ({p['coordinates'][0]}, {p['coordinates'][1]})"
             for p in evidence_patches[:self.config.max_evidence_patches]
         ])
-        
+
         # Build similar cases description
         similar_text = ""
         if similar_cases:
@@ -149,13 +150,13 @@ class MedGemmaReporter:
                 if case_key not in seen:
                     seen.add(case_key)
                     similar_cases_deduped.append(s)
-            
+
             similar_text = "\n".join([
                 f"- Similar case: {s.get('metadata', {}).get('slide_id', 'unknown')}, "
                 f"distance: {s['distance']:.3f}"
                 for s in similar_cases_deduped
             ])
-        
+
         prompt = f"""You are a medical AI assistant helping prepare a tumor board summary for a pathology case. You must be cautious, factual, and clearly state limitations.
 
 CASE ID: {case_id}
@@ -205,20 +206,20 @@ IMPORTANT CONSTRAINTS:
 5. Keep descriptions factual and based only on the provided evidence
 
 Generate the JSON report:"""
-        
+
         return prompt
-    
+
     def _parse_json_response(self, response: str) -> Dict:
         """Extract and parse JSON from model response."""
         # Try to find JSON in the response
         json_match = re.search(r'\{[\s\S]*\}', response)
-        
+
         if json_match:
             try:
                 return json.loads(json_match.group())
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse JSON: {e}")
-        
+
         # Return a minimal valid structure if parsing fails
         return {
             "case_id": "unknown",
@@ -234,17 +235,19 @@ Generate the JSON report:"""
             "safety_statement": "This report could not be generated properly. Do not use for any clinical purpose.",
             "raw_response": response
         }
-    
+
     def _validate_report(self, report: Dict) -> bool:
         """Validate report against schema."""
-        required_fields = ["case_id", "task", "model_output", "evidence", 
-                          "limitations", "safety_statement"]
-        
+        required_fields = [
+            "case_id", "task", "model_output", "evidence",
+            "limitations", "safety_statement"
+        ]
+
         for field in required_fields:
             if field not in report:
                 logger.warning(f"Report missing required field: {field}")
                 return False
-        
+
         # Check for prohibited statements
         prohibited_phrases = [
             "start treatment",
@@ -254,15 +257,15 @@ Generate the JSON report:"""
             "prescribe",
             "administer",
         ]
-        
+
         report_str = json.dumps(report).lower()
         for phrase in prohibited_phrases:
             if phrase in report_str:
                 logger.warning(f"Report contains prohibited phrase: {phrase}")
                 return False
-        
+
         return True
-    
+
     def generate(
         self,
         evidence_patches: List[Dict],
@@ -274,7 +277,7 @@ Generate the JSON report:"""
     ) -> Dict:
         """
         Generate a structured report.
-        
+
         Args:
             evidence_patches: List of evidence patch dicts
             score: Model prediction score
@@ -282,18 +285,18 @@ Generate the JSON report:"""
             similar_cases: List of similar case dicts
             case_id: Case identifier
             max_retries: Number of retries on failure
-            
+
         Returns:
             Structured report dictionary
         """
         self._load_model()
-        
+
         import torch
-        
+
         prompt = self._build_prompt(
             evidence_patches, score, label, similar_cases, case_id
         )
-        
+
         for attempt in range(max_retries + 1):
             try:
                 # Tokenize
@@ -304,7 +307,7 @@ Generate the JSON report:"""
                     max_length=4096,
                 )
                 inputs = {k: v.to(self._device) for k, v in inputs.items()}
-                
+
                 # Generate
                 with torch.no_grad():
                     outputs = self._model.generate(
@@ -315,29 +318,29 @@ Generate the JSON report:"""
                         do_sample=True,
                         pad_token_id=self._tokenizer.eos_token_id,
                     )
-                
+
                 # Decode
                 response = self._tokenizer.decode(
                     outputs[0][inputs["input_ids"].shape[1]:],
                     skip_special_tokens=True,
                 )
-                
+
                 # Parse JSON
                 report = self._parse_json_response(response)
-                
+
                 # Validate
                 if self._validate_report(report):
                     logger.info("Generated valid report")
                     return report
                 else:
                     logger.warning(f"Report validation failed, attempt {attempt + 1}")
-                    
+
             except Exception as e:
                 logger.error(f"Report generation error (attempt {attempt + 1}): {e}")
-        
+
         # Return fallback report
         return self._create_fallback_report(case_id, score, label)
-    
+
     def _create_fallback_report(
         self,
         case_id: str,
@@ -365,14 +368,14 @@ Generate the JSON report:"""
             ],
             "safety_statement": "This is a research tool. Report generation encountered errors. All findings require manual validation by qualified pathologists."
         }
-    
+
     def generate_summary(self, report: Dict) -> str:
         """
         Generate a human-readable summary from structured report.
-        
+
         Args:
             report: Structured report dictionary
-            
+
         Returns:
             Formatted text summary
         """
@@ -381,7 +384,7 @@ Generate the JSON report:"""
         limitations = report.get("limitations", [])
         next_steps = report.get("suggested_next_steps", [])
         safety = report.get("safety_statement", "")
-        
+
         summary = f"""
 === TUMOR BOARD SUMMARY ===
 
@@ -398,19 +401,19 @@ EVIDENCE PATCHES:
         for e in evidence[:5]:
             summary += f"  - {e.get('patch_id', 'Unknown')}: {e.get('morphology_description', '')}\n"
             summary += f"    Significance: {e.get('significance', '')}\n"
-        
+
         summary += f"""
 LIMITATIONS:
 """
         for lim in limitations:
             summary += f"  - {lim}\n"
-        
+
         summary += f"""
 SUGGESTED NEXT STEPS:
 """
         for step in next_steps:
             summary += f"  - {step}\n"
-        
+
         summary += f"""
 SAFETY STATEMENT:
 {safety}

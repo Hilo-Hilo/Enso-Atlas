@@ -1,10 +1,15 @@
 # Option A PRD + Technical Design Document
 
-## Enso Atlas (Prototype): On‑Prem Pathology Evidence Engine for Treatment-Response Insight
+## Implementation Status Legend
+- [DONE] - Fully implemented and working
+- [WIP] - Work in progress
+- [TODO] - Not yet started
 
-> This document describes a **winning** MedGemma Impact Challenge project in the “Option A” family: an **offline, local-first, on‑prem WSI evidence engine** that predicts a clinically meaningful outcome (or proxy) from histopathology and produces **interactive, auditable evidence** (heatmaps + similar patch retrieval + structured report).
+## Enso Atlas (Prototype): On-Prem Pathology Evidence Engine for Treatment-Response Insight
+
+> This document describes a **winning** MedGemma Impact Challenge project in the "Option A" family: an **offline, local-first, on-prem WSI evidence engine** that predicts a clinically meaningful outcome (or proxy) from histopathology and produces **interactive, auditable evidence** (heatmaps + similar patch retrieval + structured report).
 >
-> It is designed to be **foundation-model-agnostic** so you can later swap in Enso’s own histopathology slide foundation model without rewriting the product.
+> It is designed to be **foundation-model-agnostic** so you can later swap in Enso's own histopathology slide foundation model without rewriting the product.
 
 ---
 
@@ -13,7 +18,7 @@
 1. Executive summary
 2. Why this can win (judging rubric mapping)
 3. Product vision & value proposition
-4. Clinical users, real-life use cases, and “when would a doctor use it?”
+4. Clinical users, real-life use cases, and "when would a doctor use it?"
 5. PRD: goals, non-goals, scope, success metrics
 6. System overview and architecture
 7. Technical pipeline (end-to-end)
@@ -21,10 +26,10 @@
 9. MedGemma role (report generation + safety + grounding)
 10. Compute estimates (DGX Spark target)
 11. System requirements and limitations
-12. Deployment plan (offline / hospital on‑prem)
+12. Deployment plan (offline / hospital on-prem)
 13. Security, privacy, and compliance posture (practical, not legal advice)
 14. Evaluation plan (ML + UX + safety)
-15. Roadmap and “swap-in Enso FM later” plan
+15. Roadmap and "swap-in Enso FM later" plan
 16. Appendix: alternative open(-weight) models and libraries
 
 ---
@@ -35,12 +40,12 @@
 
 * A **patient/slide-level score** for a target outcome (starting with the public bevacizumab-response dataset; later extend to other therapies/biomarkers). ([Nature][1])
 * A **heatmap** that highlights regions most responsible for that score (evidence patches).
-* A **similarity search** view: “show me the most similar patches/cases” inside the local reference cohort. (This is critical: evidence is not just attention—clinicians can inspect precedent.) ([Google for Developers][2])
+* A **similarity search** view: "show me the most similar patches/cases" inside the local reference cohort. (This is critical: evidence is not just attention-clinicians can inspect precedent.) ([Google for Developers][2])
 * A **structured, cautious tumor-board-style summary** generated locally by **MedGemma**, grounded only in the evidence patches and a small set of facts you provide. ([Google for Developers][3])
 
-The core design principle is **local-first**: the hospital runs everything on a single workstation-class box (DGX Spark) and **no PHI needs to leave the hospital network** by default. DGX Spark is explicitly marketed around **128GB unified system memory**, local inference/fine-tuning, and “desktop-scale” development. ([NVIDIA Docs][4])
+The core design principle is **local-first**: the hospital runs everything on a single workstation-class box (DGX Spark) and **no PHI needs to leave the hospital network** by default. DGX Spark is explicitly marketed around **128GB unified system memory**, local inference/fine-tuning, and "desktop-scale" development. ([NVIDIA Docs][4])
 
-This aligns with Enso’s startup direction (histopath foundation models → treatment response) while leveraging open(-weight) models now: **Path Foundation** for patch embeddings + **MedGemma** for multimodal reporting (and optionally **MedSigLIP** for text-to-patch retrieval). Path Foundation produces **384‑dim embeddings from 224×224 H&E patches** and is designed to reduce compute for downstream classifiers. ([Google for Developers][5])
+This aligns with Enso's startup direction (histopath foundation models → treatment response) while leveraging open(-weight) models now: **Path Foundation** for patch embeddings + **MedGemma** for multimodal reporting (and optionally **MedSigLIP** for text-to-patch retrieval). Path Foundation produces **384-dim embeddings from 224×224 H&E patches** and is designed to reduce compute for downstream classifiers. ([Google for Developers][5])
 
 ---
 
@@ -54,16 +59,16 @@ This project maps cleanly:
 
 * A visually compelling demo: upload WSI → heatmap → click evidence patches → retrieve similar cases → generate structured summary.
 
-### Effective use of HAI‑DEF models
+### Effective use of HAI-DEF models
 
 * Path Foundation is not cosmetic; it is the **feature backbone**. ([Google for Developers][5])
 * MedGemma is not a chatbot add-on; it is the **report compiler** that turns evidence into a tumor-board packet. ([Google for Developers][3])
-* Optional: MedSigLIP enables “semantic evidence search” (text query → patch retrieval), a highly “human-centered” feature. ([Google for Developers][7])
+* Optional: MedSigLIP enables "semantic evidence search" (text query → patch retrieval), a highly "human-centered" feature. ([Google for Developers][7])
 
 ### Product feasibility
 
 * Compute is made feasible by the embedding-first pipeline: embed patches once, then train small heads. ([Google for Developers][5])
-* DGX Spark specs support a credible “single-box” story (20-core Arm CPU, 128GB unified memory, substantial bandwidth). ([NVIDIA Docs][4])
+* DGX Spark specs support a credible "single-box" story (20-core Arm CPU, 128GB unified memory, substantial bandwidth). ([NVIDIA Docs][4])
 
 ### Impact potential + domain importance
 
@@ -76,15 +81,15 @@ This project maps cleanly:
 
 ### Vision statement
 
-Build a **pathology-first decision-support assistant** that produces *inspectable evidence* from histology images to support oncologists and pathologists during tumor board and therapy planning—**without cloud compute** and without requiring the startup to host PHI.
+Build a **pathology-first decision-support assistant** that produces *inspectable evidence* from histology images to support oncologists and pathologists during tumor board and therapy planning-**without cloud compute** and without requiring the startup to host PHI.
 
-### The real value proposition (what’s actually different)
+### The real value proposition (what's actually different)
 
-Most “AI in pathology” demos fail in the same ways:
+Most "AI in pathology" demos fail in the same ways:
 
 * They give a number but no evidence.
 * They require cloud infrastructure (hard in hospitals).
-* They don’t integrate into tumor board preparation.
+* They don't integrate into tumor board preparation.
 
 **Enso Atlas differentiates** by making three things first-class:
 
@@ -93,28 +98,28 @@ Most “AI in pathology” demos fail in the same ways:
    * Heatmap on the slide
    * Top evidence patches
    * Similar patch/case retrieval
-     This turns the AI output from “a magic probability” into something clinicians can interrogate.
+     This turns the AI output from "a magic probability" into something clinicians can interrogate.
 
 2. **Local-first deployment**
 
-   * Runs on a single on‑prem box (DGX Spark class)
+   * Runs on a single on-prem box (DGX Spark class)
    * No PHI transfer required by default
-     This aligns with “privacy-first, offline-capable healthcare AI” positioning. ([EdTech Innovation Hub][6])
+     This aligns with "privacy-first, offline-capable healthcare AI" positioning. ([EdTech Innovation Hub][6])
 
 3. **Tumor-board packet automation (MedGemma)**
 
-   * Converts evidence into structured summaries, limitations, suggested confirmatory tests, and an exportable “case note draft.” ([Google for Developers][3])
+   * Converts evidence into structured summaries, limitations, suggested confirmatory tests, and an exportable "case note draft." ([Google for Developers][3])
 
-### How this aligns with Enso’s startup trajectory
+### How this aligns with Enso's startup trajectory
 
-* Today: use open(-weight) encoders (Path Foundation) to ship the “evidence engine” and workflow. ([Google for Developers][5])
-* Tomorrow: swap the encoder with **Enso’s slide foundation model** to improve performance/robustness, while keeping the entire product architecture (tiler, retrieval, UI, reporting) unchanged.
+* Today: use open(-weight) encoders (Path Foundation) to ship the "evidence engine" and workflow. ([Google for Developers][5])
+* Tomorrow: swap the encoder with **Enso's slide foundation model** to improve performance/robustness, while keeping the entire product architecture (tiler, retrieval, UI, reporting) unchanged.
 
 The product is the workflow + evidence interface; the foundation model is an interchangeable component.
 
 ---
 
-## 4) Clinical users, real-life use cases, and “when would a doctor use it?”
+## 4) Clinical users, real-life use cases, and "when would a doctor use it?"
 
 ### Primary persona 1: Pathologist (sign-out + tumor board prep)
 
@@ -127,14 +132,14 @@ The product is the workflow + evidence interface; the foundation model is an int
 
   * Heatmap of model-attended regions
   * Top evidence patches (clickable)
-  * Similar patch retrieval from reference cohort (shows “what it resembles”)
+  * Similar patch retrieval from reference cohort (shows "what it resembles")
   * A draft summary with limitations (for tumor board packet)
 
 **Why this is valuable**
 
-* It reduces time spent hunting for the “most informative” regions.
+* It reduces time spent hunting for the "most informative" regions.
 * It provides a structured way to justify and communicate findings to the oncology team.
-* It supports research discussions: “These patches look like X pattern seen in responders/non-responders in this local cohort.”
+* It supports research discussions: "These patches look like X pattern seen in responders/non-responders in this local cohort."
 
 **What it is not**
 
@@ -144,7 +149,7 @@ The product is the workflow + evidence interface; the foundation model is an int
 
 ### Primary persona 2: Medical oncologist (tumor board + therapy planning)
 
-**Situation:** The oncologist is deciding between therapy options (or considering eligibility for an anti-VEGF regimen / clinical trial). They have pathology, radiology, labs, and genomics—often fragmented.
+**Situation:** The oncologist is deciding between therapy options (or considering eligibility for an anti-VEGF regimen / clinical trial). They have pathology, radiology, labs, and genomics-often fragmented.
 
 **How they use Enso Atlas**
 
@@ -158,8 +163,8 @@ The product is the workflow + evidence interface; the foundation model is an int
 
 **Why this is valuable**
 
-* It helps the oncologist ask better questions: “Is this score driven by necrosis? stromal patterns? immune infiltration?”
-* It supports “right test, right patient” decisions (e.g., whether to pursue additional IHC/NGS or trial screening).
+* It helps the oncologist ask better questions: "Is this score driven by necrosis? stromal patterns? immune infiltration?"
+* It supports "right test, right patient" decisions (e.g., whether to pursue additional IHC/NGS or trial screening).
 
 ### Secondary persona: Tumor board coordinator / clinical research coordinator
 
@@ -170,7 +175,7 @@ The product is the workflow + evidence interface; the foundation model is an int
 * Atlas outputs a consistent tumor board draft (JSON + human-readable).
 * Coordinator can export the summary into the tumor board deck template and mark missing metadata.
 
-### Real-life “doctor would use it when…”
+### Real-life "doctor would use it when…"
 
 This tool is most defensible in settings where:
 
@@ -182,7 +187,7 @@ It is especially compelling for:
 
 * **Tumor board**: the tool creates shared, inspectable artifacts for multidisciplinary discussion.
 * **Retrospective cohort review**: identifying morphological correlates of response and hypothesis generation.
-* **Triage**: highlight “regions worth looking at” (not “this is the answer”).
+* **Triage**: highlight "regions worth looking at" (not "this is the answer").
 
 ---
 
@@ -222,7 +227,7 @@ Clinicians routinely rely on H&E histology for diagnosis and biomarker workflows
 * Not integrating directly into the EHR in v1 (export-only).
 * Not training a new foundation model (Enso FM comes later).
 
-### 5.4 Target “winning demo” outcomes
+### 5.4 Target "winning demo" outcomes
 
 * A working demo that runs end-to-end on a sample WSI.
 * A short evaluation on a public dataset with patient-level splits.
@@ -235,17 +240,17 @@ Clinicians routinely rely on H&E histology for diagnosis and biomarker workflows
 
 * AUC/PR-AUC on the chosen public target (patient-level cross-validation).
 * Calibration curve or simple reliability metric.
-* Evidence sanity checks (pathologist review of top patches: “do these look plausible?”)
+* Evidence sanity checks (pathologist review of top patches: "do these look plausible?")
 
 **Product**
 
 * Time-to-result per slide under a defined patch budget.
 * One-command local run.
-* “Tumor board packet generated” success on sample cases.
+* "Tumor board packet generated" success on sample cases.
 
 **Human-centered**
 
-* User testing with at least 1–2 clinicians (even informal) demonstrating that evidence view changes/helps discussion.
+* User testing with at least 1-2 clinicians (even informal) demonstrating that evidence view changes/helps discussion.
 
 ---
 
@@ -254,34 +259,36 @@ Clinicians routinely rely on H&E histology for diagnosis and biomarker workflows
 ### 6.1 High-level architecture diagram (text)
 
 ```
-[WSI File] 
-   ↓
-[WSI Reader + Tissue Mask + Patch Sampler]
-   ↓ patches (224x224) + coords
-[Patch Embedding Service]
-   - Path Foundation embeddings (primary)
-   - (Optional) MedSigLIP embeddings (for text↔patch search)
-   ↓
-[Local Storage Cache]  (embeddings, thumbnails, metadata)
-   ↓
-[Slide Head Service]
-   - Attention MIL / pooling head
-   - Outputs: score + attention weights
-   ↓
-[Evidence Engine]
-   - Heatmap compositor
-   - Top-K patch selector
-   - FAISS similarity search
-   ↓
-[MedGemma Report Generator]
-   - Inputs: evidence patches + score + constraints
-   - Output: structured JSON + human summary
-   ↓
+[WSI File]                                          [DONE]
+   |
+[WSI Reader + Tissue Mask + Patch Sampler]          [DONE] src/enso_atlas/wsi/processor.py
+   | patches (224x224) + coords
+[Patch Embedding Service]                           [DONE] src/enso_atlas/embedding/embedder.py
+   - Path Foundation embeddings (primary)           [DONE]
+   - (Optional) MedSigLIP embeddings                [TODO]
+   |
+[Local Storage Cache]                               [DONE] data/demo/embeddings/
+   |
+[Slide Head Service]                                [DONE] src/enso_atlas/mil/clam.py
+   - CLAM Attention MIL head                        [DONE]
+   - Outputs: score + attention weights             [DONE]
+   |
+[Evidence Engine]                                   [DONE] src/enso_atlas/evidence/generator.py
+   - Heatmap compositor                             [DONE]
+   - Top-K patch selector                           [DONE]
+   - FAISS similarity search                        [DONE]
+   |
+[MedGemma Report Generator]                         [DONE] src/enso_atlas/reporting/medgemma.py
+   - Inputs: evidence patches + score + constraints [DONE]
+   - Output: structured JSON + human summary        [DONE]
+   |
 [UI + Exports]
-   - Slide viewer + overlay
-   - Evidence patch gallery
-   - Similar cases/patches
-   - Export PDF/JSON/CSV
+   - Gradio demo interface                          [DONE] src/enso_atlas/ui/demo_app.py
+   - Next.js professional frontend                  [DONE] frontend/
+   - OpenSeadragon slide viewer                     [DONE]
+   - Evidence patch gallery                         [DONE]
+   - Similar cases/patches                          [DONE]
+   - Export PDF/JSON                                [WIP]
 ```
 
 ### 6.2 Key design choices
@@ -294,7 +301,22 @@ Clinicians routinely rely on H&E histology for diagnosis and biomarker workflows
 
 ## 7) Technical pipeline (end-to-end)
 
-This section is the “exact technical pipeline” you asked for.
+This section is the "exact technical pipeline" you asked for.
+
+### Implementation Status Summary
+| Component | Status | Location |
+|-----------|--------|----------|
+| WSI Processing | [DONE] | `src/enso_atlas/wsi/processor.py` |
+| Tissue Detection | [DONE] | Uses Otsu thresholding |
+| Patch Sampling | [DONE] | Grid-based, configurable budget |
+| Path Foundation Embedding | [DONE] | `src/enso_atlas/embedding/embedder.py` |
+| CLAM MIL Head | [DONE] | `src/enso_atlas/mil/clam.py` |
+| Heatmap Generation | [DONE] | `src/enso_atlas/evidence/generator.py` |
+| FAISS Similarity Search | [DONE] | `src/enso_atlas/evidence/generator.py` |
+| MedGemma Reporting | [DONE] | `src/enso_atlas/reporting/medgemma.py` |
+| FastAPI Backend | [DONE] | `src/enso_atlas/api/main.py` |
+| Gradio Demo UI | [DONE] | `src/enso_atlas/ui/demo_app.py` |
+| Next.js Frontend | [DONE] | `frontend/` |
 
 ### 7.1 Input formats and ingestion
 
@@ -319,10 +341,10 @@ This section is the “exact technical pipeline” you asked for.
 
 **Why sampling matters:** WSI can contain tens of thousands of valid tissue patches. You need bounded compute.
 
-**Two-phase sampling (recommended for “winning”)**
+**Two-phase sampling (recommended for "winning")**
 
-* Phase 1: coarse sampling (e.g., 1,000–2,000 patches) to produce an initial score + rough heatmap.
-* Phase 2: adaptive refinement: sample more patches in high-uncertainty / high-attention regions (another 2,000–8,000 patches).
+* Phase 1: coarse sampling (e.g., 1,000-2,000 patches) to produce an initial score + rough heatmap.
+* Phase 2: adaptive refinement: sample more patches in high-uncertainty / high-attention regions (another 2,000-8,000 patches).
 
 **Patch size:** 224×224 for Path Foundation input. ([Google for Developers][5])
 **Magnification:** configurable; start with 20× equivalent if metadata allows; otherwise use a pixel-size-based approach.
@@ -393,13 +415,13 @@ MedGemma 1.5 supports:
 
 * Whole-slide histopathology use via multiple patches as input.
 * EHR/document understanding tasks.
-  This makes it a fit for “evidence patches → structured tumor board summary.” ([Google for Developers][3])
+  This makes it a fit for "evidence patches → structured tumor board summary." ([Google for Developers][3])
 
 **MedGemma inputs (v1)**
 
-* Top 6–12 evidence patches (images)
+* Top 6-12 evidence patches (images)
 * Model score + a confidence descriptor
-* A short “task card” prompt that defines:
+* A short "task card" prompt that defines:
 
   * intended use (research / decision support)
   * limitations
@@ -427,7 +449,7 @@ MedGemma 1.5 supports:
 
 ## 8) Model strategy: pick targets that are defensible and winnable
 
-You said you “only want a winning project,” not a locked-in one. This is how to remain pivotable without losing months.
+You said you "only want a winning project," not a locked-in one. This is how to remain pivotable without losing months.
 
 ### 8.1 Target selection strategy (what to predict)
 
@@ -436,7 +458,7 @@ Option A can be framed as either:
 **Track 1 (high impact, higher risk): direct treatment-response prediction**
 
 * Demo dataset: ovarian bevacizumab response WSIs (public). ([Nature][1])
-* Pros: strongest “impact story”
+* Pros: strongest "impact story"
 * Cons: label noise, small n, risk of overfitting.
 
 **Track 2 (lower risk, still clinically aligned): therapy-relevant phenotype / biomarker proxy**
@@ -449,23 +471,23 @@ Examples:
 
 Pros: easier to validate, less overclaiming, still meaningful for therapy discussion.
 
-**Winning approach:** Build the product for Track 1 but keep a “task head plug-in” so you can pivot to Track 2 if Track 1 performance is shaky.
+**Winning approach:** Build the product for Track 1 but keep a "task head plug-in" so you can pivot to Track 2 if Track 1 performance is shaky.
 
 ### 8.2 Evidence-based precedent: foundation models can support response prediction + explainability
 
 There is published work benchmarking histopathology foundation models for bevacizumab response prediction from WSIs, explicitly noting that high-attention regions can aid explainability and may serve as imaging biomarkers. ([PubMed][8])
 
-This is useful in your writeup: you’re not claiming a miracle; you’re building a tool consistent with existing research and pushing it into a deployable workflow.
+This is useful in your writeup: you're not claiming a miracle; you're building a tool consistent with existing research and pushing it into a deployable workflow.
 
 ### 8.3 Avoid the most common WSI ML pitfalls (PRD-level requirements)
 
 * **Patient-level split** (not slide-level) to avoid leakage (multiple slides per patient).
 * **Slide stain/scanner variability**: include stain normalization or robust augmentation.
-* **Patch sampling bias**: ensure tissue coverage; don’t only sample tumor-dense regions unless that’s the intended behavior.
+* **Patch sampling bias**: ensure tissue coverage; don't only sample tumor-dense regions unless that's the intended behavior.
 
 ---
 
-## 9) MedGemma role: make it safe, grounded, and “doctor-usable”
+## 9) MedGemma role: make it safe, grounded, and "doctor-usable"
 
 ### 9.1 Why MedGemma here is not fluff
 
@@ -474,12 +496,12 @@ MedGemma 1.5 explicitly supports multiple domains including WSI multi-patch inte
 In Atlas, MedGemma is the **clinical communication layer**:
 
 * Converts evidence artifacts into a consistent summary.
-* Enforces limitations and “not for standalone decision-making.”
+* Enforces limitations and "not for standalone decision-making."
 * Produces a structured output that can be audited.
 
 ### 9.2 Grounding strategy (to reduce hallucinations)
 
-MedGemma can hallucinate if you ask it to “explain why treatment will work.” Don’t.
+MedGemma can hallucinate if you ask it to "explain why treatment will work." Don't.
 
 Instead, constrain the task:
 
@@ -488,7 +510,7 @@ Instead, constrain the task:
 * Describe what it sees in the evidence patches (morphology descriptors).
 * Summarize what the model output is and what evidence was used.
 * Provide limitations and suggested confirmatory steps (general, non-prescriptive).
-* Avoid any direct clinical recommendations (“start drug X”).
+* Avoid any direct clinical recommendations ("start drug X").
 
 **Mechanisms**
 
@@ -497,7 +519,7 @@ Instead, constrain the task:
   * evidence patch images,
   * the model output,
   * the allowed vocabulary / schema.
-* Add a “must cite evidence patch IDs” rule inside the schema.
+* Add a "must cite evidence patch IDs" rule inside the schema.
 * Validate JSON output; if invalid, rerun with stricter prompt.
 
 ### 9.3 Example structured report schema (v1)
@@ -542,9 +564,9 @@ DGX Spark hardware overview includes:
 * 20-core Arm CPU,
 * **128GB unified system memory**,
 * memory bandwidth reported in docs,
-* “support for AI models up to 200B parameters” (marketing + user guide). ([NVIDIA Docs][4])
+* "support for AI models up to 200B parameters" (marketing + user guide). ([NVIDIA Docs][4])
 
-Your project (Path Foundation + MIL head + MedGemma 4B) is far below “200B parameter” scale, but the unified memory is still valuable for:
+Your project (Path Foundation + MIL head + MedGemma 4B) is far below "200B parameter" scale, but the unified memory is still valuable for:
 
 * caching embeddings,
 * holding WSI tiles,
@@ -564,8 +586,8 @@ The MIL head and FAISS retrieval are cheap.
 
 Typical tissue area varies widely, but for planning:
 
-* **Sampling budget (recommended):** 3,000–12,000 patches/slide total per run (coarse + refine).
-* “Full slide” can exceed 30,000 patches at 224×224 depending on tissue area.
+* **Sampling budget (recommended):** 3,000-12,000 patches/slide total per run (coarse + refine).
+* "Full slide" can exceed 30,000 patches at 224×224 depending on tissue area.
 
 ### 10.4 Embedding throughput estimate
 
@@ -577,7 +599,7 @@ You should measure this early, but a planning model:
 
 **Conservative planning ranges (you should benchmark):**
 
-* `R` might range ~200–1500 patches/sec depending on:
+* `R` might range ~200-1500 patches/sec depending on:
 
   * batching,
   * image decode/I/O,
@@ -600,14 +622,14 @@ For 20,000 patches:
 * FP16 embeddings ≈ 15.4 MB/slide
 * FP32 embeddings ≈ 30.7 MB/slide
 
-This is **tiny** relative to system memory, which is why “embed once, reuse forever” is such a strong product strategy.
+This is **tiny** relative to system memory, which is why "embed once, reuse forever" is such a strong product strategy.
 
 ### 10.6 FAISS retrieval compute
 
-FAISS approximate search with 10k–1M vectors is typically sub‑second per query on CPU, often milliseconds.
+FAISS approximate search with 10k-1M vectors is typically sub-second per query on CPU, often milliseconds.
 For your UI:
 
-* 10 evidence patches × top‑20 neighbors: effectively instantaneous.
+* 10 evidence patches × top-20 neighbors: effectively instantaneous.
 
 ### 10.7 MedGemma inference compute
 
@@ -615,22 +637,22 @@ MedGemma 1.5 is used for multi-patch interpretation and medical summarization ta
 
 In v1, treat it as optional:
 
-* Run MedGemma only when the user clicks “Generate tumor board summary”
-* Keep patch count small (6–12 evidence patches)
-* Keep output short (300–600 tokens)
+* Run MedGemma only when the user clicks "Generate tumor board summary"
+* Keep patch count small (6-12 evidence patches)
+* Keep output short (300-600 tokens)
 
 This makes interactive latency acceptable even on a single box.
 
 ### 10.8 End-to-end latency targets (v1)
 
-**Goal:** “useful in tumor board prep,” not real-time.
+**Goal:** "useful in tumor board prep," not real-time.
 
-* Slide ingest + tissue mask: 1–5 sec
-* Embedding (8k patches): 5–30 sec (depends; measure)
+* Slide ingest + tissue mask: 1-5 sec
+* Embedding (8k patches): 5-30 sec (depends; measure)
 * MIL + heatmap + retrieval prep: <1 sec
-* Report generation (MedGemma): 2–20 sec depending on runtime config
+* Report generation (MedGemma): 2-20 sec depending on runtime config
 
-**Total:** ~10–60 seconds per slide for “evidence-ready,” plus optional report.
+**Total:** ~10-60 seconds per slide for "evidence-ready," plus optional report.
 
 ---
 
@@ -696,16 +718,16 @@ These acknowledgements increase judge trust.
 
 ---
 
-## 12) Deployment plan (offline / hospital on‑prem)
+## 12) Deployment plan (offline / hospital on-prem)
 
 ### 12.1 Deployment modes
 
-**Mode A: “Single-box workstation”**
+**Mode A: "Single-box workstation"**
 
 * Everything runs on DGX Spark.
 * Local web UI accessible on hospital intranet.
 
-**Mode B: “Department server”**
+**Mode B: "Department server"**
 
 * Same container stack runs on a small on-prem GPU server.
 * Multiple users access via browser.
@@ -723,11 +745,11 @@ These acknowledgements increase judge trust.
 
 ### 12.3 Offline-first enforcement
 
-* Provide a “no network” runtime flag:
+* Provide a "no network" runtime flag:
 
   * disables outbound HTTP
   * requires models already present
-* In UI show status: “Offline mode enabled: No outbound connections.”
+* In UI show status: "Offline mode enabled: No outbound connections."
 
 ### 12.4 Why DGX Spark is a credible target
 
@@ -793,9 +815,9 @@ The dataset includes **288 de-identified H&E WSIs from 78 patients**, with count
 
 ### 14.3 Evidence quality checks (human-centered)
 
-Even 1–2 pathologists reviewing:
+Even 1-2 pathologists reviewing:
 
-* Are top patches “reasonable”?
+* Are top patches "reasonable"?
 * Do the similar-patch results make sense?
 * Does the report summary stay within evidence?
 
@@ -804,34 +826,34 @@ Even 1–2 pathologists reviewing:
 * Enforce schema validation.
 * Block prohibited statements:
 
-  * “Start/stop drug X”
-  * “This patient will respond”
+  * "Start/stop drug X"
+  * "This patient will respond"
 * Require limitations section and safety statement.
 
 ---
 
-## 15) Roadmap and “swap-in Enso FM later” plan
+## 15) Roadmap and "swap-in Enso FM later" plan
 
-### Phase 0: Kaggle-winning MVP (2–4 weeks sprint style)
+### Phase 0: Kaggle-winning MVP (2-4 weeks sprint style) [DONE]
 
-* Implement patching + embedding + MIL + heatmap + evidence patches
-* Add FAISS retrieval
-* Add MedGemma structured report generation
-* Package into local docker stack
-* Produce 3-minute demo + writeup with safety positioning
+* [DONE] Implement patching + embedding + MIL + heatmap + evidence patches
+* [DONE] Add FAISS retrieval
+* [DONE] Add MedGemma structured report generation
+* [WIP] Package into local docker stack
+* [TODO] Produce 3-minute demo + writeup with safety positioning
 
-### Phase 1: Pilot-ready research tool
+### Phase 1: Pilot-ready research tool [WIP]
 
-* Add stain robustness improvements
-* Add quality control gate (artifact detection)
-* Add cohort management UI (local reference library)
-* Add “case comparison” view
+* [TODO] Add stain robustness improvements (Macenko normalization)
+* [TODO] Add quality control gate (artifact detection)
+* [TODO] Add cohort management UI (local reference library)
+* [TODO] Add "case comparison" view
 
-### Phase 2: Enso foundation model integration
+### Phase 2: Enso foundation model integration [TODO]
 
 Because the architecture is encoder-agnostic:
 
-* Replace `PathFoundationEmbedder` with `EnsoEmbedder`
+* [TODO] Replace `PathFoundationEmbedder` with `EnsoEmbedder`
 * Keep:
 
   * sampling,
@@ -859,7 +881,7 @@ Because the architecture is encoder-agnostic:
 
 **Embeddings**
 
-* Path Foundation (open-weight, HAI‑DEF). ([Google for Developers][5])
+* Path Foundation (open-weight, HAI-DEF). ([Google for Developers][5])
 * Optional: MedSigLIP for text↔patch retrieval. ([Google for Developers][7])
 
 **Indexing**
@@ -897,7 +919,7 @@ Now you can pivot targets without changing UI or evidence engine.
 
 ---
 
-# Final note: what makes this “winning” isn’t just the model
+# Final note: what makes this "winning" isn't just the model
 
 A lot of teams will show a MedGemma chatbot or a classifier. Few will show:
 
@@ -906,20 +928,20 @@ A lot of teams will show a MedGemma chatbot or a classifier. Few will show:
 * structured report generation with guardrails,
 * and a credible on-prem/offline deployment story.
 
-Your “moat” for the challenge is the **evidence workflow** and the **local-first packaging**, not chasing state-of-the-art AUC.
+Your "moat" for the challenge is the **evidence workflow** and the **local-first packaging**, not chasing state-of-the-art AUC.
 
 If you want, I can also produce:
 
 * a **repo structure** (folders, modules, interfaces),
 * a **demo storyboard** (exact 3-min script),
-* and a **writeup outline** that directly maps each feature to the judging criteria and special “Edge AI” category requirements.
+* and a **writeup outline** that directly maps each feature to the judging criteria and special "Edge AI" category requirements.
 
 [1]: https://www.nature.com/articles/s41597-022-01127-6?utm_source=chatgpt.com "Histopathological whole slide image dataset for ..."
 [2]: https://developers.google.com/health-ai-developer-foundations/path-foundation?utm_source=chatgpt.com "Path Foundation Model | Health AI Developer Foundations"
-[3]: https://developers.google.com/health-ai-developer-foundations/medgemma/model-card "MedGemma 1.5 model card  |  Health AI Developer Foundations  |  Google for Developers"
-[4]: https://docs.nvidia.com/dgx/dgx-spark/hardware.html "Hardware Overview — DGX Spark User Guide"
-[5]: https://developers.google.com/health-ai-developer-foundations/path-foundation/model-card "Path Foundation model card  |  Health AI Developer Foundations  |  Google for Developers"
-[6]: https://www.edtechinnovationhub.com/news/google-launches-medgemma-impact-challenge-to-advance-human-centered-health-ai "Google MedGemma Impact Challenge opens on Kaggle | ETIH EdTech News — EdTech Innovation Hub"
+[3]: https://developers.google.com/health-ai-developer-foundations/medgemma/model-card "MedGemma 1.5 model card  |  Health AI Developer Foundations  |  Google for Developers"
+[4]: https://docs.nvidia.com/dgx/dgx-spark/hardware.html "Hardware Overview - DGX Spark User Guide"
+[5]: https://developers.google.com/health-ai-developer-foundations/path-foundation/model-card "Path Foundation model card  |  Health AI Developer Foundations  |  Google for Developers"
+[6]: https://www.edtechinnovationhub.com/news/google-launches-medgemma-impact-challenge-to-advance-human-centered-health-ai "Google MedGemma Impact Challenge opens on Kaggle | ETIH EdTech News - EdTech Innovation Hub"
 [7]: https://developers.google.com/health-ai-developer-foundations/medsiglip/model-card?utm_source=chatgpt.com "MedSigLIP model card | Health AI Developer Foundations"
 [8]: https://pubmed.ncbi.nlm.nih.gov/39961889/?utm_source=chatgpt.com "Benchmarking histopathology foundation models for ..."
 [9]: https://www.nvidia.com/en-us/products/workstations/dgx-spark/ "A Grace Blackwell AI supercomputer on your desk | NVIDIA DGX Spark"
