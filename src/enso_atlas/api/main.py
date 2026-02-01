@@ -108,7 +108,7 @@ class SimilarResponse(BaseModel):
 
 
 def create_app(
-    embeddings_dir: Path = Path("data/demo/embeddings"),
+    embeddings_dir: Path = Path("data/embeddings"),
     model_path: Path = Path("models/demo_clam.pt"),
     enable_cors: bool = True,
 ) -> FastAPI:

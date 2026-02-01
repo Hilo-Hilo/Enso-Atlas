@@ -34,7 +34,7 @@ class AppState:
         
         # Paths from environment
         self.embeddings_dir = Path(
-            os.environ.get("EMBEDDINGS_DIR", "data/demo/embeddings")
+            os.environ.get("EMBEDDINGS_DIR", "data/embeddings")
         )
         self.model_path = Path(
             os.environ.get("MODEL_PATH", "models/demo_clam.pt")
