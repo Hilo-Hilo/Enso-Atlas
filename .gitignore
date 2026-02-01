@@ -4,6 +4,11 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Node.js
+node_modules/
+.next/
+*.tsbuildinfo
+
 # Model weights (too large for git, download separately)
 models/**/*.safetensors
 models/**/*.bin

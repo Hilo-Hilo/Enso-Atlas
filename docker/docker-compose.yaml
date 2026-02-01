@@ -31,6 +31,7 @@ services:
       # - /path/to/hospital/slides:/app/data/slides:ro
     ports:
       - "7860:7860"
+      - "8000:8000"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7860/"]
