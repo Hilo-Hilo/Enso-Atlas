@@ -1,8 +1,9 @@
 # Enso Atlas - Production Dockerfile
-# Optimized for NVIDIA DGX Spark deployment
+# Optimized for NVIDIA DGX Spark deployment (ARM64 + CUDA)
 
-# Use PyTorch base image with CUDA (more reliable than nvidia/cuda)
-FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
+# Use NVIDIA NGC PyTorch container (ARM64 compatible)
+# See: https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch
+FROM nvcr.io/nvidia/pytorch:24.04-py3
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -32,11 +33,11 @@ WORKDIR /app
 # Copy requirements first for caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies (PyTorch already in base image)
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Install additional GPU packages
+# Install additional packages
 RUN pip install --no-cache-dir \
     faiss-cpu \
     accelerate \
