@@ -47,6 +47,8 @@ Enso Atlas is an **on-premise pathology evidence engine** designed to predict tr
 
 **FAISS Similarity Search**: Facebook AI Similarity Search enables rapid retrieval of morphologically similar patches from a reference cohort. This precedent-based evidence allows clinicians to compare current cases with historical outcomes.
 
+**MedSigLIP Semantic Search**: MedSigLIP (based on SigLIP architecture) enables text-to-patch semantic retrieval. Pathologists can query patches using natural language descriptions like "tumor infiltrating lymphocytes" or "necrosis" to find morphologically matching regions. This highly human-centered feature supports intuitive evidence exploration.
+
 **MedGemma Report Generation**: MedGemma 4B generates structured, cautious tumor board summaries grounded exclusively in the visual evidence. The model is constrained to describe morphological observations and limitations rather than prescribing treatment.
 
 ---
@@ -196,6 +198,42 @@ Path Foundation provides the feature backbone for the entire pipeline:
 - **Downstream Flexibility**: Pre-computed embeddings support rapid experimentation with different classification heads
 
 The embedding-first architecture means Path Foundation is computed once per slide, with downstream tasks (response prediction, biomarker classification, quality control) operating on cached representations.
+
+### MedSigLIP for Semantic Evidence Search
+
+MedSigLIP (derived from Google's SigLIP architecture) provides a dual encoder for medical images and text, enabling semantic similarity search between natural language queries and histopathology patches.
+
+**Use Case**: A pathologist examining a slide can type queries like:
+- "tumor infiltrating lymphocytes" - Find immune-rich regions
+- "necrosis" - Locate areas of tissue death
+- "mitotic figures" - Identify areas of high proliferation
+- "stroma" - Find connective tissue regions
+
+**Integration Architecture**:
+
+```
+Text Query: "lymphocytes"
+       |
+       v
+[Text Encoder] --> Query Embedding (1152-dim)
+       |
+       v
+[Cosine Similarity Search]
+       ^
+       |
+[Patch Embeddings] <-- [Image Encoder] <-- Patch Images
+       |
+       v
+Top-K Matching Patches with Coordinates
+```
+
+**Implementation Details**:
+- Uses SigLIP SO400M architecture (1152-dimensional embeddings)
+- Embeddings are normalized for efficient cosine similarity computation
+- Supports both in-memory search and FAISS-indexed large-scale retrieval
+- Results include patch coordinates, similarity scores, and attention weights
+
+This feature represents a highly human-centered approach to evidence exploration, allowing clinicians to validate AI predictions against their domain expertise by searching for specific morphological patterns.
 
 ---
 

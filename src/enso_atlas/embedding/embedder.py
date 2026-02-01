@@ -1,12 +1,12 @@
 """
-Path Foundation Embedder - Feature extraction from histopathology patches.
+Embedders for histopathology patches.
 
-Uses the Path Foundation model from Google Health AI:
-- Input: 224x224 H&E patches
-- Output: 384-dimensional embeddings
-- Architecture: ViT-S
+Contains:
+- PathFoundationEmbedder: Feature extraction using Path Foundation model
+- MedSigLIPEmbedder: Text-to-patch semantic search using SigLIP/MedSigLIP
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Union
 import logging
@@ -202,43 +202,82 @@ class PathFoundationEmbedder:
         return embeddings
 
 
+@dataclass
+class MedSigLIPConfig:
+    """MedSigLIP configuration."""
+    model_id: str = "google/siglip-so400m-patch14-384"  # Base SigLIP model
+    batch_size: int = 32
+    precision: str = "fp16"
+    cache_dir: str = "data/medsiglip_cache"
+
+
 class MedSigLIPEmbedder:
     """
-    Optional embedder using MedSigLIP for text-to-patch retrieval.
+    Embedder using MedSigLIP/SigLIP for text-to-patch semantic retrieval.
 
     MedSigLIP provides dual encoder for medical image + text.
-    Useful for semantic evidence search (text query → patch retrieval).
+    Enables "semantic evidence search" - query with text like
+    "tumor infiltrating lymphocytes" and find matching patches.
+
+    Note: Using SigLIP as base since MedSigLIP follows the same architecture.
+    For medical-specific fine-tuned model, update model_id when available.
     """
 
-    EMBEDDING_DIM = 768
-    INPUT_SIZE = 448
+    EMBEDDING_DIM = 1152  # SigLIP SO400M dimension
+    INPUT_SIZE = 384
 
-    def __init__(self, config: EmbeddingConfig):
-        self.config = config
+    def __init__(self, config: Optional[MedSigLIPConfig] = None):
+        self.config = config or MedSigLIPConfig()
         self._model = None
         self._processor = None
         self._device = None
+        self._patch_embeddings = None
+        self._patch_metadata = None
+
+        # Setup cache directory
+        self.cache_dir = Path(self.config.cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _load_model(self) -> None:
-        """Load MedSigLIP model."""
+        """Load the SigLIP/MedSigLIP model."""
         if self._model is not None:
             return
 
         import torch
         from transformers import AutoModel, AutoProcessor
 
-        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Determine device
+        if torch.cuda.is_available():
+            self._device = torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self._device = torch.device("mps")
+        else:
+            self._device = torch.device("cpu")
 
         logger.info(f"Loading MedSigLIP model on {self._device}")
 
-        model_id = "google/medsiglip"
+        model_id = self.config.model_id
         self._processor = AutoProcessor.from_pretrained(model_id)
-        self._model = AutoModel.from_pretrained(model_id).to(self._device).eval()
+        self._model = AutoModel.from_pretrained(model_id)
 
-        logger.info("MedSigLIP model loaded successfully")
+        # Move to device and set precision
+        self._model = self._model.to(self._device)
+        if self.config.precision == "fp16" and self._device.type == "cuda":
+            self._model = self._model.half()
+
+        self._model.eval()
+        logger.info(f"MedSigLIP model loaded successfully: {model_id}")
 
     def embed_image(self, image: np.ndarray) -> np.ndarray:
-        """Embed a single image."""
+        """
+        Embed a single image.
+
+        Args:
+            image: RGB image array
+
+        Returns:
+            Normalized embedding vector
+        """
         self._load_model()
 
         import torch
@@ -250,21 +289,221 @@ class MedSigLIPEmbedder:
         inputs = self._processor(images=image, return_tensors="pt")
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
+        if self.config.precision == "fp16" and self._device.type == "cuda":
+            inputs = {k: v.half() if v.dtype == torch.float32 else v for k, v in inputs.items()}
+
         with torch.no_grad():
             embedding = self._model.get_image_features(**inputs)
+            # Normalize for cosine similarity
+            embedding = embedding / embedding.norm(dim=-1, keepdim=True)
 
         return embedding.cpu().numpy().squeeze()
 
     def embed_text(self, text: str) -> np.ndarray:
-        """Embed a text query."""
+        """
+        Embed a text query.
+
+        Args:
+            text: Text query (e.g., "tumor infiltrating lymphocytes")
+
+        Returns:
+            Normalized embedding vector
+        """
         self._load_model()
 
         import torch
 
-        inputs = self._processor(text=text, return_tensors="pt")
+        inputs = self._processor(text=text, return_tensors="pt", padding=True)
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
         with torch.no_grad():
             embedding = self._model.get_text_features(**inputs)
+            # Normalize for cosine similarity
+            embedding = embedding / embedding.norm(dim=-1, keepdim=True)
 
         return embedding.cpu().numpy().squeeze()
+
+    def embed_patches(
+        self,
+        patches: List[np.ndarray],
+        cache_key: Optional[str] = None,
+        show_progress: bool = True,
+    ) -> np.ndarray:
+        """
+        Embed a batch of image patches.
+
+        Args:
+            patches: List of RGB images
+            cache_key: Optional cache key for storing/loading embeddings
+            show_progress: Whether to show progress bar
+
+        Returns:
+            Embeddings of shape (n_patches, embedding_dim)
+        """
+        # Try loading from cache first
+        if cache_key is not None:
+            cache_path = self.cache_dir / f"{hashlib.md5(cache_key.encode()).hexdigest()}_siglip.npy"
+            if cache_path.exists():
+                logger.info(f"Loading MedSigLIP embeddings from cache: {cache_path}")
+                return np.load(cache_path)
+
+        self._load_model()
+
+        import torch
+        from PIL import Image
+        from tqdm import tqdm
+
+        all_embeddings = []
+        batch_size = self.config.batch_size
+
+        # Process in batches
+        iterator = range(0, len(patches), batch_size)
+        if show_progress:
+            iterator = tqdm(iterator, desc="MedSigLIP embedding patches")
+
+        for i in iterator:
+            batch = patches[i:i + batch_size]
+
+            # Convert to PIL Images
+            pil_images = [Image.fromarray(p) if isinstance(p, np.ndarray) else p for p in batch]
+
+            # Preprocess batch
+            inputs = self._processor(images=pil_images, return_tensors="pt")
+            inputs = {k: v.to(self._device) for k, v in inputs.items()}
+
+            if self.config.precision == "fp16" and self._device.type == "cuda":
+                inputs = {k: v.half() if v.dtype == torch.float32 else v for k, v in inputs.items()}
+
+            # Forward pass
+            with torch.no_grad():
+                embeddings = self._model.get_image_features(**inputs)
+                # Normalize for cosine similarity
+                embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
+
+            all_embeddings.append(embeddings.cpu().numpy())
+
+        # Concatenate all embeddings
+        embeddings = np.concatenate(all_embeddings, axis=0)
+
+        # Convert to FP16 for storage efficiency
+        if self.config.precision == "fp16":
+            embeddings = embeddings.astype(np.float16)
+
+        # Save to cache
+        if cache_key is not None:
+            np.save(cache_path, embeddings)
+            logger.info(f"Saved MedSigLIP embeddings to cache: {cache_path}")
+
+        logger.info(f"Generated MedSigLIP embeddings: {embeddings.shape}")
+        return embeddings
+
+    def build_search_index(
+        self,
+        embeddings: np.ndarray,
+        metadata: Optional[List[dict]] = None,
+    ) -> None:
+        """
+        Build an in-memory search index from patch embeddings.
+
+        Args:
+            embeddings: Patch embeddings of shape (n_patches, embedding_dim)
+            metadata: Optional list of metadata dicts for each patch
+        """
+        self._patch_embeddings = embeddings.astype(np.float32)
+        self._patch_metadata = metadata or [{"index": i} for i in range(len(embeddings))]
+        logger.info(f"Built search index with {len(embeddings)} patches")
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        embeddings: Optional[np.ndarray] = None,
+        metadata: Optional[List[dict]] = None,
+    ) -> List[dict]:
+        """
+        Search for patches matching a text query using cosine similarity.
+
+        Args:
+            query: Text query (e.g., "tumor cells", "necrosis", "lymphocytes")
+            top_k: Number of top results to return
+            embeddings: Optional embeddings to search (uses built index if None)
+            metadata: Optional metadata for the embeddings
+
+        Returns:
+            List of dicts with patch_index, similarity_score, and metadata
+        """
+        # Use provided embeddings or built index
+        if embeddings is not None:
+            search_embeddings = embeddings.astype(np.float32)
+            search_metadata = metadata or [{"index": i} for i in range(len(embeddings))]
+        elif self._patch_embeddings is not None:
+            search_embeddings = self._patch_embeddings
+            search_metadata = self._patch_metadata
+        else:
+            raise ValueError("No embeddings available. Call build_search_index() first or provide embeddings.")
+
+        # Get text embedding
+        query_embedding = self.embed_text(query).astype(np.float32)
+
+        # Ensure embeddings are normalized (should already be, but be safe)
+        if len(query_embedding.shape) == 1:
+            query_embedding = query_embedding.reshape(1, -1)
+
+        # Compute cosine similarities
+        similarities = np.dot(search_embeddings, query_embedding.T).squeeze()
+
+        # Get top-k indices
+        top_indices = np.argsort(similarities)[-top_k:][::-1]
+
+        results = []
+        for idx in top_indices:
+            result = {
+                "patch_index": int(idx),
+                "similarity_score": float(similarities[idx]),
+                "metadata": search_metadata[idx] if idx < len(search_metadata) else {},
+            }
+            results.append(result)
+
+        return results
+
+    def search_with_faiss(
+        self,
+        query: str,
+        faiss_index,
+        metadata: List[dict],
+        top_k: int = 10,
+    ) -> List[dict]:
+        """
+        Search using a pre-built FAISS index for large-scale retrieval.
+
+        Args:
+            query: Text query
+            faiss_index: FAISS index built from patch embeddings
+            metadata: Metadata list aligned with FAISS index
+            top_k: Number of results
+
+        Returns:
+            List of search results with similarity scores
+        """
+        import faiss
+
+        # Get text embedding
+        query_embedding = self.embed_text(query).astype(np.float32)
+        if len(query_embedding.shape) == 1:
+            query_embedding = query_embedding.reshape(1, -1)
+
+        # Search FAISS index
+        distances, indices = faiss_index.search(query_embedding, top_k)
+
+        results = []
+        for dist, idx in zip(distances[0], indices[0]):
+            if idx == -1:
+                continue
+            result = {
+                "patch_index": int(idx),
+                "similarity_score": float(1.0 - dist),  # Convert L2 distance to similarity
+                "metadata": metadata[idx] if idx < len(metadata) else {},
+            }
+            results.append(result)
+
+        return results

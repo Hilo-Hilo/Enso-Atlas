@@ -153,6 +153,7 @@ python -m enso_atlas.ui.demo_app
 |-----------|-------------|
 | **WSI Processing** | OpenSlide-based processing with tissue detection |
 | **Path Foundation** | 384-dim embeddings from Google's foundation model |
+| **MedSigLIP** | Text-to-patch semantic search (e.g., "tumor cells", "lymphocytes") |
 | **CLAM Classifier** | Attention-based MIL for slide-level prediction |
 | **Evidence Heatmaps** | Attention visualization overlaid on thumbnails |
 | **FAISS Retrieval** | Similar case search from reference cohort |
@@ -164,6 +165,7 @@ python -m enso_atlas.ui.demo_app
 |-------|------------|
 | WSI I/O | OpenSlide |
 | Embeddings | Path Foundation (ViT-S, 384-dim) |
+| Semantic Search | MedSigLIP/SigLIP (text-to-patch retrieval) |
 | Classification | CLAM (Gated Attention MIL) |
 | Retrieval | FAISS |
 | Reporting | MedGemma 1.5 4B |
@@ -196,6 +198,23 @@ curl -X POST http://localhost:8000/api/report \
   -H "Content-Type: application/json" \
   -d '{"slide_id": "slide_001", "include_evidence": true}'
 ```
+
+### Semantic Search (MedSigLIP)
+
+Search for patches matching a text description using MedSigLIP embeddings:
+
+```bash
+curl -X POST http://localhost:8000/api/semantic-search \
+  -H "Content-Type: application/json" \
+  -d '{"slide_id": "slide_001", "query": "tumor infiltrating lymphocytes", "top_k": 10}'
+```
+
+Example queries:
+- `"tumor cells"` - Find regions with dense tumor cells
+- `"lymphocytes"` - Immune cell infiltration
+- `"necrosis"` - Areas of tissue death
+- `"stroma"` - Stromal/connective tissue regions
+- `"mitotic figures"` - Cell division activity
 
 ### Full API Documentation
 
@@ -301,3 +320,4 @@ MIT License - See [LICENSE](LICENSE) for details.
 1. Lu et al., "Data-efficient and weakly supervised computational pathology on whole-slide images," *Nature Biomedical Engineering*, 2021.
 2. Google Health AI, [Path Foundation](https://developers.google.com/health-ai-developer-foundations/path-foundation)
 3. Google, [MedGemma](https://developers.google.com/health-ai-developer-foundations/medgemma)
+4. Google Health AI, [MedSigLIP](https://developers.google.com/health-ai-developer-foundations/medsiglip) - Text-to-image retrieval for medical images
