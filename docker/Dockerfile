@@ -1,7 +1,8 @@
 # Enso Atlas - Production Dockerfile
 # Optimized for NVIDIA DGX Spark deployment
 
-FROM nvidia/cuda:12.2-cudnn8-runtime-ubuntu22.04 AS base
+# Use PyTorch base image with CUDA (more reliable than nvidia/cuda)
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -10,9 +11,6 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3.11-venv \
-    python3-pip \
     # OpenSlide dependencies
     openslide-tools \
     libopenslide0 \
@@ -28,10 +26,6 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-
 # Create app directory
 WORKDIR /app
 
@@ -42,11 +36,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Install GPU-specific packages
+# Install additional GPU packages
 RUN pip install --no-cache-dir \
-    faiss-gpu \
+    faiss-cpu \
     accelerate \
-    bitsandbytes
+    bitsandbytes \
+    openslide-python \
+    gradio
 
 # Copy application code
 COPY src/ ./src/
@@ -60,6 +56,7 @@ RUN mkdir -p /app/data /app/outputs /app/cache /app/models
 ENV ENSO_CONFIG=/app/config/default.yaml
 ENV TRANSFORMERS_CACHE=/app/cache/huggingface
 ENV HF_HOME=/app/cache/huggingface
+ENV PYTHONPATH=/app/src
 
 # Expose Gradio port
 EXPOSE 7860
@@ -68,5 +65,5 @@ EXPOSE 7860
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:7860/ || exit 1
 
-# Default command
-CMD ["python", "-m", "enso_atlas.ui.app"]
+# Default command - run demo app
+CMD ["python", "-m", "enso_atlas.ui.demo_app"]
