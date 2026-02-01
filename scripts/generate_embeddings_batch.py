@@ -358,8 +358,8 @@ class BatchEmbedder:
             embeddings = self.embed_patches(patches)
             
             # Save atomically (write to temp, then rename)
-            temp_emb = output_path.with_suffix('.npy.tmp')
-            temp_coords = coords_path.with_suffix('.npy.tmp')
+            temp_emb = output_path.with_name(output_path.stem + '.tmp.npy')
+            temp_coords = coords_path.with_name(coords_path.stem + '.tmp.npy')
             
             np.save(temp_emb, embeddings)
             np.save(temp_coords, np.array(coords))
