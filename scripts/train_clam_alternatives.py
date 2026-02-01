@@ -129,42 +129,72 @@ def load_embeddings_with_labels(
     """
     Load embeddings and match with labels.
     
+    Supports two label formats:
+    1. Clinical data with patient_id (from clinical.csv)
+    2. Direct labels with slide_id (from labels.csv: slide_id,patient_id,label,platinum_status)
+    
     Returns:
         embeddings_list: List of embedding arrays
         labels: List of binary labels
-        patient_ids: List of patient IDs
+        patient_ids: List of patient/slide IDs
     """
     embeddings_list = []
     labels = []
     patient_ids = []
     
-    # Build patient-to-label map
-    label_map = dict(zip(labels_df["patient_id"], labels_df["label"]))
+    # Build label maps (try both patient_id and slide_id based matching)
+    patient_label_map = {}
+    slide_label_map = {}
+    
+    if "patient_id" in labels_df.columns:
+        patient_label_map = dict(zip(labels_df["patient_id"], labels_df["label"]))
+    
+    # Check for slide_id column (new format from labels.csv)
+    if "slide_id" in labels_df.columns:
+        slide_label_map = dict(zip(labels_df["slide_id"], labels_df["label"]))
+        logger.info(f"Using slide-level labels: {len(slide_label_map)} slides")
     
     # Scan embedding files
     for emb_file in embeddings_dir.glob("*.npy"):
         if "_coords" in emb_file.name:
             continue
             
-        # Extract patient ID from filename (e.g., TCGA-04-1360-01A-01-TS1.npy -> TCGA-04-1360)
         name = emb_file.stem
+        
+        # Try slide_id match first (more specific)
+        # Slide IDs in labels.csv may include UUID suffix: TCGA-13-0794-01A-01-BS1.a4d22c1b-...
+        slide_matched = False
+        for slide_id, label in slide_label_map.items():
+            # Match by prefix (embedding file may not have UUID)
+            slide_prefix = slide_id.split(".")[0]  # Remove UUID suffix
+            if name == slide_prefix or name.startswith(slide_prefix):
+                embeddings = np.load(emb_file).astype(np.float32)
+                embeddings_list.append(embeddings)
+                labels.append(int(label))
+                patient_ids.append(slide_prefix)
+                logger.info(f"  {slide_prefix}: {embeddings.shape[0]} patches, label={label}")
+                slide_matched = True
+                break
+        
+        if slide_matched:
+            continue
+        
+        # Fall back to patient_id matching
         parts = name.split("-")
         if len(parts) >= 3 and parts[0] == "TCGA":
             patient_id = "-".join(parts[:3])
         else:
-            # Demo slide format
+            # Demo slide format - skip
             continue
         
-        if patient_id not in label_map:
+        if patient_id in patient_label_map:
+            embeddings = np.load(emb_file).astype(np.float32)
+            embeddings_list.append(embeddings)
+            labels.append(int(patient_label_map[patient_id]))
+            patient_ids.append(patient_id)
+            logger.info(f"  {patient_id}: {embeddings.shape[0]} patches, label={patient_label_map[patient_id]}")
+        else:
             logger.debug(f"No label for {patient_id}")
-            continue
-        
-        embeddings = np.load(emb_file).astype(np.float32)
-        embeddings_list.append(embeddings)
-        labels.append(label_map[patient_id])
-        patient_ids.append(patient_id)
-        
-        logger.info(f"  {patient_id}: {embeddings.shape[0]} patches, label={label_map[patient_id]}")
     
     logger.info(f"Loaded {len(embeddings_list)} slides with labels")
     return embeddings_list, labels, patient_ids
@@ -557,10 +587,27 @@ def print_results(results: Dict):
         logger.info(f"  Accuracy: {m['accuracy']:.4f}")
 
 
+def load_direct_labels(labels_path: Path) -> pd.DataFrame:
+    """
+    Load direct labels from labels.csv (slide-level format).
+    Format: slide_id,patient_id,label,platinum_status
+    """
+    df = pd.read_csv(labels_path)
+    logger.info(f"Loaded direct labels for {len(df)} slides")
+    
+    # Count distribution
+    pos = (df["label"] == 1).sum()
+    neg = (df["label"] == 0).sum()
+    ratio = max(pos, neg) / min(pos, neg) if min(pos, neg) > 0 else float("inf")
+    
+    logger.info(f"Distribution: positive={pos}, negative={neg}, ratio={ratio:.2f}:1")
+    return df
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train CLAM with alternative approaches")
-    parser.add_argument("--label_type", choices=["platinum", "survival", "recurrence"],
-                       default="survival", help="Label type to use")
+    parser.add_argument("--label_type", choices=["platinum", "survival", "recurrence", "direct"],
+                       default="direct", help="Label type to use (direct=use labels.csv directly)")
     parser.add_argument("--survival_threshold", type=int, default=36,
                        help="OS threshold in months for survival label")
     parser.add_argument("--oversample", action="store_true",
@@ -570,9 +617,11 @@ def main():
     parser.add_argument("--optimal_threshold", action="store_true",
                        help="Report metrics at optimal threshold (Youden's J)")
     parser.add_argument("--data_dir", type=str, default=None,
-                       help="Data directory with embeddings")
+                       help="Data directory with embeddings and labels")
     parser.add_argument("--clinical_file", type=str, default=None,
                        help="Path to clinical CSV file")
+    parser.add_argument("--labels_file", type=str, default=None,
+                       help="Path to labels.csv file (direct slide-level labels)")
     parser.add_argument("--output_dir", type=str, default="outputs/alternative_training",
                        help="Output directory for results")
     
@@ -585,19 +634,6 @@ def main():
         data_dir = Path(args.data_dir)
     else:
         data_dir = project_dir / "data"
-    
-    if args.clinical_file:
-        clinical_path = Path(args.clinical_file)
-    else:
-        # Try TCGA full clinical data first
-        tcga_clinical = Path.home() / "med-gemma-hackathon/data/tcga_full/clinical.csv"
-        if tcga_clinical.exists():
-            clinical_path = tcga_clinical
-        else:
-            # Fall back to project clinical data
-            clinical_path = data_dir / "clinical.csv"
-            if not clinical_path.exists():
-                clinical_path = data_dir / "labels.csv"
     
     embeddings_dir = data_dir / "embeddings"
     output_dir = Path(args.output_dir)
@@ -615,13 +651,37 @@ def main():
     logger.info(f"{'='*60}")
     logger.info("ALTERNATIVE TRAINING APPROACHES FOR TCGA OVARIAN CANCER")
     logger.info(f"{'='*60}")
-    logger.info(f"Clinical data: {clinical_path}")
     logger.info(f"Embeddings: {embeddings_dir}")
     logger.info(f"Label type: {config.label_type}")
     
-    # Load data
-    clinical_df = load_clinical_data(clinical_path)
-    labels_df = create_labels(clinical_df, config.label_type, config.survival_threshold)
+    # Load data based on label type
+    if args.label_type == "direct" or args.labels_file:
+        # Use direct labels.csv format
+        labels_path = Path(args.labels_file) if args.labels_file else (data_dir / "tcga_full" / "labels.csv")
+        if not labels_path.exists():
+            labels_path = data_dir / "labels.csv"
+        
+        logger.info(f"Labels file: {labels_path}")
+        labels_df = load_direct_labels(labels_path)
+        clinical_df = labels_df  # Use same df for compatibility
+        
+    else:
+        # Use clinical data with derived labels
+        if args.clinical_file:
+            clinical_path = Path(args.clinical_file)
+        else:
+            # Try TCGA full clinical data first
+            tcga_clinical = Path.home() / "med-gemma-hackathon/data/tcga_full/clinical.csv"
+            if tcga_clinical.exists():
+                clinical_path = tcga_clinical
+            else:
+                clinical_path = data_dir / "clinical.csv"
+                if not clinical_path.exists():
+                    clinical_path = data_dir / "labels.csv"
+        
+        logger.info(f"Clinical data: {clinical_path}")
+        clinical_df = load_clinical_data(clinical_path)
+        labels_df = create_labels(clinical_df, config.label_type, config.survival_threshold)
     
     embeddings_list, labels, patient_ids = load_embeddings_with_labels(
         embeddings_dir, labels_df, clinical_df
@@ -629,11 +689,19 @@ def main():
     
     if len(embeddings_list) == 0:
         logger.error("No embeddings found with matching labels!")
-        logger.error("Available embeddings need TCGA patient IDs matching clinical data.")
+        logger.error("Available embeddings need TCGA slide IDs matching labels data.")
         return
     
     if len(embeddings_list) < 3:
         logger.warning(f"Only {len(embeddings_list)} samples available - results will be limited")
+    
+    # Check class balance
+    pos_count = sum(labels)
+    neg_count = len(labels) - pos_count
+    if pos_count == 0 or neg_count == 0:
+        logger.error(f"Only one class present in data (pos={pos_count}, neg={neg_count})!")
+        logger.error("Cannot train a meaningful classifier. Need at least 1 sample per class.")
+        return
     
     # Train and evaluate
     results = train_and_evaluate(config, embeddings_list, labels, patient_ids)

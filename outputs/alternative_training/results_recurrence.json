@@ -1,0 +1,54 @@
+{
+  "config": {
+    "label_type": "recurrence",
+    "use_oversampling": true,
+    "use_focal_loss": true,
+    "survival_threshold": 36
+  },
+  "n_samples": 4,
+  "class_distribution": {
+    "positive": 2,
+    "negative": 2
+  },
+  "metrics_threshold_0.5": {
+    "auc_roc": 1.0,
+    "accuracy": 1.0,
+    "sensitivity": 1.0,
+    "specificity": 1.0,
+    "ppv": 1.0,
+    "npv": 1.0,
+    "tp": 2,
+    "tn": 2,
+    "fp": 0,
+    "fn": 0
+  },
+  "metrics_optimal_threshold": {
+    "optimal_threshold": 0.6220311522483826,
+    "youden_j": 1.0,
+    "sensitivity": 1.0,
+    "specificity": 1.0,
+    "accuracy": 1.0
+  },
+  "predictions": [
+    {
+      "patient_id": "TCGA-04-1360",
+      "true_label": 1,
+      "predicted_prob": 0.6220311522483826
+    },
+    {
+      "patient_id": "TCGA-29-1691",
+      "true_label": 0,
+      "predicted_prob": 0.21707841753959656
+    },
+    {
+      "patient_id": "TCGA-13-1489",
+      "true_label": 0,
+      "predicted_prob": 0.04618235304951668
+    },
+    {
+      "patient_id": "TCGA-09-2056",
+      "true_label": 1,
+      "predicted_prob": 0.8055960536003113
+    }
+  ]
+}

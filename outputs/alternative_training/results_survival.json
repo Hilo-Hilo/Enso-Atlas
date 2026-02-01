@@ -1,0 +1,47 @@
+{
+  "config": {
+    "label_type": "survival",
+    "use_oversampling": false,
+    "use_focal_loss": false,
+    "survival_threshold": 36
+  },
+  "n_samples": 4,
+  "class_distribution": {
+    "positive": 0,
+    "negative": 4
+  },
+  "metrics_threshold_0.5": {
+    "auc_roc": NaN,
+    "accuracy": 1.0,
+    "sensitivity": 0.0,
+    "specificity": 1.0,
+    "ppv": 0.0,
+    "npv": 1.0,
+    "tp": 0,
+    "tn": 4,
+    "fp": 0,
+    "fn": 0
+  },
+  "predictions": [
+    {
+      "patient_id": "TCGA-29-1691",
+      "true_label": 0,
+      "predicted_prob": 2.0288691302994266e-05
+    },
+    {
+      "patient_id": "TCGA-13-1489",
+      "true_label": 0,
+      "predicted_prob": 8.158608579833526e-06
+    },
+    {
+      "patient_id": "TCGA-61-1730",
+      "true_label": 0,
+      "predicted_prob": 1.3517442312149797e-06
+    },
+    {
+      "patient_id": "TCGA-09-2056",
+      "true_label": 0,
+      "predicted_prob": 1.7054819636541652e-06
+    }
+  ]
+}
