@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ReportingConfig:
     """MedGemma reporting configuration."""
-    model: str = "google/medgemma-4b-it"
+    # Use local path in container, fallback to HuggingFace ID
+    model: str = "/app/models/medgemma-4b-it"
     max_evidence_patches: int = 8
     max_output_tokens: int = 1024
     temperature: float = 0.3
