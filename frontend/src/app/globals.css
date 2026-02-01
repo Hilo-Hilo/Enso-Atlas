@@ -1,0 +1,173 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles for the clinical application */
+@layer base {
+  :root {
+    /* Clinical color scheme variables */
+    --color-primary: 14 165 233; /* clinical-500 */
+    --color-background: 255 255 255;
+    --color-foreground: 15 23 42;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-surface-secondary text-gray-900;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Custom scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-100 rounded;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 rounded hover:bg-gray-400;
+  }
+
+  /* Focus ring styling for accessibility */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-clinical-500 ring-offset-2;
+  }
+}
+
+@layer components {
+  /* Professional card styling */
+  .clinical-card {
+    @apply bg-white rounded-lg border border-surface-border shadow-clinical;
+  }
+
+  /* Panel header styling */
+  .panel-header {
+    @apply px-4 py-3 border-b border-surface-border bg-surface-secondary;
+  }
+
+  /* Status indicator dot */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+
+  .status-dot-positive {
+    @apply bg-status-positive;
+  }
+
+  .status-dot-negative {
+    @apply bg-status-negative;
+  }
+
+  .status-dot-warning {
+    @apply bg-status-warning;
+  }
+
+  /* OpenSeadragon viewer container */
+  .osd-viewer {
+    @apply w-full h-full bg-gray-900 rounded-lg overflow-hidden;
+  }
+
+  /* Evidence patch thumbnail */
+  .patch-thumbnail {
+    @apply aspect-square rounded-lg overflow-hidden border-2 transition-all;
+    @apply hover:border-clinical-500 hover:shadow-md;
+  }
+
+  .patch-thumbnail.selected {
+    @apply border-clinical-600 ring-2 ring-clinical-200;
+  }
+
+  /* Heatmap legend gradient */
+  .heatmap-legend {
+    background: linear-gradient(
+      to right,
+      rgba(59, 130, 246, 0.8),
+      rgba(34, 197, 94, 0.8),
+      rgba(234, 179, 8, 0.8),
+      rgba(239, 68, 68, 0.8)
+    );
+  }
+}
+
+@layer utilities {
+  /* Text utilities for clinical content */
+  .text-clinical-body {
+    @apply text-sm text-gray-700 leading-relaxed;
+  }
+
+  .text-clinical-label {
+    @apply text-xs font-medium text-gray-500 uppercase tracking-wide;
+  }
+
+  /* Animation utilities */
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-slide-in {
+    animation: slideIn 0.3s ease-out;
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  /* Gradient overlay for patch thumbnails */
+  .gradient-overlay {
+    background: linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.7) 0%,
+      transparent 50%
+    );
+  }
+
+  /* Glass effect for floating controls */
+  .glass-effect {
+    @apply bg-white/90 backdrop-blur-sm;
+  }
+}
+
+/* OpenSeadragon navigator styling */
+.openseadragon-navigator {
+  @apply border-2 border-white/20 rounded-lg shadow-lg overflow-hidden !important;
+}
+
+/* Print styles for report export */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    @apply text-black bg-white;
+  }
+
+  .clinical-card {
+    @apply shadow-none border-gray-300;
+  }
+}
