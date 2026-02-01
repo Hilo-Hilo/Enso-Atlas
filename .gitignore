@@ -23,3 +23,5 @@ data/demo/embeddings/*.npy
 # Logs and temp files
 *.log
 /tmp/
+venv/
+data/slides/*.svs

@@ -1,0 +1,6 @@
+patient_id,slide_file,diagnosis,vital_status,treatment_response
+TCGA-04-1360,TCGA-04-1360-01A-01-TS1.svs,Serous cystadenocarcinoma,Alive,responder
+TCGA-09-2056,TCGA-09-2056-01B-01-TS1.svs,Serous cystadenocarcinoma,Alive,responder
+TCGA-13-1489,TCGA-13-1489-01A-01-TS1.svs,Serous cystadenocarcinoma,Dead,non-responder
+TCGA-29-1691,TCGA-29-1691-01A-01-BS1.svs,Serous cystadenocarcinoma,Dead,non-responder
+TCGA-61-1730,TCGA-61-1730-01A-01-BS1.svs,Serous cystadenocarcinoma,Dead,non-responder
