@@ -4,7 +4,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: enso-atlas
-    # Use gpus: all (Compose v2) instead of deprecated runtime: nvidia
+    # GPU access via deploy.resources (Compose v2 / Swarm compatible)
     deploy:
       resources:
         reservations:
@@ -17,7 +17,7 @@ services:
       ENSO_CONFIG: /app/config/default.yaml
       TRANSFORMERS_CACHE: /app/cache/huggingface
       HF_HOME: /app/cache/huggingface
-      # Offline mode - set to 0 for first-time model download
+      # Offline mode - set to 1 after models are downloaded
       TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-0}"
       HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
     volumes:
@@ -32,13 +32,6 @@ services:
     ports:
       - "7860:7860"
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7860/"]
       interval: 30s
