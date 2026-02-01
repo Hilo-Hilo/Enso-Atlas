@@ -357,7 +357,7 @@ def create_app(
                 )
 
         # Load MIL classifier
-        config = MILConfig(input_dim=384, hidden_dim=128)
+        config = MILConfig(input_dim=384, hidden_dim=256)
         classifier = CLAMClassifier(config)
         if model_path.exists():
             classifier.load(model_path)
