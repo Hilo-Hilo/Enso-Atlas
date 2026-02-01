@@ -1,1 +1,20 @@
 .DS_Store
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Model weights (too large for git, download separately)
+models/**/*.safetensors
+models/**/*.bin
+models/**/*.pt
+models/**/*.h5
+models/**/*.pb
+models/**/variables/
+
+# Demo embeddings (regenerate with scripts/create_demo_data.py)
+data/demo/embeddings/*.npy
+
+# Logs and temp files
+*.log
+/tmp/

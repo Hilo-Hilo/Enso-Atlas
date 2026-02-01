@@ -1,0 +1,11 @@
+slide_id,patient_id,label,label_name
+demo_slide_000,patient_00,0,invalid
+demo_slide_001,patient_00,0,invalid
+demo_slide_002,patient_00,0,invalid
+demo_slide_003,patient_01,0,invalid
+demo_slide_004,patient_01,0,invalid
+demo_slide_005,patient_01,0,invalid
+demo_slide_006,patient_02,1,effective
+demo_slide_007,patient_02,0,invalid
+demo_slide_008,patient_02,0,invalid
+demo_slide_009,patient_03,0,invalid
