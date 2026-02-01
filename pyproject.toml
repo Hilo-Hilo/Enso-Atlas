@@ -1,0 +1,86 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "enso-atlas"
+version = "0.1.0"
+description = "On-prem pathology evidence engine for treatment-response insight"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Hanson Wen", email = "hansonwen@berkeley.edu"},
+]
+keywords = ["pathology", "medical-ai", "whole-slide-imaging", "deep-learning"]
+
+dependencies = [
+    # Core
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "pandas>=2.0.0",
+    "scikit-learn>=1.3.0",
+    "pillow>=10.0.0",
+    "opencv-python>=4.8.0",
+    "h5py>=3.9.0",
+    
+    # WSI Processing
+    "openslide-python>=1.3.0",
+    
+    # Deep Learning
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "transformers>=4.36.0",
+    "huggingface-hub>=0.19.0",
+    
+    # MIL & Pathology
+    "slideflow>=2.3.0",
+    
+    # Vector Search
+    "faiss-cpu>=1.7.4",
+    
+    # UI
+    "gradio>=4.0.0",
+    
+    # Utilities
+    "tqdm>=4.66.0",
+    "pyyaml>=6.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "ipython>=8.0.0",
+    "jupyter>=1.0.0",
+]
+gpu = [
+    "faiss-gpu>=1.7.4",
+    "cucim>=24.2.0",
+]
+
+[project.scripts]
+enso-atlas = "enso_atlas.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/enso_atlas"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true

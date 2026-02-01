@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  enso-atlas:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: enso-atlas
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - ENSO_CONFIG=/app/config/default.yaml
+      - TRANSFORMERS_CACHE=/app/cache/huggingface
+      - HF_HOME=/app/cache/huggingface
+      # Offline mode - no external connections
+      - TRANSFORMERS_OFFLINE=1
+      - HF_HUB_OFFLINE=1
+    volumes:
+      # Persistent data storage
+      - atlas-data:/app/data
+      - atlas-outputs:/app/outputs
+      - atlas-cache:/app/cache
+      # Model storage (pre-downloaded)
+      - atlas-models:/app/models
+      # Optional: mount local slides for processing
+      # - /path/to/hospital/slides:/app/data/slides:ro
+    ports:
+      - "7860:7860"
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  atlas-data:
+    driver: local
+  atlas-outputs:
+    driver: local
+  atlas-cache:
+    driver: local
+  atlas-models:
+    driver: local

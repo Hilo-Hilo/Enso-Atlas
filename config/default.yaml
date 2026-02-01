@@ -1,0 +1,62 @@
+# Enso Atlas Configuration
+
+# WSI Processing
+wsi:
+  patch_size: 224
+  magnification: 20  # 20x equivalent
+  tissue_threshold: 0.5  # Minimum tissue percentage per patch
+  min_tissue_area: 0.1  # Minimum tissue area fraction for slide
+  max_patches_coarse: 2000  # Initial sampling
+  max_patches_refine: 8000  # Adaptive refinement
+  
+# Embedding
+embedding:
+  model: "path-foundation"  # or "medsigLIP"
+  batch_size: 64
+  precision: "fp16"  # fp16 for storage efficiency
+  cache_dir: "data/embeddings"
+  
+# MIL Head
+mil:
+  architecture: "clam"  # clam, abmil, transmil
+  hidden_dim: 256
+  attention_heads: 1
+  dropout: 0.25
+  learning_rate: 0.0002
+  weight_decay: 0.00001
+  epochs: 200
+  patience: 20  # Early stopping
+  
+# Evidence Generation
+evidence:
+  top_k_patches: 12  # Top evidence patches to show
+  heatmap_alpha: 0.4  # Overlay transparency
+  similarity_k: 20  # Number of similar patches to retrieve
+  faiss_index_type: "IVF1024,Flat"  # FAISS index configuration
+  
+# MedGemma Reporting
+reporting:
+  model: "google/medgemma-4b-it"  # or path to local model
+  max_evidence_patches: 8  # Patches to include in prompt
+  max_output_tokens: 1024
+  temperature: 0.3
+  top_p: 0.9
+  
+# UI
+ui:
+  server_port: 7860
+  share: false
+  theme: "soft"
+  
+# Paths
+paths:
+  data_dir: "data"
+  cache_dir: "cache"
+  output_dir: "outputs"
+  model_dir: "models"
+  
+# Deployment
+deployment:
+  offline_mode: true
+  log_level: "INFO"
+  enable_telemetry: false  # No PHI logging
