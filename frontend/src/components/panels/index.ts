@@ -10,5 +10,6 @@ export { QuickStatsPanel, recordAnalysis, getStats, resetStats } from "./QuickSt
 export { OncologistSummaryView } from "./OncologistSummaryView";
 export { PathologistView } from "./PathologistView";
 export { UncertaintyPanel } from "./UncertaintyPanel";
+export { BatchAnalysisPanel } from "./BatchAnalysisPanel";
 export type { CaseNote } from "./CaseNotesPanel";
 export type { AnalysisStats } from "./QuickStatsPanel";

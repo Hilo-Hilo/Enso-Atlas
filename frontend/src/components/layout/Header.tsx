@@ -13,10 +13,11 @@ import {
   ChevronDown,
   Keyboard,
   Stethoscope,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type UserViewMode = "oncologist" | "pathologist";
+export type UserViewMode = "oncologist" | "pathologist" | "batch";
 
 interface HeaderProps {
   isConnected?: boolean;
@@ -101,6 +102,18 @@ export function Header({
             >
               <Microscope className="h-4 w-4" />
               <span className="hidden lg:inline">Pathologist</span>
+            </button>
+            <button
+              onClick={() => onViewModeChange("batch")}
+              className={cn(
+                "flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all",
+                viewMode === "batch"
+                  ? "bg-amber-600 text-white shadow-sm"
+                  : "text-gray-400 hover:text-gray-200"
+              )}
+            >
+              <Layers className="h-4 w-4" />
+              <span className="hidden lg:inline">Batch</span>
             </button>
           </div>
         )}

@@ -15,6 +15,7 @@ import {
   QuickStatsPanel,
   OncologistSummaryView,
   PathologistView,
+  BatchAnalysisPanel,
   recordAnalysis,
   getCaseNotes,
 } from "@/components/panels";
@@ -22,7 +23,7 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
-import { getDziUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation } from "@/lib/api";
+import { getDziUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides } from "@/lib/api";
 import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
 import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation } from "@/types";
 
@@ -163,6 +164,19 @@ export default function HomePage() {
 
     loadAnnotations();
   }, [selectedSlide]);
+
+  // Load slide list for keyboard navigation and batch mode
+  useEffect(() => {
+    const loadSlideList = async () => {
+      try {
+        const response = await getSlides();
+        setSlideList(response.slides);
+      } catch (err) {
+        console.error("Failed to load slide list:", err);
+      }
+    };
+    loadSlideList();
+  }, []);
 
   // Keyboard shortcut handlers
   const handleNavigateSlides = useCallback((direction: "up" | "down") => {
@@ -598,6 +612,25 @@ export default function HomePage() {
 
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden">
+        {/* Batch Mode - Full Width Panel */}
+        {userViewMode === "batch" ? (
+          <div className="flex-1 p-6 bg-gray-50">
+            <div className="max-w-6xl mx-auto h-full">
+              <BatchAnalysisPanel
+                onSlideSelect={(slideId) => {
+                  // Switch to oncologist mode and select the slide
+                  const slide = slideList.find((s) => s.id === slideId);
+                  if (slide) {
+                    setSelectedSlide(slide);
+                    setUserViewMode("oncologist");
+                  }
+                }}
+                className="h-full"
+              />
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Left Sidebar - Slide Selection */}
         <aside
           ref={slideSelectorRef as React.RefObject<HTMLElement>}
@@ -836,6 +869,8 @@ export default function HomePage() {
             </>
           )}
         </aside>
+        </>
+        )}
       </main>
 
       {/* Footer */}

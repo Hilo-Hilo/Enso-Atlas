@@ -281,3 +281,38 @@ export interface DecisionSupport {
   interpretation_note: string;
   caveat: string;
 }
+
+// Batch analysis types for clinical workflow
+export type UncertaintyLevel = "low" | "moderate" | "high" | "unknown";
+
+export interface BatchAnalysisResult {
+  slideId: string;
+  prediction: string;
+  score: number;
+  confidence: number;
+  patchesAnalyzed: number;
+  requiresReview: boolean;
+  uncertaintyLevel: UncertaintyLevel;
+  error?: string;
+}
+
+export interface BatchAnalysisSummary {
+  total: number;
+  completed: number;
+  failed: number;
+  responders: number;
+  nonResponders: number;
+  uncertain: number;
+  avgConfidence: number;
+  requiresReviewCount: number;
+}
+
+export interface BatchAnalyzeRequest {
+  slideIds: string[];
+}
+
+export interface BatchAnalyzeResponse {
+  results: BatchAnalysisResult[];
+  summary: BatchAnalysisSummary;
+  processingTimeMs: number;
+}

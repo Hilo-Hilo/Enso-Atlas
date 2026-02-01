@@ -215,6 +215,47 @@ class SimilarRequest(BaseModel):
     top_patches: int = Field(default=3, ge=1, le=10)
 
 
+class BatchAnalyzeRequest(BaseModel):
+    """Request for batch analysis of multiple slides."""
+    slide_ids: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="List of slide IDs to analyze (1-100 slides)"
+    )
+
+
+class BatchAnalysisResult(BaseModel):
+    """Result for a single slide in batch analysis."""
+    slide_id: str
+    prediction: str
+    score: float
+    confidence: float
+    patches_analyzed: int
+    requires_review: bool
+    uncertainty_level: str = "unknown"
+    error: Optional[str] = None
+
+
+class BatchAnalysisSummary(BaseModel):
+    """Summary statistics for batch analysis."""
+    total: int
+    completed: int
+    failed: int
+    responders: int
+    non_responders: int
+    uncertain: int
+    avg_confidence: float
+    requires_review_count: int
+
+
+class BatchAnalyzeResponse(BaseModel):
+    """Response from batch analysis endpoint."""
+    results: List[BatchAnalysisResult]
+    summary: BatchAnalysisSummary
+    processing_time_ms: float
+
+
 class ClassifyRegionRequest(BaseModel):
     """Request for tissue region classification."""
     x: int = Field(..., description="X coordinate of the region")
@@ -686,6 +727,149 @@ def create_app(
             patches_analyzed=len(embeddings),
             top_evidence=top_evidence,
             similar_cases=similar_cases[:5],
+        )
+
+    # ====== Batch Analysis Endpoint ======
+
+    @app.post("/api/analyze-batch", response_model=BatchAnalyzeResponse)
+    async def analyze_batch(request: BatchAnalyzeRequest):
+        """
+        Analyze multiple slides in batch for clinical workflow efficiency.
+
+        This endpoint processes multiple slides at once and returns:
+        - Individual results for each slide
+        - Summary statistics across all slides
+        - Priority ordering (uncertain cases flagged first)
+
+        Clinical use cases:
+        - Review incoming cases for a day/week
+        - Triage cases by prediction confidence
+        - Identify cases requiring human review
+        """
+        import time
+        start_time = time.time()
+
+        if classifier is None:
+            raise HTTPException(status_code=503, detail="Model not loaded")
+
+        results = []
+        for slide_id in request.slide_ids:
+            emb_path = embeddings_dir / f"{slide_id}.npy"
+
+            if not emb_path.exists():
+                # Record failed slide
+                results.append(BatchAnalysisResult(
+                    slide_id=slide_id,
+                    prediction="ERROR",
+                    score=0.0,
+                    confidence=0.0,
+                    patches_analyzed=0,
+                    requires_review=True,
+                    uncertainty_level="unknown",
+                    error=f"Slide {slide_id} not found",
+                ))
+                continue
+
+            try:
+                # Load embeddings
+                embeddings = np.load(emb_path)
+
+                # Run prediction
+                score, attention = classifier.predict(embeddings)
+                label = "RESPONDER" if score > 0.5 else "NON-RESPONDER"
+                confidence = abs(score - 0.5) * 2
+
+                # Determine uncertainty level and review requirement
+                if confidence < 0.3:
+                    uncertainty_level = "high"
+                    requires_review = True
+                elif confidence < 0.6:
+                    uncertainty_level = "moderate"
+                    requires_review = True
+                else:
+                    uncertainty_level = "low"
+                    requires_review = False
+
+                results.append(BatchAnalysisResult(
+                    slide_id=slide_id,
+                    prediction=label,
+                    score=float(score),
+                    confidence=float(confidence),
+                    patches_analyzed=len(embeddings),
+                    requires_review=requires_review,
+                    uncertainty_level=uncertainty_level,
+                    error=None,
+                ))
+
+                # Log to audit trail
+                log_audit_event(
+                    "batch_analysis_slide",
+                    slide_id,
+                    details={
+                        "prediction": label,
+                        "confidence": float(confidence),
+                        "requires_review": requires_review,
+                    },
+                )
+
+            except Exception as e:
+                logger.error(f"Batch analysis failed for {slide_id}: {e}")
+                results.append(BatchAnalysisResult(
+                    slide_id=slide_id,
+                    prediction="ERROR",
+                    score=0.0,
+                    confidence=0.0,
+                    patches_analyzed=0,
+                    requires_review=True,
+                    uncertainty_level="unknown",
+                    error=str(e),
+                ))
+
+        # Sort results: uncertain cases first (by confidence ascending)
+        results.sort(key=lambda r: (
+            0 if r.error else 1,  # Errors first
+            r.confidence if not r.error else 999,  # Then by confidence (lowest first)
+        ))
+
+        # Calculate summary statistics
+        completed = [r for r in results if r.error is None]
+        failed = [r for r in results if r.error is not None]
+        responders = [r for r in completed if r.prediction == "RESPONDER"]
+        non_responders = [r for r in completed if r.prediction == "NON-RESPONDER"]
+        uncertain = [r for r in completed if r.requires_review]
+        avg_confidence = (
+            sum(r.confidence for r in completed) / len(completed)
+            if completed else 0.0
+        )
+
+        summary = BatchAnalysisSummary(
+            total=len(results),
+            completed=len(completed),
+            failed=len(failed),
+            responders=len(responders),
+            non_responders=len(non_responders),
+            uncertain=len(uncertain),
+            avg_confidence=round(avg_confidence, 3),
+            requires_review_count=sum(1 for r in results if r.requires_review),
+        )
+
+        processing_time_ms = (time.time() - start_time) * 1000
+
+        # Log batch completion
+        log_audit_event(
+            "batch_analysis_completed",
+            details={
+                "total_slides": len(results),
+                "completed": len(completed),
+                "failed": len(failed),
+                "processing_time_ms": processing_time_ms,
+            },
+        )
+
+        return BatchAnalyzeResponse(
+            results=results,
+            summary=summary,
+            processing_time_ms=round(processing_time_ms, 2),
         )
 
     # ====== Uncertainty Quantification Endpoint ======

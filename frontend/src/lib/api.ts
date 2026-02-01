@@ -15,6 +15,10 @@ import type {
   Annotation,
   AnnotationRequest,
   AnnotationsResponse,
+  BatchAnalyzeRequest,
+  BatchAnalyzeResponse,
+  BatchAnalysisResult,
+  BatchAnalysisSummary,
 } from "@/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -499,4 +503,150 @@ export async function deleteAnnotation(
       method: "DELETE",
     }
   );
+}
+
+// ====== Batch Analysis API ======
+
+// Backend batch analysis response (snake_case)
+interface BackendBatchAnalysisResult {
+  slide_id: string;
+  prediction: string;
+  score: number;
+  confidence: number;
+  patches_analyzed: number;
+  requires_review: boolean;
+  uncertainty_level: string;
+  error?: string;
+}
+
+interface BackendBatchAnalysisSummary {
+  total: number;
+  completed: number;
+  failed: number;
+  responders: number;
+  non_responders: number;
+  uncertain: number;
+  avg_confidence: number;
+  requires_review_count: number;
+}
+
+interface BackendBatchAnalyzeResponse {
+  results: BackendBatchAnalysisResult[];
+  summary: BackendBatchAnalysisSummary;
+  processing_time_ms: number;
+}
+
+/**
+ * Analyze multiple slides in batch for clinical workflow efficiency.
+ * Returns individual results sorted by priority (uncertain cases first)
+ * along with summary statistics.
+ */
+export async function analyzeBatch(
+  slideIds: string[]
+): Promise<BatchAnalyzeResponse> {
+  const backend = await fetchApi<BackendBatchAnalyzeResponse>(
+    "/api/analyze-batch",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        slide_ids: slideIds,
+      }),
+    }
+  );
+
+  return {
+    results: backend.results.map((r) => ({
+      slideId: r.slide_id,
+      prediction: r.prediction,
+      score: r.score,
+      confidence: r.confidence,
+      patchesAnalyzed: r.patches_analyzed,
+      requiresReview: r.requires_review,
+      uncertaintyLevel: r.uncertainty_level as BatchAnalysisResult["uncertaintyLevel"],
+      error: r.error,
+    })),
+    summary: {
+      total: backend.summary.total,
+      completed: backend.summary.completed,
+      failed: backend.summary.failed,
+      responders: backend.summary.responders,
+      nonResponders: backend.summary.non_responders,
+      uncertain: backend.summary.uncertain,
+      avgConfidence: backend.summary.avg_confidence,
+      requiresReviewCount: backend.summary.requires_review_count,
+    },
+    processingTimeMs: backend.processing_time_ms,
+  };
+}
+
+/**
+ * Export batch analysis results to CSV format
+ */
+export function exportBatchResultsToCsv(
+  results: BatchAnalysisResult[],
+  summary: BatchAnalysisSummary
+): string {
+  const headers = [
+    "Slide ID",
+    "Prediction",
+    "Score",
+    "Confidence",
+    "Patches Analyzed",
+    "Requires Review",
+    "Uncertainty Level",
+    "Error",
+  ];
+
+  const rows = results.map((r) => [
+    r.slideId,
+    r.prediction,
+    r.score.toFixed(4),
+    r.confidence.toFixed(4),
+    r.patchesAnalyzed.toString(),
+    r.requiresReview ? "Yes" : "No",
+    r.uncertaintyLevel,
+    r.error || "",
+  ]);
+
+  // Add summary section
+  const summaryRows = [
+    [],
+    ["SUMMARY"],
+    ["Total Slides", summary.total.toString()],
+    ["Completed", summary.completed.toString()],
+    ["Failed", summary.failed.toString()],
+    ["Responders", summary.responders.toString()],
+    ["Non-Responders", summary.nonResponders.toString()],
+    ["Uncertain Cases", summary.uncertain.toString()],
+    ["Avg Confidence", summary.avgConfidence.toFixed(3)],
+    ["Requires Review", summary.requiresReviewCount.toString()],
+  ];
+
+  const csvContent = [
+    headers.join(","),
+    ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+    ...summaryRows.map((row) => row.join(",")),
+  ].join("\n");
+
+  return csvContent;
+}
+
+/**
+ * Download batch results as CSV file
+ */
+export function downloadBatchCsv(
+  results: BatchAnalysisResult[],
+  summary: BatchAnalysisSummary,
+  filename: string = "batch_analysis_results.csv"
+): void {
+  const csv = exportBatchResultsToCsv(results, summary);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
