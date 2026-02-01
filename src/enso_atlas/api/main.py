@@ -209,6 +209,11 @@ def create_app(
             "cuda_available": _check_cuda(),
             "slides_available": len(available_slides),
         }
+
+    @app.get("/api/health")
+    async def api_health_check():
+        """Health check endpoint (aliased for frontend compatibility)."""
+        return await health_check()
     
     @app.get("/")
     async def root():
