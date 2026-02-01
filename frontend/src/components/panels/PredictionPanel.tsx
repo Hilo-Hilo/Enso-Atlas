@@ -59,15 +59,20 @@ export function PredictionPanel({
     );
   }
 
+  // Convert numeric confidence to label
+  const confidenceLabel = 
+    prediction.confidence >= 0.7 ? "High" :
+    prediction.confidence >= 0.4 ? "Moderate" : "Low";
+  
   const confidenceVariant =
-    prediction.confidence === "high"
+    prediction.confidence >= 0.7
       ? "success"
-      : prediction.confidence === "moderate"
+      : prediction.confidence >= 0.4
       ? "warning"
       : "danger";
 
   // Calculate the probability bar width
-  const probabilityPercent = Math.round(prediction.probability * 100);
+  const probabilityPercent = Math.round(prediction.score * 100);
 
   return (
     <Card>
@@ -90,7 +95,7 @@ export function PredictionPanel({
         {/* Primary Prediction */}
         <div className="text-center py-2">
           <div className="flex items-center justify-center gap-2 mb-2">
-            {prediction.probability >= 0.5 ? (
+            {prediction.score >= 0.5 ? (
               <CheckCircle className="h-5 w-5 text-status-positive" />
             ) : (
               <AlertCircle className="h-5 w-5 text-status-negative" />
@@ -100,9 +105,7 @@ export function PredictionPanel({
             </span>
           </div>
           <Badge variant={confidenceVariant} size="md">
-            {prediction.confidence.charAt(0).toUpperCase() +
-              prediction.confidence.slice(1)}{" "}
-            Confidence
+            {confidenceLabel} Confidence
           </Badge>
         </div>
 
@@ -111,16 +114,16 @@ export function PredictionPanel({
           <div className="flex items-center justify-between text-sm">
             <span className="text-gray-600">Probability Score</span>
             <span className="font-mono font-medium text-gray-900">
-              {formatProbability(prediction.probability)}
+              {formatProbability(prediction.score)}
             </span>
           </div>
           <div className="relative h-3 bg-gray-100 rounded-full overflow-hidden">
             <div
               className={cn(
                 "absolute left-0 top-0 h-full rounded-full transition-all duration-500",
-                prediction.probability >= 0.7
+                prediction.score >= 0.7
                   ? "bg-status-positive"
-                  : prediction.probability >= 0.4
+                  : prediction.score >= 0.4
                   ? "bg-status-warning"
                   : "bg-status-negative"
               )}
