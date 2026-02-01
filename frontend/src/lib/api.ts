@@ -11,6 +11,10 @@ import type {
   ApiError,
   SemanticSearchResponse,
   SlideQCMetrics,
+  UncertaintyResult,
+  Annotation,
+  AnnotationRequest,
+  AnnotationsResponse,
 } from "@/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -330,4 +334,169 @@ export async function getSlideQC(slideId: string): Promise<SlideQCMetrics> {
     foldDetected: backend.fold_detected,
     overallQuality: backend.overall_quality,
   };
+}
+
+// Backend uncertainty response (snake_case)
+interface BackendUncertaintyResponse {
+  slide_id: string;
+  prediction: string;
+  probability: number;
+  uncertainty: number;
+  confidence_interval: [number, number];
+  is_uncertain: boolean;
+  requires_review: boolean;
+  uncertainty_level: "low" | "moderate" | "high";
+  clinical_recommendation: string;
+  patches_analyzed: number;
+  n_samples: number;
+  samples: number[];
+  top_evidence: Array<{
+    rank: number;
+    patch_index: number;
+    attention_weight: number;
+    attention_uncertainty: number;
+    coordinates: [number, number];
+  }>;
+}
+
+/**
+ * Analyze a slide with MC Dropout uncertainty quantification
+ */
+export async function analyzeWithUncertainty(
+  slideId: string,
+  nSamples: number = 20
+): Promise<UncertaintyResult> {
+  const backend = await fetchApi<BackendUncertaintyResponse>(
+    "/api/analyze-uncertainty",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        slide_id: slideId,
+        n_samples: nSamples,
+      }),
+    }
+  );
+
+  return {
+    slideId: backend.slide_id,
+    prediction: backend.prediction,
+    probability: backend.probability,
+    uncertainty: backend.uncertainty,
+    confidenceInterval: backend.confidence_interval,
+    isUncertain: backend.is_uncertain,
+    requiresReview: backend.requires_review,
+    uncertaintyLevel: backend.uncertainty_level,
+    clinicalRecommendation: backend.clinical_recommendation,
+    patchesAnalyzed: backend.patches_analyzed,
+    nSamples: backend.n_samples,
+    samples: backend.samples,
+    topEvidence: backend.top_evidence.map((e) => ({
+      rank: e.rank,
+      patchIndex: e.patch_index,
+      attentionWeight: e.attention_weight,
+      attentionUncertainty: e.attention_uncertainty,
+      coordinates: e.coordinates,
+    })),
+  };
+}
+
+// ====== Annotations API ======
+
+// Backend annotation response (snake_case)
+interface BackendAnnotation {
+  id: string;
+  slide_id: string;
+  type: string;
+  coordinates: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    points?: Array<{ x: number; y: number }>;
+  };
+  text?: string;
+  color?: string;
+  category?: string;
+  created_at: string;
+  created_by?: string;
+}
+
+interface BackendAnnotationsResponse {
+  slide_id: string;
+  annotations: BackendAnnotation[];
+  total: number;
+}
+
+/**
+ * Get all annotations for a slide
+ */
+export async function getAnnotations(slideId: string): Promise<AnnotationsResponse> {
+  const backend = await fetchApi<BackendAnnotationsResponse>(
+    `/api/slides/${slideId}/annotations`
+  );
+
+  return {
+    slideId: backend.slide_id,
+    annotations: backend.annotations.map((a) => ({
+      id: a.id,
+      slideId: a.slide_id,
+      type: a.type as Annotation["type"],
+      coordinates: a.coordinates,
+      text: a.text,
+      color: a.color,
+      category: a.category,
+      createdAt: a.created_at,
+      createdBy: a.created_by,
+    })),
+    total: backend.total,
+  };
+}
+
+/**
+ * Save a new annotation for a slide
+ */
+export async function saveAnnotation(
+  slideId: string,
+  annotation: AnnotationRequest
+): Promise<Annotation> {
+  const backend = await fetchApi<BackendAnnotation>(
+    `/api/slides/${slideId}/annotations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        type: annotation.type,
+        coordinates: annotation.coordinates,
+        text: annotation.text,
+        color: annotation.color,
+        category: annotation.category,
+      }),
+    }
+  );
+
+  return {
+    id: backend.id,
+    slideId: backend.slide_id,
+    type: backend.type as Annotation["type"],
+    coordinates: backend.coordinates,
+    text: backend.text,
+    color: backend.color,
+    category: backend.category,
+    createdAt: backend.created_at,
+    createdBy: backend.created_by,
+  };
+}
+
+/**
+ * Delete an annotation
+ */
+export async function deleteAnnotation(
+  slideId: string,
+  annotationId: string
+): Promise<void> {
+  await fetchApi<{ success: boolean }>(
+    `/api/slides/${slideId}/annotations/${annotationId}`,
+    {
+      method: "DELETE",
+    }
+  );
 }

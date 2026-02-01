@@ -417,3 +417,87 @@ class CLAMClassifier:
             prob, attention = self.predict(embeddings)
             results.append((prob, attention))
         return results
+
+    def predict_with_uncertainty(
+        self,
+        embeddings: np.ndarray,
+        n_samples: int = 20,
+    ) -> Dict[str, float | np.ndarray]:
+        """
+        Predict with MC Dropout uncertainty quantification.
+
+        Runs multiple forward passes with dropout enabled to estimate
+        predictive uncertainty. High variance indicates model uncertainty.
+
+        Args:
+            embeddings: Patch embeddings of shape (n_patches, embedding_dim)
+            n_samples: Number of Monte Carlo forward passes (default 20)
+
+        Returns:
+            Dictionary containing:
+            - prediction: "RESPONDER" or "NON-RESPONDER"
+            - probability: Mean predicted probability
+            - uncertainty: Standard deviation of predictions
+            - confidence_interval: [lower, upper] 95% CI bounds
+            - attention_weights: Mean attention weights
+            - attention_uncertainty: Std of attention weights
+            - samples: Raw probability samples (for visualization)
+            - is_uncertain: Boolean flag if uncertainty exceeds threshold
+        """
+        import torch
+
+        if self._model is None:
+            self._setup_device()
+            self._build_model()
+            self._model.to(self._device)
+            logger.warning("Using untrained model for prediction")
+
+        # Enable dropout for MC sampling by setting to train mode
+        # but we still don't compute gradients
+        self._model.train()
+
+        x = torch.from_numpy(embeddings).float().to(self._device)
+
+        predictions = []
+        attention_samples = []
+
+        with torch.no_grad():
+            for _ in range(n_samples):
+                prob, attention = self._model(x, return_attention=True)
+                predictions.append(prob.item())
+                attention_samples.append(attention.cpu().numpy())
+
+        # Set back to eval mode
+        self._model.eval()
+
+        # Compute statistics
+        predictions = np.array(predictions)
+        attention_samples = np.array(attention_samples)  # (n_samples, n_patches)
+
+        mean_pred = float(np.mean(predictions))
+        std_pred = float(np.std(predictions))
+
+        # 95% confidence interval (approximately 2 standard deviations)
+        ci_lower = float(max(0.0, mean_pred - 2 * std_pred))
+        ci_upper = float(min(1.0, mean_pred + 2 * std_pred))
+
+        # Mean attention weights and their uncertainty
+        mean_attention = np.mean(attention_samples, axis=0)
+        attention_std = np.std(attention_samples, axis=0)
+
+        # Uncertainty threshold for flagging cases
+        # Threshold chosen based on typical MC Dropout variance
+        UNCERTAINTY_THRESHOLD = 0.15
+        is_uncertain = std_pred > UNCERTAINTY_THRESHOLD
+
+        return {
+            "prediction": "RESPONDER" if mean_pred > 0.5 else "NON-RESPONDER",
+            "probability": mean_pred,
+            "uncertainty": std_pred,
+            "confidence_interval": [ci_lower, ci_upper],
+            "attention_weights": mean_attention,
+            "attention_uncertainty": attention_std,
+            "samples": predictions.tolist(),
+            "is_uncertain": is_uncertain,
+            "n_samples": n_samples,
+        }

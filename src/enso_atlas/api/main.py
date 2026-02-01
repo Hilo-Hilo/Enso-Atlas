@@ -116,6 +116,34 @@ class AnalyzeResponse(BaseModel):
     similar_cases: List[Dict[str, Any]]
 
 
+class UncertaintyRequest(BaseModel):
+    """Request for analysis with uncertainty quantification."""
+    slide_id: str = Field(..., min_length=1, max_length=256)
+    n_samples: int = Field(
+        default=20,
+        ge=5,
+        le=50,
+        description="Number of MC Dropout samples (5-50, default 20)"
+    )
+
+
+class UncertaintyResponse(BaseModel):
+    """Response with MC Dropout uncertainty quantification."""
+    slide_id: str
+    prediction: str
+    probability: float
+    uncertainty: float
+    confidence_interval: List[float]
+    is_uncertain: bool
+    requires_review: bool
+    uncertainty_level: str  # "low", "moderate", "high"
+    clinical_recommendation: str
+    patches_analyzed: int
+    n_samples: int
+    samples: List[float]
+    top_evidence: List[Dict[str, Any]]
+
+
 class ReportRequest(BaseModel):
     slide_id: str = Field(..., min_length=1, max_length=256)
     include_evidence: bool = True
@@ -658,6 +686,136 @@ def create_app(
             patches_analyzed=len(embeddings),
             top_evidence=top_evidence,
             similar_cases=similar_cases[:5],
+        )
+
+    # ====== Uncertainty Quantification Endpoint ======
+
+    @app.post("/api/analyze-uncertainty", response_model=UncertaintyResponse)
+    async def analyze_with_uncertainty(request: UncertaintyRequest):
+        """
+        Analyze a slide with MC Dropout uncertainty quantification.
+
+        Uses Monte Carlo Dropout to estimate predictive uncertainty by running
+        multiple forward passes with dropout enabled. High variance indicates
+        the model is uncertain about its prediction.
+
+        Clinical interpretation:
+        - Low uncertainty (< 0.10): Model is confident, prediction reliable
+        - Moderate uncertainty (0.10 - 0.20): Some uncertainty, review recommended
+        - High uncertainty (> 0.20): Model is uncertain, consider additional testing
+
+        When uncertainty is high, the system flags the case for human review
+        and provides conservative recommendations.
+        """
+        if classifier is None:
+            raise HTTPException(status_code=503, detail="Model not loaded")
+
+        slide_id = request.slide_id
+        emb_path = embeddings_dir / f"{slide_id}.npy"
+
+        if not emb_path.exists():
+            raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
+
+        # Load embeddings
+        embeddings = np.load(emb_path)
+
+        # Run MC Dropout prediction
+        try:
+            result = classifier.predict_with_uncertainty(
+                embeddings, n_samples=request.n_samples
+            )
+        except Exception as e:
+            logger.error(f"Uncertainty prediction failed: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Uncertainty prediction failed: {str(e)}"
+            )
+
+        # Determine uncertainty level and clinical recommendation
+        uncertainty = result["uncertainty"]
+        probability = result["probability"]
+
+        if uncertainty < 0.10:
+            uncertainty_level = "low"
+            requires_review = False
+            if result["prediction"] == "RESPONDER":
+                clinical_recommendation = (
+                    "Model shows high confidence in RESPONDER prediction. "
+                    "Consider proceeding with bevacizumab treatment evaluation."
+                )
+            else:
+                clinical_recommendation = (
+                    "Model shows high confidence in NON-RESPONDER prediction. "
+                    "Consider alternative treatment options."
+                )
+        elif uncertainty < 0.20:
+            uncertainty_level = "moderate"
+            requires_review = True
+            clinical_recommendation = (
+                "Model shows moderate uncertainty. Recommend pathologist review "
+                "of high-attention regions and correlation with clinical factors."
+            )
+        else:
+            uncertainty_level = "high"
+            requires_review = True
+            clinical_recommendation = (
+                "Model is uncertain about this case - consider additional testing. "
+                "Do not rely solely on this prediction. Recommend molecular profiling "
+                "and/or expert pathology consultation."
+            )
+
+        # Load coordinates for evidence patches
+        coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+        coords = None
+        if coord_path.exists():
+            coords = np.load(coord_path)
+
+        # Get top evidence patches using mean attention
+        attention = result["attention_weights"]
+        attention_std = result["attention_uncertainty"]
+        top_k = min(8, len(attention))
+        top_indices = np.argsort(attention)[-top_k:][::-1]
+
+        top_evidence = []
+        for i, idx in enumerate(top_indices):
+            patch_x = int(coords[idx][0]) if coords is not None else 0
+            patch_y = int(coords[idx][1]) if coords is not None else 0
+
+            # Include attention uncertainty for each patch
+            top_evidence.append({
+                "rank": i + 1,
+                "patch_index": int(idx),
+                "attention_weight": float(attention[idx]),
+                "attention_uncertainty": float(attention_std[idx]),
+                "coordinates": [patch_x, patch_y],
+            })
+
+        # Log audit event
+        log_audit_event(
+            "uncertainty_analysis_completed",
+            slide_id,
+            details={
+                "prediction": result["prediction"],
+                "uncertainty": uncertainty,
+                "uncertainty_level": uncertainty_level,
+                "requires_review": requires_review,
+            },
+        )
+
+        return UncertaintyResponse(
+            slide_id=slide_id,
+            prediction=result["prediction"],
+            probability=probability,
+            uncertainty=uncertainty,
+            confidence_interval=result["confidence_interval"],
+            is_uncertain=result["is_uncertain"],
+            requires_review=requires_review,
+            uncertainty_level=uncertainty_level,
+            clinical_recommendation=clinical_recommendation,
+            patches_analyzed=len(embeddings),
+            n_samples=result["n_samples"],
+            samples=result["samples"],
+            top_evidence=top_evidence,
         )
 
     # ====== Analysis History Endpoints ======

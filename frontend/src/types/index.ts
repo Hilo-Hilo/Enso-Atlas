@@ -184,6 +184,41 @@ export interface SemanticSearchResponse {
   results: SemanticSearchResult[];
 }
 
+// Annotation for pathologist review
+export interface Annotation {
+  id: string;
+  slideId: string;
+  type: "circle" | "rectangle" | "freehand" | "marker" | "note" | "measurement";
+  coordinates: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    points?: Array<{ x: number; y: number }>; // For freehand annotations
+  };
+  text?: string;
+  color?: string;
+  category?: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
+// Annotation request/response types
+export interface AnnotationRequest {
+  slideId: string;
+  type: Annotation["type"];
+  coordinates: Annotation["coordinates"];
+  text?: string;
+  color?: string;
+  category?: string;
+}
+
+export interface AnnotationsResponse {
+  slideId: string;
+  annotations: Annotation[];
+  total: number;
+}
+
 // Slide quality control metrics
 export interface SlideQCMetrics {
   slideId: string;
@@ -202,6 +237,29 @@ export interface GuidelineReference {
   section: string;
   recommendation: string;
   url?: string;
+}
+
+// Uncertainty quantification result from MC Dropout
+export interface UncertaintyResult {
+  slideId: string;
+  prediction: string;
+  probability: number;
+  uncertainty: number;
+  confidenceInterval: [number, number];
+  isUncertain: boolean;
+  requiresReview: boolean;
+  uncertaintyLevel: "low" | "moderate" | "high";
+  clinicalRecommendation: string;
+  patchesAnalyzed: number;
+  nSamples: number;
+  samples: number[];
+  topEvidence: Array<{
+    rank: number;
+    patchIndex: number;
+    attentionWeight: number;
+    attentionUncertainty: number;
+    coordinates: [number, number];
+  }>;
 }
 
 // Risk stratification levels

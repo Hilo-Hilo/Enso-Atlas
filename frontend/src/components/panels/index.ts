@@ -8,5 +8,7 @@ export { SemanticSearchPanel } from "./SemanticSearchPanel";
 export { CaseNotesPanel, getCaseNotes } from "./CaseNotesPanel";
 export { QuickStatsPanel, recordAnalysis, getStats, resetStats } from "./QuickStatsPanel";
 export { OncologistSummaryView } from "./OncologistSummaryView";
+export { PathologistView } from "./PathologistView";
+export { UncertaintyPanel } from "./UncertaintyPanel";
 export type { CaseNote } from "./CaseNotesPanel";
 export type { AnalysisStats } from "./QuickStatsPanel";
