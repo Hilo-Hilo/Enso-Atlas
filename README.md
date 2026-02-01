@@ -2,7 +2,7 @@
 
 **On-Prem Pathology Evidence Engine for Treatment-Response Insight**
 
-[![MedGemma Impact Challenge](https://img.shields.io/badge/Kaggle-MedGemma%20Impact%20Challenge-blue)](https://www.kaggle.com/competitions/medgemma-impact-challenge)
+[![MedGemma Impact Challenge](https://img.shields.io/badge/Kaggle-MedGemma%20Impact%20Challenge-blue)](https://www.kaggle.com/competitions/med-gemma-impact-challenge)
 
 ## Overview
 
