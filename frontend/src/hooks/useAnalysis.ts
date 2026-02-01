@@ -19,7 +19,7 @@ interface UseAnalysisState {
 }
 
 interface UseAnalysisReturn extends UseAnalysisState {
-  analyze: (request: AnalysisRequest) => Promise<void>;
+  analyze: (request: AnalysisRequest) => Promise<AnalysisResponse | null>;
   generateSlideReport: (request: ReportRequest) => Promise<void>;
   clearResults: () => void;
   clearError: () => void;
@@ -34,7 +34,7 @@ export function useAnalysis(): UseAnalysisReturn {
     error: null,
   });
 
-  const analyze = useCallback(async (request: AnalysisRequest) => {
+  const analyze = useCallback(async (request: AnalysisRequest): Promise<AnalysisResponse | null> => {
     setState((prev) => ({
       ...prev,
       isAnalyzing: true,
@@ -49,6 +49,7 @@ export function useAnalysis(): UseAnalysisReturn {
         analysisResult: result,
         report: result.report || null,
       }));
+      return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Analysis failed";
       setState((prev) => ({
@@ -56,6 +57,7 @@ export function useAnalysis(): UseAnalysisReturn {
         isAnalyzing: false,
         error: message,
       }));
+      return null;
     }
   }, []);
 
