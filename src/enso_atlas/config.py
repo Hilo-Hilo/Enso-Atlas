@@ -2,10 +2,11 @@
 Configuration management for Enso Atlas.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-import yaml
 
 
 @dataclass
@@ -32,6 +33,7 @@ class EmbeddingConfig:
 class MILConfig:
     """MIL head configuration."""
     architecture: str = "clam"
+    input_dim: int = 384
     hidden_dim: int = 256
     attention_heads: int = 1
     dropout: float = 0.25
@@ -100,6 +102,8 @@ class AtlasConfig:
     @classmethod
     def from_yaml(cls, path: str | Path) -> "AtlasConfig":
         """Load configuration from YAML file."""
+        import yaml
+
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
@@ -120,6 +124,8 @@ class AtlasConfig:
     
     def to_yaml(self, path: str | Path) -> None:
         """Save configuration to YAML file."""
+        import yaml
+
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         

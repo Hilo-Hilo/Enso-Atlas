@@ -7,7 +7,6 @@ Uses the Path Foundation model from Google Health AI:
 - Architecture: ViT-S
 """
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Union
 import logging
@@ -15,16 +14,9 @@ import hashlib
 
 import numpy as np
 
+from enso_atlas.config import EmbeddingConfig
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class EmbeddingConfig:
-    """Embedding model configuration."""
-    model: str = "path-foundation"
-    batch_size: int = 64
-    precision: str = "fp16"
-    cache_dir: str = "data/embeddings"
 
 
 class PathFoundationEmbedder:

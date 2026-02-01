@@ -9,28 +9,15 @@ This module provides the attention-based MIL head for slide-level classification
 with interpretable attention weights for evidence generation.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Tuple, Optional, List, Dict
 import logging
 
 import numpy as np
 
+from enso_atlas.config import MILConfig
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class MILConfig:
-    """MIL head configuration."""
-    architecture: str = "clam"
-    hidden_dim: int = 256
-    attention_heads: int = 1
-    dropout: float = 0.25
-    learning_rate: float = 0.0002
-    weight_decay: float = 1e-5
-    epochs: int = 200
-    patience: int = 20
-    input_dim: int = 384  # Path Foundation embedding dim
 
 
 class AttentionMIL:

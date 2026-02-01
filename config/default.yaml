@@ -19,6 +19,7 @@ embedding:
 # MIL Head
 mil:
   architecture: "clam"  # clam, abmil, transmil
+  input_dim: 384  # Embedding dimension (Path Foundation)
   hidden_dim: 256
   attention_heads: 1
   dropout: 0.25
