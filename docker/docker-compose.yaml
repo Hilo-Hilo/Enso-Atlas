@@ -1,20 +1,25 @@
-version: '3.8'
-
 services:
   enso-atlas:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: enso-atlas
-    runtime: nvidia
+    # Use gpus: all (Compose v2) instead of deprecated runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - ENSO_CONFIG=/app/config/default.yaml
-      - TRANSFORMERS_CACHE=/app/cache/huggingface
-      - HF_HOME=/app/cache/huggingface
-      # Offline mode - no external connections
-      - TRANSFORMERS_OFFLINE=1
-      - HF_HUB_OFFLINE=1
+      NVIDIA_VISIBLE_DEVICES: all
+      ENSO_CONFIG: /app/config/default.yaml
+      TRANSFORMERS_CACHE: /app/cache/huggingface
+      HF_HOME: /app/cache/huggingface
+      # Offline mode - set to 0 for first-time model download
+      TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-0}"
+      HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
     volumes:
       # Persistent data storage
       - atlas-data:/app/data
