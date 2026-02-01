@@ -236,8 +236,19 @@ def create_app(
             with open(labels_path) as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    labels[row["slide_id"]] = row.get("label", "")
-
+                    # Handle different CSV formats
+                    if "slide_id" in row:
+                        sid = row["slide_id"]
+                        label = row.get("label", "")
+                    else:
+                        # Alternative format: slide_file contains filename with .svs
+                        slide_file = row.get("slide_file", "")
+                        sid = slide_file.replace(".svs", "").replace(".SVS", "")
+                        # Derive label from treatment_response
+                        response = row.get("treatment_response", "")
+                        label = "1" if response == "responder" else "0" if response == "non-responder" else ""
+                    if sid:
+                        labels[sid] = label
         for slide_id in available_slides:
             # Get patch count
             emb_path = embeddings_dir / f"{slide_id}.npy"
