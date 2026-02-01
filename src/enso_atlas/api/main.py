@@ -38,7 +38,7 @@ def _check_cuda() -> bool:
 
 # Request/Response Models
 class AnalyzeRequest(BaseModel):
-    slide_id: str
+    slide_id: str = Field(..., min_length=1, max_length=256)
     generate_report: bool = False
 
 
@@ -53,7 +53,7 @@ class AnalyzeResponse(BaseModel):
 
 
 class ReportRequest(BaseModel):
-    slide_id: str
+    slide_id: str = Field(..., min_length=1, max_length=256)
     include_evidence: bool = True
     include_similar: bool = True
 
@@ -95,7 +95,7 @@ class EmbedResponse(BaseModel):
 
 class SimilarRequest(BaseModel):
     """Request for similar case search."""
-    slide_id: str
+    slide_id: str = Field(..., min_length=1, max_length=256)
     k: int = Field(default=5, ge=1, le=20)
     top_patches: int = Field(default=3, ge=1, le=10)
 
