@@ -177,6 +177,7 @@ def create_app(
         from ..mil.clam import CLAMClassifier
         from ..evidence.generator import EvidenceGenerator
         from ..embedding.embedder import PathFoundationEmbedder, MedSigLIPEmbedder, MedSigLIPConfig
+        from ..reporting.medgemma import MedGemmaReporter, ReportingConfig
 
         # Load MIL classifier
         config = MILConfig(input_dim=384, hidden_dim=128)
