@@ -166,18 +166,57 @@ def create_app(
     embedder = None
     medsiglip_embedder = None
     reporter = None
-    available_slides = []
     slide_siglip_embeddings = {}  # Cache for MedSigLIP embeddings per slide
+    available_slides = []
+    # Directories (may be updated at startup if we fall back to demo data)
+    slides_dir: Path = embeddings_dir.parent / 'slides'
 
     @app.on_event("startup")
     async def load_models():
-        nonlocal classifier, evidence_gen, embedder, medsiglip_embedder, reporter, available_slides
+        nonlocal classifier, evidence_gen, embedder, medsiglip_embedder, reporter, available_slides, slides_dir, embeddings_dir
 
         from ..config import MILConfig, EvidenceConfig, EmbeddingConfig
         from ..mil.clam import CLAMClassifier
         from ..evidence.generator import EvidenceGenerator
         from ..embedding.embedder import PathFoundationEmbedder, MedSigLIPEmbedder, MedSigLIPConfig
         from ..reporting.medgemma import MedGemmaReporter, ReportingConfig
+
+
+        def _count_embeddings(p: Path) -> int:
+            if not p.exists() or not p.is_dir():
+                return 0
+            return sum(1 for f in p.glob('*.npy') if not f.name.endswith('_coords.npy'))
+
+        def _count_slides(p: Path) -> int:
+            if not p.exists() or not p.is_dir():
+                return 0
+            exts = {'.svs', '.tiff', '.tif', '.ndpi', '.mrxs', '.vms', '.scn'}
+            return sum(1 for f in p.iterdir() if f.is_file() and f.suffix.lower() in exts)
+
+        primary_embeddings_dir = embeddings_dir
+        primary_slides_dir = slides_dir
+        primary_n = _count_embeddings(primary_embeddings_dir)
+        primary_s = _count_slides(primary_slides_dir)
+        logger.info(f'Embeddings dir: {primary_embeddings_dir} (npy={primary_n})')
+        logger.info(f'Slides dir: {primary_slides_dir} (slides={primary_s})')
+
+        if primary_n == 0:
+            demo_embeddings_dir = primary_embeddings_dir.parent / 'demo' / 'embeddings'
+            demo_slides_dir = demo_embeddings_dir.parent / 'slides'
+            demo_n = _count_embeddings(demo_embeddings_dir)
+            demo_s = _count_slides(demo_slides_dir)
+            if demo_n > 0:
+                logger.warning(
+                    f'No embeddings found in {primary_embeddings_dir}; falling back to demo embeddings at {demo_embeddings_dir} (npy={demo_n})'
+                )
+                embeddings_dir = demo_embeddings_dir
+                slides_dir = demo_slides_dir
+                logger.info(f'Using embeddings dir: {embeddings_dir}')
+                logger.info(f'Using slides dir: {slides_dir} (slides={demo_s})')
+            else:
+                logger.warning(
+                    f'No embeddings found in {primary_embeddings_dir} and no demo embeddings found at {demo_embeddings_dir}.'
+                )
 
         # Load MIL classifier
         config = MILConfig(input_dim=384, hidden_dim=128)
@@ -866,8 +905,6 @@ reviewed and validated by qualified pathologists before any clinical decision-ma
 
     # WSI / DZI Tile Serving
     # Cache for OpenSlide objects and DeepZoom generators
-    # slides are at data/slides (not inside demo/)
-    slides_dir = embeddings_dir.parent / "slides"
     wsi_cache: Dict[str, Any] = {}
     logger.info(f"Slides directory: {slides_dir}")
 
