@@ -13,6 +13,7 @@ import {
   SemanticSearchPanel,
   CaseNotesPanel,
   QuickStatsPanel,
+  OncologistSummaryView,
   recordAnalysis,
   getCaseNotes,
 } from "@/components/panels";
@@ -35,6 +36,9 @@ export default function HomePage() {
   const [selectedSlide, setSelectedSlide] = useState<SlideInfo | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [selectedPatchId, setSelectedPatchId] = useState<string | undefined>();
+
+  // View mode: "wsi" for full WSI viewer, "summary" for oncologist summary
+  const [viewMode, setViewMode] = useState<"wsi" | "summary">("wsi");
 
   // Patch zoom modal state
   const [zoomModalOpen, setZoomModalOpen] = useState(false);

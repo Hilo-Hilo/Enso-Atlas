@@ -228,6 +228,19 @@ export function ReportPanel({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* UNCALIBRATED WARNING BANNER */}
+        <div className="flex items-center gap-3 px-4 py-3 bg-amber-100 border-2 border-amber-400 rounded-lg">
+          <FlaskConical className="h-5 w-5 text-amber-700 shrink-0" />
+          <div>
+            <span className="text-sm font-bold text-amber-800 uppercase tracking-wide">
+              Uncalibrated Model - Research Use Only
+            </span>
+            <p className="text-xs text-amber-700 mt-0.5">
+              Probabilities are raw model outputs. Not validated for clinical decision-making.
+            </p>
+          </div>
+        </div>
+
         {/* Report Header - Print Only */}
         <div className="hidden print:block mb-6 pb-4 border-b-2 border-gray-200">
           <h1 className="text-xl font-bold text-gray-900">
@@ -241,13 +254,50 @@ export function ReportPanel({
           </p>
         </div>
 
+        {/* ACTIONABLE NEXT STEPS - Moved to top for visibility */}
+        <ReportSection
+          title="Suggested Next Steps"
+          icon={<Stethoscope className="h-4 w-4 text-clinical-600" />}
+          isExpanded={expandedSections.has("nextSteps")}
+          onToggle={() => toggleSection("nextSteps")}
+          variant="info"
+          priority="high"
+        >
+          <div className="space-y-3">
+            <p className="text-xs text-blue-700 mb-3">
+              Based on the analysis findings, consider the following clinical actions:
+            </p>
+            <ol className="space-y-2">
+              {report.suggestedNextSteps.map((step, index) => (
+                <li
+                  key={index}
+                  className="flex items-start gap-3 text-sm text-blue-800"
+                >
+                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-200 text-blue-700 text-xs font-bold shrink-0">
+                    {index + 1}
+                  </span>
+                  <span className="leading-relaxed">{step}</span>
+                </li>
+              ))}
+            </ol>
+            {/* Additional context based on prediction */}
+            <div className="mt-4 pt-3 border-t border-blue-200">
+              <p className="text-xs text-blue-700 leading-relaxed">
+                <strong>Interpretation guidance:</strong> These recommendations are generated 
+                based on the morphological patterns identified by the model. They should be 
+                evaluated in the context of the patient's complete clinical picture, imaging 
+                findings, and other laboratory results.
+              </p>
+            </div>
+          </div>
+        </ReportSection>
+
         {/* Summary Section */}
         <ReportSection
           title="Clinical Summary"
           icon={<FileText className="h-4 w-4" />}
           isExpanded={expandedSections.has("summary")}
           onToggle={() => toggleSection("summary")}
-          priority="high"
         >
           <div className="prose prose-sm max-w-none">
             <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
@@ -276,7 +326,7 @@ export function ReportPanel({
           </div>
         </ReportSection>
 
-        {/* Evidence Section */}
+        {/* Evidence Section with Tissue Types */}
         <ReportSection
           title="Supporting Evidence"
           icon={<Lightbulb className="h-4 w-4" />}
@@ -285,31 +335,45 @@ export function ReportPanel({
           badge={`${report.evidence.length} patches`}
         >
           <div className="space-y-3">
-            {report.evidence.map((item, index) => (
-              <div
-                key={item.patchId}
-                className="p-3 bg-gray-50 rounded-lg border border-gray-100"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-gray-600">
-                    Evidence #{index + 1}
-                  </span>
-                  <span className="text-xs font-mono text-gray-400">
-                    ({item.coordsLevel0[0].toLocaleString()},{" "}
-                    {item.coordsLevel0[1].toLocaleString()})
-                  </span>
-                </div>
-                <p className="text-sm text-gray-700 mb-2 leading-relaxed">
-                  {item.morphologyDescription}
-                </p>
-                <div className="flex items-start gap-2 p-2 bg-clinical-50 rounded border border-clinical-100">
-                  <ArrowRight className="h-3.5 w-3.5 text-clinical-600 mt-0.5 shrink-0" />
-                  <p className="text-xs text-clinical-700 italic leading-relaxed">
-                    {item.whyThisPatchMatters}
+            {report.evidence.map((item, index) => {
+              const tissueType = inferTissueType(item.morphologyDescription);
+              const tissueInfo = TISSUE_TYPE_LABELS[tissueType];
+              return (
+                <div
+                  key={item.patchId}
+                  className="p-3 bg-gray-50 rounded-lg border border-gray-100"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-600">
+                        Evidence #{index + 1}
+                      </span>
+                      {/* Tissue Type Badge */}
+                      <span className={cn(
+                        "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-white border",
+                        tissueInfo.color
+                      )}>
+                        <Circle className="h-2 w-2 fill-current" />
+                        {tissueInfo.label}
+                      </span>
+                    </div>
+                    <span className="text-xs font-mono text-gray-400">
+                      ({item.coordsLevel0[0].toLocaleString()},{" "}
+                      {item.coordsLevel0[1].toLocaleString()})
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-700 mb-2 leading-relaxed">
+                    {item.morphologyDescription}
                   </p>
+                  <div className="flex items-start gap-2 p-2 bg-clinical-50 rounded border border-clinical-100">
+                    <ArrowRight className="h-3.5 w-3.5 text-clinical-600 mt-0.5 shrink-0" />
+                    <p className="text-xs text-clinical-700 italic leading-relaxed">
+                      {item.whyThisPatchMatters}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </ReportSection>
 
@@ -363,29 +427,6 @@ export function ReportPanel({
             </div>
           </ReportSection>
         )}
-
-        {/* Recommendations Section */}
-        <ReportSection
-          title="Suggested Next Steps"
-          icon={<Lightbulb className="h-4 w-4 text-blue-500" />}
-          isExpanded={expandedSections.has("nextSteps")}
-          onToggle={() => toggleSection("nextSteps")}
-          variant="info"
-        >
-          <ol className="space-y-2">
-            {report.suggestedNextSteps.map((step, index) => (
-              <li
-                key={index}
-                className="flex items-start gap-3 text-sm text-blue-800"
-              >
-                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs font-bold shrink-0">
-                  {index + 1}
-                </span>
-                <span className="leading-relaxed">{step}</span>
-              </li>
-            ))}
-          </ol>
-        </ReportSection>
 
         {/* Limitations Section */}
         <ReportSection

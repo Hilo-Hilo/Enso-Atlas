@@ -7,5 +7,6 @@ export { SlideSelector } from "./SlideSelector";
 export { SemanticSearchPanel } from "./SemanticSearchPanel";
 export { CaseNotesPanel, getCaseNotes } from "./CaseNotesPanel";
 export { QuickStatsPanel, recordAnalysis, getStats, resetStats } from "./QuickStatsPanel";
+export { OncologistSummaryView } from "./OncologistSummaryView";
 export type { CaseNote } from "./CaseNotesPanel";
 export type { AnalysisStats } from "./QuickStatsPanel";

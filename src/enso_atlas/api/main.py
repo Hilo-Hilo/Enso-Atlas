@@ -100,6 +100,20 @@ class SimilarRequest(BaseModel):
     top_patches: int = Field(default=3, ge=1, le=10)
 
 
+class ClassifyRegionRequest(BaseModel):
+    """Request for tissue region classification."""
+    x: int = Field(..., description="X coordinate of the region")
+    y: int = Field(..., description="Y coordinate of the region")
+    patch_index: Optional[int] = Field(None, description="Optional patch index for deterministic classification")
+
+
+class ClassifyRegionResponse(BaseModel):
+    """Response from tissue region classification."""
+    tissue_type: str
+    confidence: float
+    description: str
+
+
 class SimilarResponse(BaseModel):
     """Response from similar case search."""
     slide_id: str
