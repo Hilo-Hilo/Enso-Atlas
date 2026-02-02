@@ -14,3 +14,4 @@ export {
   SkeletonSimilarCases,
   SkeletonReport,
 } from "./Skeleton";
+export { NetworkStatus, useNetworkStatus } from "./NetworkStatus";

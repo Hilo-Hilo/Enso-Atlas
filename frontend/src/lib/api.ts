@@ -1,5 +1,5 @@
 // Enso Atlas - API Client
-// Backend communication utilities
+// Backend communication utilities with robust error handling
 
 import type {
   AnalysisRequest,
@@ -23,52 +23,220 @@ import type {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Configuration for retry behavior
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  baseDelayMs: 1000,
+  maxDelayMs: 10000,
+  retryableStatusCodes: [408, 429, 500, 502, 503, 504],
+};
+
+// Default timeout for API requests (30 seconds)
+const DEFAULT_TIMEOUT_MS = 30000;
+
 // Custom error class for API errors
 export class AtlasApiError extends Error {
   code: string;
   details?: Record<string, unknown>;
+  statusCode?: number;
+  isRetryable: boolean;
+  isTimeout: boolean;
+  isNetworkError: boolean;
 
-  constructor(error: ApiError) {
+  constructor(error: ApiError & { statusCode?: number; isTimeout?: boolean; isNetworkError?: boolean }) {
     super(error.message);
     this.name = "AtlasApiError";
     this.code = error.code;
     this.details = error.details;
+    this.statusCode = error.statusCode;
+    this.isTimeout = error.isTimeout || false;
+    this.isNetworkError = error.isNetworkError || false;
+    this.isRetryable = this.isTimeout || 
+                       this.isNetworkError || 
+                       (this.statusCode !== undefined && 
+                        RETRY_CONFIG.retryableStatusCodes.includes(this.statusCode));
+  }
+
+  /**
+   * Get a user-friendly error message
+   */
+  getUserMessage(): string {
+    if (this.isTimeout) {
+      return "The request timed out. Please try again.";
+    }
+    if (this.isNetworkError) {
+      return "Unable to connect to the server. Please check your connection.";
+    }
+    if (this.statusCode === 429) {
+      return "Too many requests. Please wait a moment and try again.";
+    }
+    if (this.statusCode && this.statusCode >= 500) {
+      return "Server error. Our team has been notified.";
+    }
+    if (this.statusCode === 404) {
+      return "The requested resource was not found.";
+    }
+    if (this.statusCode === 403) {
+      return "You do not have permission to perform this action.";
+    }
+    if (this.statusCode === 401) {
+      return "Authentication required. Please log in.";
+    }
+    return this.message || "An unexpected error occurred.";
   }
 }
 
-// Generic fetch wrapper with error handling
+/**
+ * Sleep utility for retry delays
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Calculate exponential backoff delay
+ */
+function getRetryDelay(attempt: number): number {
+  const delay = RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt);
+  // Add jitter (0-25% of delay)
+  const jitter = delay * Math.random() * 0.25;
+  return Math.min(delay + jitter, RETRY_CONFIG.maxDelayMs);
+}
+
+/**
+ * Create an AbortController with timeout
+ */
+function createTimeoutController(timeoutMs: number): { controller: AbortController; timeoutId: ReturnType<typeof setTimeout> } {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return { controller, timeoutId };
+}
+
+/**
+ * Generic fetch wrapper with error handling, retries, and timeout
+ */
 async function fetchApi<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  config: { 
+    timeoutMs?: number; 
+    retries?: number;
+    skipRetry?: boolean;
+  } = {}
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
+  const timeoutMs = config.timeoutMs || DEFAULT_TIMEOUT_MS;
+  const maxRetries = config.skipRetry ? 0 : (config.retries ?? RETRY_CONFIG.maxRetries);
 
   const defaultHeaders: HeadersInit = {
     "Content-Type": "application/json",
   };
 
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...defaultHeaders,
-      ...options.headers,
-    },
-  });
+  let lastError: AtlasApiError | null = null;
 
-  if (!response.ok) {
-    let errorData: ApiError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const { controller, timeoutId } = createTimeoutController(timeoutMs);
+
     try {
-      errorData = await response.json();
-    } catch {
-      errorData = {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          ...defaultHeaders,
+          ...options.headers,
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        let errorData: ApiError;
+        try {
+          errorData = await response.json();
+        } catch {
+          errorData = {
+            code: `HTTP_${response.status}`,
+            message: `HTTP ${response.status}: ${response.statusText}`,
+          };
+        }
+        
+        const apiError = new AtlasApiError({
+          ...errorData,
+          statusCode: response.status,
+        });
+
+        // Only retry if error is retryable and we have retries left
+        if (apiError.isRetryable && attempt < maxRetries) {
+          lastError = apiError;
+          const delay = getRetryDelay(attempt);
+          console.warn(`[API] Retryable error on ${endpoint}, attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delay}ms...`);
+          await sleep(delay);
+          continue;
+        }
+
+        throw apiError;
+      }
+
+      return response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+
+      // Handle AbortController timeout
+      if (error instanceof DOMException && error.name === "AbortError") {
+        const timeoutError = new AtlasApiError({
+          code: "TIMEOUT",
+          message: `Request to ${endpoint} timed out after ${timeoutMs}ms`,
+          isTimeout: true,
+        });
+
+        if (attempt < maxRetries) {
+          lastError = timeoutError;
+          const delay = getRetryDelay(attempt);
+          console.warn(`[API] Timeout on ${endpoint}, attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delay}ms...`);
+          await sleep(delay);
+          continue;
+        }
+
+        throw timeoutError;
+      }
+
+      // Handle network errors
+      if (error instanceof TypeError && error.message.includes("fetch")) {
+        const networkError = new AtlasApiError({
+          code: "NETWORK_ERROR",
+          message: "Failed to connect to the server. Please check your network connection.",
+          isNetworkError: true,
+        });
+
+        if (attempt < maxRetries) {
+          lastError = networkError;
+          const delay = getRetryDelay(attempt);
+          console.warn(`[API] Network error on ${endpoint}, attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delay}ms...`);
+          await sleep(delay);
+          continue;
+        }
+
+        throw networkError;
+      }
+
+      // Re-throw AtlasApiError as-is
+      if (error instanceof AtlasApiError) {
+        throw error;
+      }
+
+      // Wrap unknown errors
+      throw new AtlasApiError({
         code: "UNKNOWN_ERROR",
-        message: `HTTP ${response.status}: ${response.statusText}`,
-      };
+        message: error instanceof Error ? error.message : "An unknown error occurred",
+      });
     }
-    throw new AtlasApiError(errorData);
   }
 
-  return response.json();
+  // Should not reach here, but just in case
+  throw lastError || new AtlasApiError({
+    code: "UNKNOWN_ERROR",
+    message: "Request failed after all retries",
+  });
 }
 
 // API Client functions
@@ -129,7 +297,7 @@ export async function getSlides(): Promise<SlidesListResponse> {
  * Get details for a specific slide
  */
 export async function getSlide(slideId: string): Promise<SlideInfo> {
-  return fetchApi<SlideInfo>(`/api/slides/${slideId}`);
+  return fetchApi<SlideInfo>(`/api/slides/${encodeURIComponent(slideId)}`);
 }
 
 // Backend analysis response
@@ -156,14 +324,19 @@ interface BackendAnalysisResponse {
 
 /**
  * Analyze a slide with the pathology model
+ * Uses longer timeout for potentially slow inference
  */
 export async function analyzeSlide(
   request: AnalysisRequest
 ): Promise<AnalysisResponse> {
-  const backend = await fetchApi<BackendAnalysisResponse>("/api/analyze", {
-    method: "POST",
-    body: JSON.stringify({ slide_id: request.slideId }),
-  });
+  const backend = await fetchApi<BackendAnalysisResponse>(
+    "/api/analyze",
+    {
+      method: "POST",
+      body: JSON.stringify({ slide_id: request.slideId }),
+    },
+    { timeoutMs: 60000 } // 60 second timeout for analysis
+  );
   
   // Adapt backend response to frontend format
   return {
@@ -215,63 +388,95 @@ export async function analyzeSlide(
 
 /**
  * Generate a structured report for a slide
+ * Uses longer timeout for MedGemma inference
  */
 export async function generateReport(
   request: ReportRequest
 ): Promise<StructuredReport> {
-  return fetchApi<StructuredReport>("/api/report", {
-    method: "POST",
-    body: JSON.stringify(request),
-  });
+  return fetchApi<StructuredReport>(
+    "/api/report",
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    },
+    { timeoutMs: 90000 } // 90 second timeout for report generation
+  );
 }
 
 /**
  * Get Deep Zoom Image (DZI) metadata for OpenSeadragon
  */
 export function getDziUrl(slideId: string): string {
-  return `${API_BASE_URL}/api/slides/${slideId}/dzi`;
+  return `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/dzi`;
 }
 
 /**
  * Get heatmap overlay image URL
  */
 export function getHeatmapUrl(slideId: string): string {
-  return `${API_BASE_URL}/api/slides/${slideId}/heatmap`;
+  return `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/heatmap`;
 }
 
 /**
  * Get thumbnail URL for a slide
  */
 export function getThumbnailUrl(slideId: string): string {
-  return `${API_BASE_URL}/api/slides/${slideId}/thumbnail`;
+  return `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/thumbnail`;
 }
 
 /**
  * Get patch image URL
  */
 export function getPatchUrl(slideId: string, patchId: string): string {
-  return `${API_BASE_URL}/api/slides/${slideId}/patches/${patchId}`;
+  return `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/patches/${encodeURIComponent(patchId)}`;
 }
 
 /**
  * Export report as PDF
  */
 export async function exportReportPdf(slideId: string): Promise<Blob> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/slides/${slideId}/report/pdf`,
-    {
-      method: "GET",
-    }
-  );
+  const { controller, timeoutId } = createTimeoutController(60000);
+  
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/report/pdf`,
+      {
+        method: "GET",
+        signal: controller.signal,
+      }
+    );
 
-  if (!response.ok) {
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new AtlasApiError({
+        code: "EXPORT_FAILED",
+        message: "Failed to export report as PDF",
+        statusCode: response.status,
+      });
+    }
+
+    return response.blob();
+  } catch (error) {
+    clearTimeout(timeoutId);
+    
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new AtlasApiError({
+        code: "TIMEOUT",
+        message: "PDF export timed out",
+        isTimeout: true,
+      });
+    }
+    
+    if (error instanceof AtlasApiError) {
+      throw error;
+    }
+    
     throw new AtlasApiError({
       code: "EXPORT_FAILED",
-      message: "Failed to export report as PDF",
+      message: error instanceof Error ? error.message : "Failed to export PDF",
     });
   }
-
-  return response.blob();
 }
 
 /**
@@ -280,14 +485,19 @@ export async function exportReportPdf(slideId: string): Promise<Blob> {
 export async function exportReportJson(
   slideId: string
 ): Promise<StructuredReport> {
-  return fetchApi<StructuredReport>(`/api/slides/${slideId}/report/json`);
+  return fetchApi<StructuredReport>(`/api/slides/${encodeURIComponent(slideId)}/report/json`);
 }
 
 /**
  * Health check for the backend API
+ * Uses short timeout and no retries for quick feedback
  */
 export async function healthCheck(): Promise<{ status: string; version: string }> {
-  return fetchApi<{ status: string; version: string }>("/api/health");
+  return fetchApi<{ status: string; version: string }>(
+    "/api/health",
+    {},
+    { timeoutMs: 5000, skipRetry: true }
+  );
 }
 
 /**
@@ -298,14 +508,18 @@ export async function semanticSearch(
   query: string,
   topK: number = 5
 ): Promise<SemanticSearchResponse> {
-  return fetchApi<SemanticSearchResponse>("/api/semantic-search", {
-    method: "POST",
-    body: JSON.stringify({
-      slide_id: slideId,
-      query,
-      top_k: topK,
-    }),
-  });
+  return fetchApi<SemanticSearchResponse>(
+    "/api/semantic-search",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        slide_id: slideId,
+        query,
+        top_k: topK,
+      }),
+    },
+    { timeoutMs: 30000 }
+  );
 }
 
 // Backend QC response (snake_case)
@@ -325,7 +539,7 @@ interface BackendSlideQCResponse {
  */
 export async function getSlideQC(slideId: string): Promise<SlideQCMetrics> {
   const backend = await fetchApi<BackendSlideQCResponse>(
-    `/api/slides/${slideId}/qc`
+    `/api/slides/${encodeURIComponent(slideId)}/qc`
   );
 
   return {
@@ -365,6 +579,7 @@ interface BackendUncertaintyResponse {
 
 /**
  * Analyze a slide with MC Dropout uncertainty quantification
+ * Uses longer timeout for multiple forward passes
  */
 export async function analyzeWithUncertainty(
   slideId: string,
@@ -378,7 +593,8 @@ export async function analyzeWithUncertainty(
         slide_id: slideId,
         n_samples: nSamples,
       }),
-    }
+    },
+    { timeoutMs: 120000 } // 2 minute timeout for uncertainty analysis
   );
 
   return {
@@ -436,7 +652,7 @@ interface BackendAnnotationsResponse {
  */
 export async function getAnnotations(slideId: string): Promise<AnnotationsResponse> {
   const backend = await fetchApi<BackendAnnotationsResponse>(
-    `/api/slides/${slideId}/annotations`
+    `/api/slides/${encodeURIComponent(slideId)}/annotations`
   );
 
   return {
@@ -464,7 +680,7 @@ export async function saveAnnotation(
   annotation: AnnotationRequest
 ): Promise<Annotation> {
   const backend = await fetchApi<BackendAnnotation>(
-    `/api/slides/${slideId}/annotations`,
+    `/api/slides/${encodeURIComponent(slideId)}/annotations`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -498,7 +714,7 @@ export async function deleteAnnotation(
   annotationId: string
 ): Promise<void> {
   await fetchApi<{ success: boolean }>(
-    `/api/slides/${slideId}/annotations/${annotationId}`,
+    `/api/slides/${encodeURIComponent(slideId)}/annotations/${encodeURIComponent(annotationId)}`,
     {
       method: "DELETE",
     }
@@ -540,10 +756,15 @@ interface BackendBatchAnalyzeResponse {
  * Analyze multiple slides in batch for clinical workflow efficiency.
  * Returns individual results sorted by priority (uncertain cases first)
  * along with summary statistics.
+ * 
+ * Uses extended timeout for batch processing.
  */
 export async function analyzeBatch(
   slideIds: string[]
 ): Promise<BatchAnalyzeResponse> {
+  // Scale timeout based on number of slides (30s base + 10s per slide)
+  const timeoutMs = Math.min(300000, 30000 + slideIds.length * 10000);
+  
   const backend = await fetchApi<BackendBatchAnalyzeResponse>(
     "/api/analyze-batch",
     {
@@ -551,7 +772,8 @@ export async function analyzeBatch(
       body: JSON.stringify({
         slide_ids: slideIds,
       }),
-    }
+    },
+    { timeoutMs }
   );
 
   return {
@@ -649,4 +871,58 @@ export function downloadBatchCsv(
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+// ====== Connection State Management ======
+
+type ConnectionState = "connected" | "disconnected" | "connecting" | "error";
+type ConnectionListener = (state: ConnectionState) => void;
+
+const connectionListeners: Set<ConnectionListener> = new Set();
+let currentConnectionState: ConnectionState = "disconnected";
+
+/**
+ * Subscribe to connection state changes
+ */
+export function onConnectionStateChange(listener: ConnectionListener): () => void {
+  connectionListeners.add(listener);
+  // Immediately call with current state
+  listener(currentConnectionState);
+  return () => connectionListeners.delete(listener);
+}
+
+/**
+ * Update connection state and notify listeners
+ */
+function setConnectionState(state: ConnectionState): void {
+  if (state !== currentConnectionState) {
+    currentConnectionState = state;
+    connectionListeners.forEach(listener => listener(state));
+  }
+}
+
+/**
+ * Get current connection state
+ */
+export function getConnectionState(): ConnectionState {
+  return currentConnectionState;
+}
+
+/**
+ * Check backend connection status with state management
+ */
+export async function checkConnection(): Promise<boolean> {
+  setConnectionState("connecting");
+  try {
+    await healthCheck();
+    setConnectionState("connected");
+    return true;
+  } catch (error) {
+    if (error instanceof AtlasApiError && error.isNetworkError) {
+      setConnectionState("disconnected");
+    } else {
+      setConnectionState("error");
+    }
+    return false;
+  }
 }
