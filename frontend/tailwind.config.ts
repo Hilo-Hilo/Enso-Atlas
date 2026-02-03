@@ -92,6 +92,7 @@ const config: Config = {
         "shimmer": "shimmer 2s linear infinite",
         "bounce-subtle": "bounceSubtle 0.6s ease-out",
         "glow": "glow 2s ease-in-out infinite",
+        "slide-down": "slideDown 0.3s ease-out",
       },
       keyframes: {
         fadeIn: {
@@ -130,6 +131,10 @@ const config: Config = {
         glow: {
           "0%, 100%": { boxShadow: "0 0 20px rgba(14, 165, 233, 0.2)" },
           "50%": { boxShadow: "0 0 30px rgba(14, 165, 233, 0.4)" },
+        },
+        slideDown: {
+          "0%": { opacity: "0", transform: "translateY(-100%)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
         },
       },
       transitionTimingFunction: {

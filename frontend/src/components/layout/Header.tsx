@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Logo } from "@/components/ui/Logo";
@@ -19,6 +19,10 @@ import {
   Keyboard,
   Stethoscope,
   Layers,
+  WifiOff,
+  RefreshCw,
+  AlertTriangle,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +39,71 @@ interface HeaderProps {
   onViewModeChange?: (mode: UserViewMode) => void;
   demoMode?: boolean;
   onDemoModeToggle?: () => void;
+  onReconnect?: () => void;
+}
+
+// Disconnection Banner Component
+function DisconnectionBanner({ 
+  onReconnect, 
+  onDismiss,
+  isReconnecting 
+}: { 
+  onReconnect?: () => void; 
+  onDismiss: () => void;
+  isReconnecting: boolean;
+}) {
+  return (
+    <div className="bg-gradient-to-r from-red-600 via-red-500 to-rose-600 text-white px-4 py-2 flex items-center justify-center gap-4 animate-slide-down">
+      {/* Pulsing icon */}
+      <div className="flex items-center gap-2">
+        <div className="relative">
+          <WifiOff className="h-5 w-5 animate-pulse" />
+          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
+          </span>
+        </div>
+        <span className="font-semibold text-sm">Backend Disconnected</span>
+      </div>
+
+      {/* Message */}
+      <span className="text-sm text-red-100 hidden sm:inline">
+        Unable to connect to the analysis server. Some features may be unavailable.
+      </span>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2">
+        {onReconnect && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onReconnect}
+            disabled={isReconnecting}
+            className="bg-white/20 hover:bg-white/30 text-white border-white/30 text-xs px-3 py-1"
+          >
+            {isReconnecting ? (
+              <>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Reconnecting...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Reconnect
+              </>
+            )}
+          </Button>
+        )}
+        <button
+          onClick={onDismiss}
+          className="p-1 hover:bg-white/20 rounded transition-colors"
+          title="Dismiss"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function Header({
@@ -48,18 +117,52 @@ export function Header({
   onViewModeChange,
   demoMode = false,
   onDemoModeToggle,
+  onReconnect,
 }: HeaderProps) {
   // Modal and dropdown state
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
+  // Reset banner dismissed state when connection changes
+  useEffect(() => {
+    if (isConnected) {
+      setBannerDismissed(false);
+      setIsReconnecting(false);
+    }
+  }, [isConnected]);
+
+  const handleReconnect = async () => {
+    if (onReconnect) {
+      setIsReconnecting(true);
+      try {
+        await onReconnect();
+      } finally {
+        // Keep reconnecting state for a bit to show feedback
+        setTimeout(() => setIsReconnecting(false), 2000);
+      }
+    }
+  };
 
   const handleOpenDocs = () => {
     window.open("https://github.com/Enso-Labs/medgemma", "_blank");
   };
 
+  const showDisconnectionBanner = !isConnected && !bannerDismissed;
+
   return (
     <>
+      {/* Disconnection Banner - Shows at top when disconnected */}
+      {showDisconnectionBanner && (
+        <DisconnectionBanner
+          onReconnect={handleReconnect}
+          onDismiss={() => setBannerDismissed(true)}
+          isReconnecting={isReconnecting}
+        />
+      )}
+
       <header className="h-16 bg-gradient-to-r from-navy-900 via-navy-900 to-navy-800 border-b border-navy-700/50 px-6 flex items-center justify-between shrink-0 shadow-lg">
         {/* Left: Logo and Branding */}
         <div className="flex items-center gap-4">
@@ -129,8 +232,16 @@ export function Header({
 
         {/* Center: Status Indicators */}
         <div className="hidden md:flex items-center gap-6">
-          {/* Backend Connection Status */}
-          <div className="flex items-center gap-2.5 px-3 py-1.5 bg-navy-800/50 rounded-lg border border-navy-700/30">
+          {/* Backend Connection Status - Enhanced for disconnected state */}
+          <button
+            onClick={() => setStatusOpen(true)}
+            className={cn(
+              "flex items-center gap-2.5 px-3 py-1.5 rounded-lg border transition-all",
+              isConnected
+                ? "bg-navy-800/50 border-navy-700/30 hover:bg-navy-700/50"
+                : "bg-red-900/50 border-red-700/50 hover:bg-red-800/50 animate-pulse"
+            )}
+          >
             <div
               className={cn(
                 "relative flex h-2.5 w-2.5",
@@ -147,14 +258,19 @@ export function Header({
             </div>
             <div className="flex flex-col">
               <span className={cn(
-                "text-xs font-medium",
-                isConnected ? "text-status-positive" : "text-status-negative"
+                "text-xs font-medium flex items-center gap-1",
+                isConnected ? "text-status-positive" : "text-red-400"
               )}>
-                {isConnected ? "Connected" : "Disconnected"}
+                {isConnected ? "Connected" : (
+                  <>
+                    <AlertTriangle className="h-3 w-3" />
+                    Disconnected
+                  </>
+                )}
               </span>
               <span className="text-2xs text-gray-500">Backend Service</span>
             </div>
-          </div>
+          </button>
 
           {/* Processing Status */}
           {isProcessing && (

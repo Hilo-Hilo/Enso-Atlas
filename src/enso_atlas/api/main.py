@@ -29,6 +29,19 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+# Multi-model TransMIL inference
+import sys
+_project_root = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(_project_root))
+try:
+    from scripts.multi_model_inference import MultiModelInference, MODEL_CONFIGS
+    MULTI_MODEL_AVAILABLE = True
+except ImportError:
+    logger.warning("MultiModelInference not available - multi-model endpoints disabled")
+    MULTI_MODEL_AVAILABLE = False
+    MultiModelInference = None
+    MODEL_CONFIGS = {}
+
 
 # Analysis History Storage
 # In-memory deque for fast access, limited to 100 entries
@@ -335,9 +348,47 @@ class SemanticSearchResponse(BaseModel):
     embedding_model: str = "siglip-so400m"
 
 
+# ====== Multi-Model Prediction Models ======
+
+class ModelPrediction(BaseModel):
+    """Single model prediction result."""
+    model_id: str
+    model_name: str
+    category: str  # ovarian_cancer or general_pathology
+    score: float
+    label: str
+    positive_label: str
+    negative_label: str
+    confidence: float
+    auc: float
+    n_training_slides: int
+    description: str
+
+
+class MultiModelRequest(BaseModel):
+    """Request for multi-model analysis."""
+    slide_id: str = Field(..., min_length=1, max_length=256)
+    models: Optional[List[str]] = None  # None = run all models
+    return_attention: bool = False
+
+
+class MultiModelResponse(BaseModel):
+    """Response with predictions from multiple models."""
+    slide_id: str
+    predictions: Dict[str, ModelPrediction]
+    by_category: Dict[str, List[ModelPrediction]]
+    n_patches: int
+    processing_time_ms: float
+
+
+class AvailableModelsResponse(BaseModel):
+    """Response listing available models."""
+    models: List[Dict[str, Any]]
+
+
 def create_app(
     embeddings_dir: Path = Path("data/embeddings"),
-    model_path: Path = Path("models/clam_ovarian.pt"),
+    model_path: Path = Path("models/clam_attention.pt"),
     enable_cors: bool = True,
 ) -> FastAPI:
     """Create and configure the FastAPI application."""
@@ -360,6 +411,7 @@ def create_app(
                 "http://localhost:7860",
                 "http://100.111.126.23:3000",
                 "http://100.111.126.23:8003",
+                "http://100.111.126.23:3002",
             ],
             allow_credentials=True,
             allow_methods=["*"],
@@ -433,6 +485,25 @@ def create_app(
         if model_path.exists():
             classifier.load(model_path)
             logger.info(f"Loaded MIL model from {model_path}")
+
+        # Initialize multi-model TransMIL inference
+        multi_model_inference = None
+        if MULTI_MODEL_AVAILABLE:
+            outputs_dir = Path(__file__).parent.parent.parent.parent / "outputs"
+            if outputs_dir.exists():
+                try:
+                    multi_model_inference = MultiModelInference(
+                        models_dir=outputs_dir,
+                        device="auto",
+                        load_all=True,
+                    )
+                    logger.info(f"Multi-model inference initialized with {len(multi_model_inference.models)} models")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize multi-model inference: {e}")
+            else:
+                logger.warning(f"Outputs directory not found: {outputs_dir}")
+        else:
+            logger.warning("Multi-model inference not available (missing dependencies)")
 
         # Setup evidence generator
         evidence_config = EvidenceConfig()
@@ -2358,6 +2429,103 @@ should incorporate all available clinical, pathological, and molecular data."""
             "total_annotations": len(annotations),
             "by_label": label_counts,
         }
+
+    # ====== Multi-Model Analysis Endpoints ======
+
+    @app.get("/api/models", response_model=AvailableModelsResponse)
+    async def list_available_models():
+        """
+        List all available TransMIL models.
+        
+        Returns model metadata including:
+        - Model ID and display name
+        - Description of what the model predicts
+        - Training AUC score (model reliability)
+        - Number of training slides
+        - Category (ovarian_cancer vs general_pathology)
+        """
+        if multi_model_inference is None:
+            raise HTTPException(status_code=503, detail="Multi-model inference not initialized")
+        
+        models = multi_model_inference.get_available_models()
+        return AvailableModelsResponse(models=models)
+
+    @app.post("/api/analyze-multi", response_model=MultiModelResponse)
+    async def analyze_slide_multi(request: MultiModelRequest):
+        """
+        Analyze a slide with multiple TransMIL models.
+        
+        This endpoint runs all (or selected) trained models on a slide:
+        
+        **Ovarian Cancer Specific:**
+        - Platinum Sensitivity (AUC 0.907): Predicts platinum chemotherapy response
+        - 5-Year Survival (AUC 0.697): Predicts 5-year overall survival
+        - 3-Year Survival (AUC 0.645): Predicts 3-year overall survival
+        - 1-Year Survival (AUC 0.639): Predicts 1-year overall survival
+        
+        **General Pathology:**
+        - Tumor Grade (AUC 0.752): Predicts high vs low tumor grade
+        
+        Use the `models` parameter to select specific models, or leave empty for all.
+        """
+        import time
+        start_time = time.time()
+        
+        if multi_model_inference is None:
+            raise HTTPException(status_code=503, detail="Multi-model inference not initialized")
+        
+        slide_id = request.slide_id
+        emb_path = embeddings_dir / f"{slide_id}.npy"
+        
+        if not emb_path.exists():
+            raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
+        
+        # Load embeddings
+        embeddings = np.load(emb_path)
+        
+        # Run multi-model inference
+        try:
+            results = multi_model_inference.predict_all(
+                embeddings,
+                model_ids=request.models,
+                return_attention=request.return_attention,
+            )
+        except Exception as e:
+            logger.error(f"Multi-model inference failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Inference failed: {str(e)}")
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        # Convert to Pydantic models
+        predictions = {}
+        for model_id, pred in results["predictions"].items():
+            if "error" not in pred:
+                predictions[model_id] = ModelPrediction(**{k: v for k, v in pred.items() if k != "attention"})
+        
+        by_category = {
+            "ovarian_cancer": [ModelPrediction(**{k: v for k, v in p.items() if k != "attention"}) 
+                              for p in results["by_category"]["ovarian_cancer"] if "error" not in p],
+            "general_pathology": [ModelPrediction(**{k: v for k, v in p.items() if k != "attention"}) 
+                                  for p in results["by_category"]["general_pathology"] if "error" not in p],
+        }
+        
+        # Log to audit trail
+        log_audit_event(
+            "multi_model_analysis",
+            slide_id,
+            details={
+                "models_run": list(predictions.keys()),
+                "processing_time_ms": processing_time,
+            },
+        )
+        
+        return MultiModelResponse(
+            slide_id=slide_id,
+            predictions=predictions,
+            by_category=by_category,
+            n_patches=results["n_patches"],
+            processing_time_ms=processing_time,
+        )
 
     return app
 

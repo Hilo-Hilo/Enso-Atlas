@@ -1,0 +1,29 @@
+FROM nvcr.io/nvidia/pytorch:25.12-py3
+
+WORKDIR /app
+
+# Install system dependencies for OpenCV
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxcb1 \
+    libxcb-shm0 \
+    libxcb-render0 \
+    libx11-6 \
+    libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install required packages
+RUN pip install --no-cache-dir \
+    openslide-bin \
+    openslide-python \
+    pillow \
+    numpy \
+    tqdm \
+    timm \
+    transformers \
+    accelerate \
+    opencv-python-headless
+
+# Skip flash-attn for stability
+RUN pip uninstall -y flash-attn || true
+
+CMD ["python", "scripts/generate_embeddings_batch.py"]

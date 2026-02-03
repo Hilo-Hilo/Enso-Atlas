@@ -8,6 +8,7 @@ import { DemoMode, WelcomeModal } from "@/components/demo";
 import {
   SlideSelector,
   PredictionPanel,
+  MultiModelPredictionPanel,
   EvidencePanel,
   SimilarCasesPanel,
   ReportPanel,
@@ -24,9 +25,9 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
-import { getDziUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides } from "@/lib/api";
+import { getDziUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel } from "@/lib/api";
 import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
-import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation } from "@/types";
+import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse } from "@/types";
 
 // Dynamically import WSIViewer to prevent SSR issues with OpenSeadragon
 const WSIViewer = nextDynamic(
@@ -92,6 +93,11 @@ export default function HomePage() {
 
   // Slide QC metrics state
   const [slideQCMetrics, setSlideQCMetrics] = useState<SlideQCMetrics | null>(null);
+
+  // Multi-model analysis state
+  const [multiModelResult, setMultiModelResult] = useState<MultiModelResponse | null>(null);
+  const [isAnalyzingMultiModel, setIsAnalyzingMultiModel] = useState(false);
+  const [multiModelError, setMultiModelError] = useState<string | null>(null);
 
   // Slide list state for keyboard navigation
   const [slideList, setSlideList] = useState<SlideInfo[]>([]);
@@ -226,6 +232,9 @@ export default function HomePage() {
       setSelectedPatchId(undefined);
       setSemanticResults([]);
       setSearchError(null);
+      // Clear multi-model results
+      setMultiModelResult(null);
+      setMultiModelError(null);
     }
   }, [slideList, slideIndex, clearResults]);
 
@@ -240,6 +249,9 @@ export default function HomePage() {
       clearResults();
       setSelectedPatchId(undefined);
       setSemanticResults([]);
+      // Clear multi-model results
+      setMultiModelResult(null);
+      setMultiModelError(null);
     }
   }, [zoomModalOpen, shortcutsModalOpen, clearResults]);
 
@@ -309,6 +321,16 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Handle manual reconnect attempt
+  const handleReconnect = useCallback(async () => {
+    try {
+      await healthCheck();
+      setIsConnected(true);
+    } catch {
+      setIsConnected(false);
+    }
+  }, []);
+
   // Handle slide selection
   const handleSlideSelect = useCallback(
     async (slide: SlideInfo) => {
@@ -318,6 +340,9 @@ export default function HomePage() {
       setSemanticResults([]);
       setSearchError(null);
       setSlideQCMetrics(null);
+      // Clear multi-model results
+      setMultiModelResult(null);
+      setMultiModelError(null);
 
       // Fetch QC metrics for the selected slide
       try {
@@ -376,7 +401,33 @@ export default function HomePage() {
         processingTime
       );
     }
+
+    // Also run multi-model analysis
+    handleMultiModelAnalyze();
   }, [selectedSlide, analyze]);
+
+  // Handle multi-model analysis
+  const handleMultiModelAnalyze = useCallback(async () => {
+    if (!selectedSlide) return;
+
+    setIsAnalyzingMultiModel(true);
+    setMultiModelError(null);
+
+    try {
+      const result = await analyzeSlideMultiModel(selectedSlide.id);
+      setMultiModelResult(result);
+    } catch (err) {
+      console.error("Multi-model analysis failed:", err);
+      setMultiModelError(err instanceof Error ? err.message : "Analysis failed");
+    } finally {
+      setIsAnalyzingMultiModel(false);
+    }
+  }, [selectedSlide]);
+
+  // Retry multi-model analysis
+  const handleRetryMultiModel = useCallback(() => {
+    handleMultiModelAnalyze();
+  }, [handleMultiModelAnalyze]);
 
   // Handle patch click - navigate viewer
   const handlePatchClick = useCallback((coords: PatchCoordinates) => {
@@ -425,6 +476,9 @@ export default function HomePage() {
       setSemanticResults([]);
       setSearchError(null);
       setSlideQCMetrics(null);
+      // Clear multi-model results
+      setMultiModelResult(null);
+      setMultiModelError(null);
       
       // Optionally auto-analyze the new slide
       // Uncomment if you want to auto-analyze when clicking a similar case:
@@ -660,6 +714,7 @@ export default function HomePage() {
         onOpenShortcuts={() => setShortcutsModalOpen(true)}
         demoMode={demoMode}
         onDemoModeToggle={handleDemoModeToggle}
+        onReconnect={handleReconnect}
       />
 
       {/* Main Content */}
@@ -871,6 +926,18 @@ export default function HomePage() {
                   error={!isAnalyzing && !analysisResult ? error : null}
                   onRetry={retryAnalysis}
                   qcMetrics={slideQCMetrics}
+                />
+              </div>
+
+              {/* Multi-Model Analysis Results */}
+              <div data-demo="multi-model-panel">
+                <MultiModelPredictionPanel
+                  multiModelResult={multiModelResult}
+                  isLoading={isAnalyzingMultiModel}
+                  processingTime={multiModelResult?.processingTimeMs}
+                  error={multiModelError}
+                  onRunAnalysis={selectedSlide ? handleMultiModelAnalyze : undefined}
+                  onRetry={handleRetryMultiModel}
                 />
               </div>
 

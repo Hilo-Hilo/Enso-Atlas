@@ -1090,3 +1090,134 @@ export async function checkConnection(): Promise<boolean> {
     return false;
   }
 }
+
+// ====== Multi-Model Analysis API ======
+
+import type {
+  ModelPrediction,
+  AvailableModel,
+  MultiModelResponse,
+  AvailableModelsResponse,
+} from "@/types";
+
+// Backend multi-model response (snake_case)
+interface BackendModelPrediction {
+  model_id: string;
+  model_name: string;
+  category: string;
+  score: number;
+  label: string;
+  positive_label: string;
+  negative_label: string;
+  confidence: number;
+  auc: number;
+  n_training_slides: number;
+  description: string;
+}
+
+interface BackendMultiModelResponse {
+  slide_id: string;
+  predictions: Record<string, BackendModelPrediction>;
+  by_category: {
+    ovarian_cancer: BackendModelPrediction[];
+    general_pathology: BackendModelPrediction[];
+  };
+  n_patches: number;
+  processing_time_ms: number;
+}
+
+interface BackendAvailableModel {
+  id: string;
+  name: string;
+  description: string;
+  auc: number;
+  n_slides: number;
+  category: string;
+  positive_label: string;
+  negative_label: string;
+  available: boolean;
+}
+
+interface BackendAvailableModelsResponse {
+  models: BackendAvailableModel[];
+}
+
+/**
+ * Transform backend model prediction to frontend format
+ */
+function transformModelPrediction(backend: BackendModelPrediction): ModelPrediction {
+  return {
+    modelId: backend.model_id,
+    modelName: backend.model_name,
+    category: backend.category as 'ovarian_cancer' | 'general_pathology',
+    score: backend.score,
+    label: backend.label,
+    positiveLabel: backend.positive_label,
+    negativeLabel: backend.negative_label,
+    confidence: backend.confidence,
+    auc: backend.auc,
+    nTrainingSlides: backend.n_training_slides,
+    description: backend.description,
+  };
+}
+
+/**
+ * Get list of available TransMIL models
+ */
+export async function getAvailableModels(): Promise<AvailableModelsResponse> {
+  const backend = await fetchApi<BackendAvailableModelsResponse>("/api/models");
+  
+  return {
+    models: backend.models.map((m) => ({
+      id: m.id,
+      name: m.name,
+      description: m.description,
+      auc: m.auc,
+      nSlides: m.n_slides,
+      category: m.category as 'ovarian_cancer' | 'general_pathology',
+      positiveLabel: m.positive_label,
+      negativeLabel: m.negative_label,
+      available: m.available,
+    })),
+  };
+}
+
+/**
+ * Analyze a slide with multiple TransMIL models
+ * Uses extended timeout for running multiple models
+ */
+export async function analyzeSlideMultiModel(
+  slideId: string,
+  models?: string[],
+  returnAttention: boolean = false
+): Promise<MultiModelResponse> {
+  const backend = await fetchApi<BackendMultiModelResponse>(
+    "/api/analyze-multi",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        slide_id: slideId,
+        models: models || null,
+        return_attention: returnAttention,
+      }),
+    },
+    { timeoutMs: 120000 } // 2 minute timeout for multi-model analysis
+  );
+
+  // Transform predictions
+  const predictions: Record<string, ModelPrediction> = {};
+  for (const [modelId, pred] of Object.entries(backend.predictions)) {
+    predictions[modelId] = transformModelPrediction(pred);
+  }
+
+  return {
+    slideId: backend.slide_id,
+    predictions,
+    byCategory: {
+      ovarianCancer: backend.by_category.ovarian_cancer.map(transformModelPrediction),
+      generalPathology: backend.by_category.general_pathology.map(transformModelPrediction),
+    },
+    nPatches: backend.n_patches,
+    processingTimeMs: backend.processing_time_ms,
+  };
+}

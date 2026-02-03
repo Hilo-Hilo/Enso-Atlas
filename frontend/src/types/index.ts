@@ -316,3 +316,59 @@ export interface BatchAnalyzeResponse {
   summary: BatchAnalysisSummary;
   processingTimeMs: number;
 }
+
+// ====== Multi-Model Prediction Types ======
+
+// Single model prediction result
+export interface ModelPrediction {
+  modelId: string;
+  modelName: string;
+  category: 'ovarian_cancer' | 'general_pathology';
+  score: number;
+  label: string;
+  positiveLabel: string;
+  negativeLabel: string;
+  confidence: number;
+  auc: number;
+  nTrainingSlides: number;
+  description: string;
+  confidenceInterval?: { lower: number; upper: number };
+}
+
+// Available model info
+export interface AvailableModel {
+  id: string;
+  name: string;
+  description: string;
+  confidenceInterval?: { lower: number; upper: number };
+  auc: number;
+  nSlides: number;
+  category: 'ovarian_cancer' | 'general_pathology';
+  positiveLabel: string;
+  negativeLabel: string;
+  available: boolean;
+}
+
+// Multi-model request
+export interface MultiModelRequest {
+  slideId: string;
+  models?: string[];  // null = run all models
+  returnAttention?: boolean;
+}
+
+// Multi-model response
+export interface MultiModelResponse {
+  slideId: string;
+  predictions: Record<string, ModelPrediction>;
+  byCategory: {
+    ovarianCancer: ModelPrediction[];
+    generalPathology: ModelPrediction[];
+  };
+  nPatches: number;
+  processingTimeMs: number;
+}
+
+// Available models response
+export interface AvailableModelsResponse {
+  models: AvailableModel[];
+}

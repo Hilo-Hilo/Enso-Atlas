@@ -1,5 +1,6 @@
 // Panel Component Exports
 export { PredictionPanel } from "./PredictionPanel";
+export { MultiModelPredictionPanel } from "./MultiModelPredictionPanel";
 export { EvidencePanel } from "./EvidencePanel";
 export { SimilarCasesPanel } from "./SimilarCasesPanel";
 export { ReportPanel } from "./ReportPanel";

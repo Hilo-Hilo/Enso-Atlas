@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -28,8 +28,9 @@ import {
   User,
   Calendar,
   Activity,
+  ImageOff,
 } from "lucide-react";
-import { getSlides, getSlideQC } from "@/lib/api";
+import { getSlides, getSlideQC, getThumbnailUrl } from "@/lib/api";
 import { ANALYSIS_STEPS } from "@/hooks/useAnalysis";
 import type { SlideInfo, SlideQCMetrics, PatientContext } from "@/types";
 
@@ -43,6 +44,86 @@ interface SlideSelectorProps {
 
 type SortField = "filename" | "date" | "dimensions";
 type SortOrder = "asc" | "desc";
+
+// Lazy loading thumbnail component
+function SlideThumbnail({ 
+  slideId, 
+  thumbnailUrl, 
+  filename,
+  className 
+}: { 
+  slideId: string; 
+  thumbnailUrl?: string; 
+  filename: string;
+  className?: string;
+}) {
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+
+  // Use Intersection Observer for lazy loading
+  const imageRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+            observer.disconnect();
+          }
+        });
+      },
+      { rootMargin: "50px" }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  // Get the thumbnail URL - either from the slide data or construct from API
+  const imgSrc = thumbnailUrl || (isVisible ? getThumbnailUrl(slideId) : undefined);
+
+  return (
+    <div 
+      ref={imageRef}
+      className={cn(
+        "w-16 h-16 rounded-lg bg-gray-100 shrink-0 overflow-hidden border border-gray-200 transition-colors relative",
+        className
+      )}
+    >
+      {isVisible && imgSrc && !imageError ? (
+        <>
+          {/* Loading skeleton while image loads */}
+          {!imageLoaded && (
+            <div className="absolute inset-0 bg-gray-200 animate-pulse flex items-center justify-center">
+              <Microscope className="h-5 w-5 text-gray-400" />
+            </div>
+          )}
+          <img
+            src={imgSrc}
+            alt={filename}
+            className={cn(
+              "w-full h-full object-cover transition-opacity duration-300",
+              imageLoaded ? "opacity-100" : "opacity-0"
+            )}
+            onLoad={() => setImageLoaded(true)}
+            onError={() => setImageError(true)}
+            loading="lazy"
+          />
+        </>
+      ) : imageError ? (
+        <div className="w-full h-full flex items-center justify-center bg-gray-50">
+          <ImageOff className="h-5 w-5 text-gray-300" />
+        </div>
+      ) : (
+        <div className="w-full h-full flex items-center justify-center pattern-dots">
+          <Microscope className="h-6 w-6 text-gray-400" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function SlideSelector({
   selectedSlideId,
@@ -284,9 +365,12 @@ export function SlideSelector({
         {selectedSlide && (
           <div className="p-4 bg-clinical-50 border border-clinical-200 rounded-lg animate-slide-up">
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 rounded-lg bg-clinical-600 flex items-center justify-center">
-                <Microscope className="h-4 w-4 text-white" />
-              </div>
+              <SlideThumbnail
+                slideId={selectedSlide.id}
+                thumbnailUrl={selectedSlide.thumbnailUrl}
+                filename={selectedSlide.filename}
+                className="w-12 h-12 border-clinical-300"
+              />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-clinical-900 truncate">
                   {selectedSlide.filename}
@@ -549,20 +633,13 @@ function SlideItem({ slide, isSelected, onClick, qcMetrics }: SlideItemProps) {
           : "border-gray-200 bg-white"
       )}
     >
-      {/* Thumbnail */}
-      <div className="w-14 h-14 rounded-lg bg-gray-100 shrink-0 overflow-hidden border border-gray-200 group-hover:border-clinical-300 transition-colors">
-        {slide.thumbnailUrl ? (
-          <img
-            src={slide.thumbnailUrl}
-            alt={slide.filename}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center pattern-dots">
-            <Microscope className="h-6 w-6 text-gray-400" />
-          </div>
-        )}
-      </div>
+      {/* Thumbnail with lazy loading */}
+      <SlideThumbnail
+        slideId={slide.id}
+        thumbnailUrl={slide.thumbnailUrl}
+        filename={slide.filename}
+        className="group-hover:border-clinical-300"
+      />
 
       {/* Info */}
       <div className="flex-1 min-w-0">
