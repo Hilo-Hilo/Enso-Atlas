@@ -17,3 +17,5 @@ export {
 export { NetworkStatus, useNetworkStatus } from "./NetworkStatus";
 export { PredictionGauge, ConfidenceGauge, UncertaintyDisplay } from "./PredictionGauge";
 export { Logo, LogoLoader } from "./Logo";
+export { ToastProvider, useToast } from "./Toast";
+export type { Toast, ToastType } from "./Toast";

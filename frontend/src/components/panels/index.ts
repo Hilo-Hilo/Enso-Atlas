@@ -12,5 +12,6 @@ export { OncologistSummaryView } from "./OncologistSummaryView";
 export { PathologistView } from "./PathologistView";
 export { UncertaintyPanel } from "./UncertaintyPanel";
 export { BatchAnalysisPanel } from "./BatchAnalysisPanel";
+export { AIAssistantPanel } from "./AIAssistantPanel";
 export type { CaseNote } from "./CaseNotesPanel";
 export type { AnalysisStats } from "./QuickStatsPanel";

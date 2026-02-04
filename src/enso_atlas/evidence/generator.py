@@ -49,6 +49,8 @@ class EvidenceGenerator:
         coordinates: List[Tuple[int, int]],
         slide_dimensions: Tuple[int, int],
         thumbnail_size: Tuple[int, int] = (1024, 1024),
+        smooth: bool = True,
+        blur_kernel: int = 31,
     ) -> np.ndarray:
         """
         Create an attention heatmap overlay.
@@ -58,6 +60,8 @@ class EvidenceGenerator:
             coordinates: List of (x, y) patch coordinates at level 0
             slide_dimensions: (width, height) of the slide at level 0
             thumbnail_size: Size of the output heatmap
+            smooth: If True, apply Gaussian blur for smooth interpolation
+            blur_kernel: Kernel size for Gaussian blur (must be odd)
 
         Returns:
             RGBA heatmap array of shape (H, W, 4)
@@ -101,8 +105,11 @@ class EvidenceGenerator:
         count_map[count_map == 0] = 1
         heatmap = heatmap / count_map
 
-        # Apply Gaussian blur for smoothness
-        heatmap = cv2.GaussianBlur(heatmap, (31, 31), 0)
+        # Apply Gaussian blur for smooth interpolation (reduces blocky patch appearance)
+        if smooth:
+            # Ensure kernel size is odd
+            blur_kernel = blur_kernel if blur_kernel % 2 == 1 else blur_kernel + 1
+            heatmap = cv2.GaussianBlur(heatmap, (blur_kernel, blur_kernel), 0)
 
         # Normalize to 0-1
         if heatmap.max() > heatmap.min():
@@ -111,7 +118,7 @@ class EvidenceGenerator:
         # Apply colormap
         heatmap_colored = self._apply_colormap(heatmap)
 
-        logger.info(f"Created heatmap: {heatmap_colored.shape}")
+        logger.info(f"Created heatmap: {heatmap_colored.shape}, smooth={smooth}")
         return heatmap_colored
 
     def _apply_colormap(self, heatmap: np.ndarray) -> np.ndarray:

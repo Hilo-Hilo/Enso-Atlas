@@ -103,6 +103,8 @@ const CONFIDENCE_BADGE_CONFIG: Record<ConfidenceLevel, { variant: "success" | "w
 };
 
 interface ReportPanelProps {
+  progress?: number;  // 0-100
+  progressMessage?: string;
   report: StructuredReport | null;
   isLoading?: boolean;
   onGenerateReport?: () => void;
@@ -119,6 +121,8 @@ export function ReportPanel({
   onExportPdf,
   onExportJson,
   error,
+  progress = 0,
+  progressMessage = "Generating clinical report...",
   onRetry,
 }: ReportPanelProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
@@ -170,13 +174,26 @@ export function ReportPanel({
               </div>
             </div>
             <p className="text-sm font-medium text-gray-700">
-              Generating clinical report...
+              {progressMessage}
             </p>
-            <p className="text-xs text-gray-500 mt-1">
-              Synthesizing findings with MedGemma
-            </p>
+            {/* Progress bar */}
+            <div className="w-full max-w-xs mt-4">
+              <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                <span>Progress</span>
+                <span>{Math.round(progress)}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-clinical-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
             <p className="text-xs text-gray-400 mt-3">
-              Estimated time: ~2-3 seconds
+              {progress < 30 ? "Loading slide data..." : 
+               progress < 50 ? "Running analysis..." :
+               progress < 80 ? "Generating report with MedGemma..." :
+               "Finalizing report..."}
             </p>
           </div>
         </CardContent>

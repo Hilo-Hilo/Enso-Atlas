@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -16,6 +16,7 @@ import {
   RefreshCw,
   FlaskConical,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Microscope,
   HeartPulse,
@@ -306,6 +307,13 @@ function CategorySection({
   );
 }
 
+interface EmbeddingProgress {
+  phase: "idle" | "embedding" | "analyzing" | "complete";
+  progress: number;
+  message: string;
+  startTime?: number;
+}
+
 interface MultiModelPredictionPanelProps {
   multiModelResult: MultiModelResponse | null;
   isLoading?: boolean;
@@ -316,6 +324,7 @@ interface MultiModelPredictionPanelProps {
   availableModels?: AvailableModel[];
   selectedModels?: string[];
   onModelToggle?: (modelId: string) => void;
+  embeddingProgress?: EmbeddingProgress | null;
 }
 
 export function MultiModelPredictionPanel({
@@ -328,8 +337,24 @@ export function MultiModelPredictionPanel({
   availableModels,
   selectedModels,
   onModelToggle,
+  embeddingProgress,
 }: MultiModelPredictionPanelProps) {
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  // Update elapsed time during embedding
+  useEffect(() => {
+    if (!embeddingProgress?.startTime) {
+      setElapsedSeconds(0);
+      return;
+    }
+    
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - embeddingProgress.startTime!) / 1000));
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [embeddingProgress?.startTime]);
 
   const toggleModelExpanded = useCallback((modelId: string) => {
     setExpandedModels((prev) => {
@@ -343,8 +368,12 @@ export function MultiModelPredictionPanel({
     });
   }, []);
 
-  // Show error state with retry
+  // Show error state with retry - improved for multi-line errors
   if (error && !isLoading) {
+    // Parse error message for bullet points
+    const errorLines = error.split("\n").filter(line => line.trim());
+    const hasDetails = errorLines.length > 1;
+    
     return (
       <Card>
         <CardHeader>
@@ -354,17 +383,32 @@ export function MultiModelPredictionPanel({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-6">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 flex items-center justify-center">
-              <AlertCircle className="h-8 w-8 text-red-500" />
+          <div className="text-center py-4">
+            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-red-100 flex items-center justify-center">
+              <AlertCircle className="h-7 w-7 text-red-500" />
             </div>
             <p className="text-sm font-medium text-red-700 mb-2">
               Analysis Failed
             </p>
-            <p className="text-xs text-red-600 mb-4 max-w-[220px] mx-auto">
-              {error}
-            </p>
-            {onRetry && (
+          </div>
+          
+          {/* Error details */}
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            {hasDetails ? (
+              <div className="text-left text-xs text-red-700 space-y-1">
+                {errorLines.map((line, i) => (
+                  <p key={i} className={line.startsWith("•") ? "pl-2" : ""}>
+                    {line}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-red-700 text-center">{error}</p>
+            )}
+          </div>
+          
+          {onRetry && (
+            <div className="text-center">
               <Button
                 variant="secondary"
                 size="sm"
@@ -373,15 +417,25 @@ export function MultiModelPredictionPanel({
               >
                 Retry Analysis
               </Button>
-            )}
-          </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
   }
 
-  // Loading state with skeleton
+  // Loading state with embedding progress
   if (isLoading) {
+    const isEmbedding = embeddingProgress?.phase === "embedding";
+    const elapsedTime = elapsedSeconds;
+    
+    const formatElapsed = (seconds: number) => {
+      if (seconds < 60) return `${seconds}s`;
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}m ${secs}s`;
+    };
+
     return (
       <Card>
         <CardHeader>
@@ -393,14 +447,43 @@ export function MultiModelPredictionPanel({
         <CardContent className="space-y-4">
           <div className="text-center py-4">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-clinical-100 to-clinical-200 flex items-center justify-center">
-              <Brain className="h-8 w-8 text-clinical-600 animate-pulse" />
+              {isEmbedding ? (
+                <Dna className="h-8 w-8 text-clinical-600 animate-pulse" />
+              ) : (
+                <Brain className="h-8 w-8 text-clinical-600 animate-pulse" />
+              )}
             </div>
             <p className="text-sm font-medium text-gray-700 mb-1">
-              Running Multi-Model Analysis...
+              {isEmbedding ? "Generating Embeddings..." : "Running Model Inference..."}
             </p>
-            <p className="text-xs text-gray-500">
-              Processing 5 TransMIL models in parallel
+            <p className="text-xs text-gray-500 max-w-[250px] mx-auto">
+              {embeddingProgress?.message || (isEmbedding 
+                ? "DINOv2 is processing tissue patches (may take 2-3 min for new slides)"
+                : "Processing 5 TransMIL models in parallel"
+              )}
             </p>
+            {isEmbedding && elapsedTime > 0 && (
+              <p className="text-xs text-clinical-600 mt-2 font-medium">
+                Elapsed: {formatElapsed(elapsedTime)}
+              </p>
+            )}
+          </div>
+
+          {/* Phase indicator */}
+          <div className="flex items-center justify-center gap-3">
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${isEmbedding ? "bg-clinical-500 animate-pulse" : "bg-green-500"}`} />
+              <span className={`text-xs ${isEmbedding ? "text-clinical-700 font-medium" : "text-green-600"}`}>
+                {isEmbedding ? "Embedding" : "✓ Embedded"}
+              </span>
+            </div>
+            <ChevronRight className="h-3 w-3 text-gray-300" />
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${!isEmbedding ? "bg-clinical-500 animate-pulse" : "bg-gray-300"}`} />
+              <span className={`text-xs ${!isEmbedding ? "text-clinical-700 font-medium" : "text-gray-400"}`}>
+                Inference
+              </span>
+            </div>
           </div>
 
           {/* Skeleton loading cards */}
@@ -417,7 +500,7 @@ export function MultiModelPredictionPanel({
               <div className="w-2 h-2 rounded-full bg-clinical-400 animate-bounce" style={{ animationDelay: "150ms" }} />
               <div className="w-2 h-2 rounded-full bg-clinical-400 animate-bounce" style={{ animationDelay: "300ms" }} />
             </div>
-            <span>Estimated: 2-5 seconds</span>
+            <span>{isEmbedding ? "This is a one-time process per slide" : "Estimated: 2-5 seconds"}</span>
           </div>
         </CardContent>
       </Card>

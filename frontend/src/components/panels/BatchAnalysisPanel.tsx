@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -10,7 +10,6 @@ import {
   Layers,
   Play,
   Download,
-  Filter,
   AlertTriangle,
   CheckCircle,
   XCircle,
@@ -20,21 +19,25 @@ import {
   BarChart3,
   Users,
   Clock,
-  RefreshCw,
   Square,
   CheckSquare,
   MinusSquare,
+  StopCircle,
+  Zap,
 } from "lucide-react";
 import {
   getSlides,
-  analyzeBatch,
   downloadBatchCsv,
+  startBatchAnalysisAsync,
+  getBatchAnalysisStatus,
+  cancelBatchAnalysis,
+  convertAsyncBatchResults,
+  type AsyncBatchTaskStatus,
 } from "@/lib/api";
 import type {
   SlideInfo,
   BatchAnalysisResult,
   BatchAnalysisSummary,
-  BatchAnalyzeResponse,
 } from "@/types";
 
 interface BatchAnalysisPanelProps {
@@ -57,17 +60,34 @@ export function BatchAnalysisPanel({
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [progress, setProgress] = useState({ current: 0, total: 0, currentSlide: "" });
   const [results, setResults] = useState<BatchAnalysisResult[]>([]);
   const [summary, setSummary] = useState<BatchAnalysisSummary | null>(null);
   const [processingTime, setProcessingTime] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  // Concurrency setting
+  const [concurrency, setConcurrency] = useState(4);
 
   // UI state
   const [sortField, setSortField] = useState<SortField>("confidence");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [showResults, setShowResults] = useState(false);
+
+  // Polling interval ref
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Load slides on mount
   useEffect(() => {
@@ -108,31 +128,98 @@ export function BatchAnalysisPanel({
     });
   }, []);
 
-  // Run batch analysis
+  // Poll for status updates
+  const pollStatus = useCallback(async (currentTaskId: string) => {
+    try {
+      const status = await getBatchAnalysisStatus(currentTaskId);
+      
+      setProgress({
+        current: status.completed_slides,
+        total: status.total_slides,
+        currentSlide: status.current_slide_id,
+      });
+
+      // Check if completed/cancelled/failed
+      if (status.status === "completed" || status.status === "cancelled" || status.status === "failed") {
+        // Stop polling
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+
+        setIsAnalyzing(false);
+        setIsCancelling(false);
+
+        if (status.status === "failed") {
+          setError(status.error || "Batch analysis failed");
+          return;
+        }
+
+        // Convert and set results
+        const converted = convertAsyncBatchResults(status);
+        if (converted) {
+          setResults(converted.results);
+          setSummary(converted.summary);
+          setProcessingTime(converted.processingTimeMs);
+          setShowResults(true);
+        }
+
+        if (status.status === "cancelled") {
+          setError(`Analysis cancelled after ${status.completed_slides} of ${status.total_slides} slides`);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to poll status:", err);
+      // Don't stop polling on transient errors
+    }
+  }, []);
+
+  // Run batch analysis with async API
   const handleAnalyze = useCallback(async () => {
     if (selectedIds.size === 0) return;
 
     setIsAnalyzing(true);
     setError(null);
-    setProgress({ current: 0, total: selectedIds.size });
+    setProgress({ current: 0, total: selectedIds.size, currentSlide: "" });
     setShowResults(false);
+    setResults([]);
+    setSummary(null);
 
     try {
       const slideIds = Array.from(selectedIds);
-      const response = await analyzeBatch(slideIds);
+      const response = await startBatchAnalysisAsync(slideIds, concurrency);
+      
+      setTaskId(response.task_id);
+      
+      // Start polling for updates
+      pollIntervalRef.current = setInterval(() => {
+        pollStatus(response.task_id);
+      }, 1000);
+      
+      // Initial poll
+      pollStatus(response.task_id);
 
-      setResults(response.results);
-      setSummary(response.summary);
-      setProcessingTime(response.processingTimeMs);
-      setProgress({ current: response.summary.total, total: response.summary.total });
-      setShowResults(true);
     } catch (err) {
-      console.error("Batch analysis failed:", err);
-      setError(err instanceof Error ? err.message : "Batch analysis failed");
-    } finally {
+      console.error("Failed to start batch analysis:", err);
+      setError(err instanceof Error ? err.message : "Failed to start batch analysis");
       setIsAnalyzing(false);
     }
-  }, [selectedIds]);
+  }, [selectedIds, concurrency, pollStatus]);
+
+  // Cancel batch analysis
+  const handleCancel = useCallback(async () => {
+    if (!taskId) return;
+
+    setIsCancelling(true);
+    try {
+      await cancelBatchAnalysis(taskId);
+      // Polling will detect the cancellation and update state
+    } catch (err) {
+      console.error("Failed to cancel:", err);
+      setError(err instanceof Error ? err.message : "Failed to cancel");
+      setIsCancelling(false);
+    }
+  }, [taskId]);
 
   // Handle export
   const handleExport = useCallback(() => {
@@ -255,12 +342,35 @@ export function BatchAnalysisPanel({
         {isAnalyzing && (
           <div className="p-4 bg-clinical-50 border border-clinical-200 rounded-lg">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-clinical-800">
-                Analyzing slides...
-              </span>
-              <span className="text-sm text-clinical-600">
-                {progress.current} / {progress.total}
-              </span>
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium text-clinical-800">
+                    Analyzing slide {progress.current + 1}/{progress.total}
+                  </span>
+                  <span className="text-xs text-clinical-600">
+                    {Math.round((progress.current / progress.total) * 100)}%
+                  </span>
+                </div>
+                {progress.currentSlide && (
+                  <p className="text-xs text-clinical-600 truncate">
+                    Current: {progress.currentSlide.slice(0, 30)}...
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleCancel}
+                disabled={isCancelling}
+                className="ml-4 text-red-600 hover:text-red-700 hover:bg-red-50"
+              >
+                {isCancelling ? (
+                  <Spinner size="sm" className="mr-1" />
+                ) : (
+                  <StopCircle className="h-4 w-4 mr-1" />
+                )}
+                Cancel
+              </Button>
             </div>
             <div className="w-full bg-clinical-200 rounded-full h-2">
               <div
@@ -274,7 +384,7 @@ export function BatchAnalysisPanel({
         )}
 
         {/* Slide Selection View */}
-        {!showResults && !isLoadingSlides && (
+        {!showResults && !isLoadingSlides && !isAnalyzing && (
           <>
             {/* Selection Header */}
             <div className="flex items-center justify-between">
@@ -300,6 +410,21 @@ export function BatchAnalysisPanel({
               </span>
             </div>
 
+            {/* Concurrency Setting */}
+            <div className="flex items-center gap-2 px-2 py-1.5 bg-gray-50 rounded-lg">
+              <Zap className="h-3.5 w-3.5 text-amber-500" />
+              <span className="text-xs text-gray-600">Parallel processing:</span>
+              <select
+                value={concurrency}
+                onChange={(e) => setConcurrency(parseInt(e.target.value, 10))}
+                className="text-xs bg-white border border-gray-200 rounded px-2 py-1"
+              >
+                {[1, 2, 4, 6, 8, 10].map((n) => (
+                  <option key={n} value={n}>{n} slides</option>
+                ))}
+              </select>
+            </div>
+
             {/* Slide List */}
             <div className="flex-1 overflow-y-auto space-y-1 scrollbar-hide">
               {slides.map((slide) => (
@@ -321,7 +446,7 @@ export function BatchAnalysisPanel({
                   )}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">
-                      {slide.filename}
+                      {slide.id}
                     </p>
                     <p className="text-xs text-gray-500">
                       {slide.numPatches?.toLocaleString() || "?"} patches

@@ -20,6 +20,66 @@ from enso_atlas.config import MILConfig
 logger = logging.getLogger(__name__)
 
 
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class LegacyCLAMModel(nn.Module):
+    """Simpler CLAM model compatible with older checkpoints.
+    
+    Architecture matches the trained model:
+    - encoder: Linear(384, 256) + ReLU + Dropout
+    - attention: Gated attention (attention_a, attention_b, attention_c)
+    - classifier: Linear(256, 2)
+    """
+    
+    def __init__(self, input_dim: int = 384, hidden_dim: int = 256, attention_dim: int = 128):
+        super().__init__()
+        
+        # Feature encoder
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.25)
+        )
+        
+        # Gated attention mechanism
+        self.attention = nn.ModuleDict({
+            "attention_a": nn.Sequential(nn.Linear(hidden_dim, attention_dim), nn.Tanh()),
+            "attention_b": nn.Sequential(nn.Linear(hidden_dim, attention_dim), nn.Sigmoid()),
+            "attention_c": nn.Linear(attention_dim, 1)
+        })
+        
+        # Bag classifier
+        self.classifier = nn.Sequential(
+            nn.Linear(hidden_dim, 2)
+        )
+        
+    def forward(self, x, return_attention: bool = True):
+        """Forward pass."""
+        # Encode features
+        h = self.encoder(x)  # (n_patches, hidden_dim)
+        
+        # Compute gated attention
+        a = self.attention["attention_a"](h)
+        b = self.attention["attention_b"](h)
+        A = self.attention["attention_c"](a * b)
+        A = F.softmax(A, dim=0)
+        
+        # Aggregate with attention
+        M = torch.mm(A.T, h)  # (1, hidden_dim)
+        
+        # Classify
+        logits = self.classifier(M)
+        score = F.softmax(logits, dim=1)[0, 1]
+        
+        if return_attention:
+            return score, A.squeeze(-1)
+        return score
+
+
 class AttentionMIL:
     """
     Basic Attention-based Multiple Instance Learning.
@@ -105,6 +165,7 @@ class CLAMClassifier:
         input_dim = self.config.input_dim
         hidden_dim = self.config.hidden_dim
         n_heads = self.config.attention_heads
+
 
         class GatedAttention(nn.Module):
             """Gated attention mechanism for CLAM."""
@@ -221,7 +282,24 @@ class CLAMClassifier:
         self._setup_device()
         self._build_model()
 
-        state_dict = torch.load(path, map_location=self._device)
+        checkpoint = torch.load(path, map_location=self._device, weights_only=False)
+        # Handle both wrapped checkpoints and plain state_dicts
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+        else:
+            state_dict = checkpoint
+            
+        # Detect legacy checkpoint format by checking for "encoder" key
+        is_legacy = any(k.startswith("encoder.") for k in state_dict.keys())
+        
+        if is_legacy:
+            # Use legacy model architecture
+            logger.info("Detected legacy checkpoint format, using LegacyCLAMModel")
+            self._model = LegacyCLAMModel(
+                input_dim=self.config.input_dim,
+                hidden_dim=self.config.hidden_dim
+            ).to(self._device)
+            
         self._model.load_state_dict(state_dict)
         self._model.to(self._device)
         self._model.eval()

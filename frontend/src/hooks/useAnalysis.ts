@@ -9,7 +9,7 @@ import type {
   ReportRequest,
   UncertaintyResult,
 } from "@/types";
-import { analyzeSlide, generateReport, analyzeWithUncertainty } from "@/lib/api";
+import { analyzeSlide, generateReportWithProgress, analyzeWithUncertainty, generateReport } from "@/lib/api";
 
 // Analysis progress steps
 export const ANALYSIS_STEPS = [
@@ -32,6 +32,9 @@ interface UseAnalysisState {
   // Progress tracking
   analysisStep: number; // -1 = not started, 0-3 = step index
   analysisStepId: AnalysisStepId | null;
+  // Report generation progress
+  reportProgress: number; // 0-100
+  reportProgressMessage: string;
 }
 
 interface UseAnalysisReturn extends UseAnalysisState {
@@ -55,6 +58,8 @@ export function useAnalysis(): UseAnalysisReturn {
     error: null,
     analysisStep: -1,
     analysisStepId: null,
+    reportProgress: 0,
+    reportProgressMessage: "Preparing report generation...",
   });
 
   // Store last requests for retry functionality
@@ -156,22 +161,52 @@ export function useAnalysis(): UseAnalysisReturn {
       ...prev,
       isGeneratingReport: true,
       error: null,
+      reportProgress: 0,
+      reportProgressMessage: "Starting report generation...",
     }));
 
     try {
-      const report = await generateReport(request);
+      // Use async report generation with progress tracking
+      const report = await generateReportWithProgress(
+        request,
+        (progress: number, message: string) => {
+          setState((prev) => ({
+            ...prev,
+            reportProgress: progress,
+            reportProgressMessage: message,
+          }));
+        }
+      );
+      
       setState((prev) => ({
         ...prev,
         isGeneratingReport: false,
         report,
+        reportProgress: 100,
+        reportProgressMessage: "Report generated successfully!",
       }));
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Report generation failed";
-      setState((prev) => ({
-        ...prev,
-        isGeneratingReport: false,
-        error: message,
-      }));
+      // Fallback to synchronous if async fails
+      console.warn("Async report generation failed, trying synchronous:", err);
+      try {
+        const report = await generateReport(request);
+        setState((prev) => ({
+          ...prev,
+          isGeneratingReport: false,
+          report,
+          reportProgress: 100,
+          reportProgressMessage: "Report generated successfully!",
+        }));
+      } catch (fallbackErr) {
+        const message = fallbackErr instanceof Error ? fallbackErr.message : "Report generation failed";
+        setState((prev) => ({
+          ...prev,
+          isGeneratingReport: false,
+          error: message,
+          reportProgress: 0,
+          reportProgressMessage: "",
+        }));
+      }
     }
   }, []);
 
@@ -226,6 +261,8 @@ export function useAnalysis(): UseAnalysisReturn {
       error: null,
       analysisStep: -1,
       analysisStepId: null,
+      reportProgress: 0,
+      reportProgressMessage: "",
     });
     lastAnalysisRequest.current = null;
     lastReportRequest.current = null;

@@ -1,5 +1,6 @@
 "use client";
 
+import { ModelPicker } from "./ModelPicker";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -29,17 +30,31 @@ import {
   Calendar,
   Activity,
   ImageOff,
+  Cpu,
+  Clock,
 } from "lucide-react";
 import { getSlides, getSlideQC, getThumbnailUrl } from "@/lib/api";
 import { ANALYSIS_STEPS } from "@/hooks/useAnalysis";
 import type { SlideInfo, SlideQCMetrics, PatientContext } from "@/types";
 
 interface SlideSelectorProps {
+  selectedModels: string[];
+  onModelsChange: (models: string[]) => void;
+  resolutionLevel: number;
+  onResolutionChange: (level: number) => void;
   selectedSlideId: string | null;
   onSlideSelect: (slide: SlideInfo) => void;
   onAnalyze: () => void;
+  onGenerateEmbeddings?: () => void;  // Called when user clicks "Generate Embeddings"
   isAnalyzing?: boolean;
   analysisStep?: number;
+  // Level 0 embedding state
+  isGeneratingEmbeddings?: boolean;
+  embeddingProgress?: {
+    phase: string;
+    progress: number;
+    message: string;
+  } | null;
 }
 
 type SortField = "filename" | "date" | "dimensions";
@@ -126,11 +141,18 @@ function SlideThumbnail({
 }
 
 export function SlideSelector({
+  selectedModels,
+  onModelsChange,
+  resolutionLevel,
+  onResolutionChange,
   selectedSlideId,
   onSlideSelect,
   onAnalyze,
+  onGenerateEmbeddings,
   isAnalyzing,
   analysisStep = -1,
+  isGeneratingEmbeddings = false,
+  embeddingProgress = null,
 }: SlideSelectorProps) {
   const [slides, setSlides] = useState<SlideInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -481,18 +503,91 @@ export function SlideSelector({
             />
           </div>
         ) : (
-          <div data-demo="analyze-button">
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={onAnalyze}
-              disabled={!selectedSlideId || isAnalyzing}
-              isLoading={isAnalyzing}
-              className="w-full"
-            >
-              {isAnalyzing ? "Analyzing..." : "Run Analysis"}
-            </Button>
-          </div>
+          <>
+            {/* Model Picker */}
+            <ModelPicker
+              selectedModels={selectedModels}
+              onSelectionChange={onModelsChange}
+              resolutionLevel={resolutionLevel}
+              onResolutionChange={onResolutionChange}
+              disabled={isAnalyzing || isGeneratingEmbeddings}
+              className="mb-3"
+            />
+            
+            {/* Embedding Progress for Level 0 */}
+            {isGeneratingEmbeddings && embeddingProgress && (
+              <div className="p-4 bg-violet-50 border border-violet-200 rounded-lg mb-3 animate-fade-in">
+                <div className="flex items-center gap-2 mb-2">
+                  <Cpu className="h-4 w-4 text-violet-600 animate-pulse" />
+                  <span className="text-sm font-medium text-violet-800">
+                    Generating Level 0 Embeddings
+                  </span>
+                </div>
+                <p className="text-xs text-violet-700 mb-2">{embeddingProgress.message}</p>
+                <div className="w-full h-2 bg-violet-200 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-violet-600 transition-all duration-500"
+                    style={{ width: `${embeddingProgress.progress}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-2xs text-violet-600">{Math.round(embeddingProgress.progress)}%</span>
+                  <div className="flex items-center gap-1 text-2xs text-violet-600">
+                    <Clock className="h-3 w-3" />
+                    <span>Est. 5-20 min for full resolution</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Show "Generate Embeddings" for Level 0 when embeddings don't exist */}
+            {resolutionLevel === 0 && selectedSlideId && selectedSlide && !selectedSlide.hasLevel0Embeddings && !isGeneratingEmbeddings ? (
+              <div className="space-y-2">
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-amber-800">
+                        Level 0 Embeddings Required
+                      </p>
+                      <p className="text-xs text-amber-700 mt-1">
+                        Full-resolution analysis requires generating embeddings first. 
+                        This extracts ~5,000-30,000 patches and may take 5-20 minutes.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div data-demo="generate-embeddings-button">
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    onClick={onGenerateEmbeddings}
+                    disabled={!selectedSlideId || isAnalyzing}
+                    className="w-full border-violet-300 text-violet-700 hover:bg-violet-50"
+                  >
+                    <Cpu className="h-4 w-4 mr-2" />
+                    Generate Level 0 Embeddings
+                  </Button>
+                </div>
+                <p className="text-2xs text-gray-500 text-center">
+                  Or select Level 1 for faster analysis with existing embeddings
+                </p>
+              </div>
+            ) : (
+              <div data-demo="analyze-button">
+                <Button
+                  variant="primary"
+                  size="lg"
+                  onClick={onAnalyze}
+                  disabled={!selectedSlideId || isAnalyzing || isGeneratingEmbeddings}
+                  isLoading={isAnalyzing}
+                  className="w-full"
+                >
+                  {isAnalyzing ? "Analyzing..." : isGeneratingEmbeddings ? "Generating Embeddings..." : "Run Analysis"}
+                </Button>
+              </div>
+            )}
+          </>
         )}
 
         {/* Upload Hint */}

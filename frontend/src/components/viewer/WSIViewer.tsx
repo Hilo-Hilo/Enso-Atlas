@@ -19,6 +19,26 @@ import {
 } from "lucide-react";
 import type { PatchCoordinates, HeatmapData } from "@/types";
 
+// Heatmap model options
+const HEATMAP_MODELS = [
+  { id: null, name: "Legacy CLAM" },
+  { id: "platinum_sensitivity", name: "Platinum Sensitivity" },
+  { id: "tumor_grade", name: "Tumor Grade" },
+  { id: "survival_5y", name: "5-Year Survival" },
+  { id: "survival_3y", name: "3-Year Survival" },
+  { id: "survival_1y", name: "1-Year Survival" },
+] as const;
+
+// Viewer control interface for keyboard shortcuts
+export interface WSIViewerControls {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
+  toggleHeatmap: () => void;
+  toggleHeatmapOnly: () => void;
+  toggleFullscreen: () => void;
+}
+
 interface WSIViewerProps {
   slideId: string;
   dziUrl: string;
@@ -27,6 +47,14 @@ interface WSIViewerProps {
   onRegionClick?: (coords: PatchCoordinates) => void;
   targetCoordinates?: PatchCoordinates | null; // Navigate to this location when set
   className?: string;
+  // Heatmap model selection
+  heatmapModel?: string | null;
+  onHeatmapModelChange?: (model: string | null) => void;
+  availableModels?: Array<{id: string; name: string}>;
+  // Heatmap resolution level
+  heatmapLevel?: number; // 0-4, default 2
+  onHeatmapLevelChange?: (level: number) => void;
+  onControlsReady?: (controls: WSIViewerControls) => void;
 }
 
 export function WSIViewer({
@@ -37,6 +65,12 @@ export function WSIViewer({
   onRegionClick,
   targetCoordinates,
   className,
+  heatmapModel,
+  onHeatmapModelChange,
+  availableModels = [],
+  heatmapLevel = 2,
+  onHeatmapLevelChange,
+  onControlsReady,
 }: WSIViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
@@ -51,6 +85,7 @@ export function WSIViewer({
   const [isReady, setIsReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showHeatmap, setShowHeatmap] = useState(true); // Default to showing heatmap
+  const [heatmapOnly, setHeatmapOnly] = useState(false); // Hide pathology, show only attention
   const [heatmapOpacity, setHeatmapOpacity] = useState(0.6);
   const [zoom, setZoom] = useState(1);
   const [showToolbar, setShowToolbar] = useState(true);
@@ -240,6 +275,7 @@ export function WSIViewer({
     img.style.opacity = showHeatmap ? String(heatmapOpacity) : "0";
     img.style.transition = "opacity 0.3s ease";
     img.style.pointerEvents = "none";
+    img.style.imageRendering = "pixelated"; // Sharp square tiles
     
     img.onload = () => {
       setHeatmapLoaded(true);
@@ -255,11 +291,26 @@ export function WSIViewer({
     overlayDiv.appendChild(img);
     heatmapOverlayRef.current = overlayDiv;
 
-    // Add overlay to cover the full viewport (0,0 to 1,1 in normalized coordinates)
-    viewer.addOverlay({
-      element: overlayDiv,
-      location: new OpenSeadragon.Rect(0, 0, 1, 1),
-    });
+    // Add overlay to cover the full slide image using its actual bounds
+    // This ensures the heatmap aligns correctly regardless of slide aspect ratio
+    const tiledImage = viewer.world.getItemAt(0);
+    if (tiledImage) {
+      // Get the bounds of the tiled image in viewport coordinates
+      const bounds = tiledImage.getBounds(true);
+      console.log("Heatmap overlay bounds:", bounds);
+      
+      viewer.addOverlay({
+        element: overlayDiv,
+        location: bounds,
+      });
+    } else {
+      // Fallback to 1x1 rect if no tiled image (should not happen when isReady is true)
+      console.warn("No tiled image found, using default 1x1 bounds");
+      viewer.addOverlay({
+        element: overlayDiv,
+        location: new OpenSeadragon.Rect(0, 0, 1, 1),
+      });
+    }
 
     return () => {
       if (heatmapOverlayRef.current && viewerRef.current) {
@@ -282,6 +333,17 @@ export function WSIViewer({
     }
   }, [showHeatmap, heatmapOpacity]);
 
+  // Hide/show main pathology tiles when heatmapOnly changes
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !isReady) return;
+    
+    const tiledImage = viewer.world.getItemAt(0);
+    if (tiledImage) {
+      tiledImage.setOpacity(heatmapOnly ? 0 : 1);
+    }
+  }, [heatmapOnly, isReady]);
+
   const handleZoomIn = () => viewerRef.current?.viewport.zoomBy(1.5);
   const handleZoomOut = () => viewerRef.current?.viewport.zoomBy(0.67);
   const handleReset = () => viewerRef.current?.viewport.goHome();
@@ -295,7 +357,47 @@ export function WSIViewer({
     }
   };
 
+  // Expose controls to parent via callback
+  useEffect(() => {
+    if (onControlsReady && isReady) {
+      onControlsReady({
+        zoomIn: handleZoomIn,
+        zoomOut: handleZoomOut,
+        resetZoom: handleReset,
+        toggleHeatmap: () => setShowHeatmap((prev) => !prev),
+        toggleHeatmapOnly: () => {
+          setHeatmapOnly((prev) => {
+            if (!prev) setShowHeatmap(true);
+            return !prev;
+          });
+        },
+        toggleFullscreen: handleFullscreen,
+      });
+    }
+  }, [isReady, onControlsReady]);
+
   const scaleInfo = getScaleBarInfo();
+
+  // Model selector component
+  const ModelSelector = () => (
+    <div className="mb-3">
+      <label className="text-xs text-gray-500 mb-1.5 block">Model</label>
+      <select
+        value={heatmapModel ?? ""}
+        onChange={(e) => {
+          const value = e.target.value;
+          onHeatmapModelChange?.(value === "" ? null : value);
+        }}
+        className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-md text-gray-700 focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:border-transparent"
+      >
+        {HEATMAP_MODELS.map((model) => (
+          <option key={model.id ?? "legacy"} value={model.id ?? ""}>
+            {model.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 
   // When WSI isn't available but heatmap is, show standalone heatmap view
   if (loadError && heatmap) {
@@ -397,6 +499,7 @@ export function WSIViewer({
 
             {showHeatmapPanel && showHeatmap && (
               <div className="pt-2 border-t border-gray-100 animate-fade-in">
+                <ModelSelector />
                 <Slider
                   label="Opacity"
                   min={0}
@@ -425,7 +528,7 @@ export function WSIViewer({
       <div
         ref={containerRef}
         className="w-full h-full min-h-[400px]"
-        style={{ background: "#0f172a" }}
+        style={{ background: heatmapOnly ? "#000000" : "#0f172a" }}
       />
 
       {/* Loading Indicator */}
@@ -566,8 +669,21 @@ export function WSIViewer({
               />
             </div>
 
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">Heatmap only (J)</span>
+              <Toggle
+                checked={heatmapOnly}
+                onChange={(checked) => {
+                  setHeatmapOnly(checked);
+                  if (checked) setShowHeatmap(true);
+                }}
+                size="sm"
+              />
+            </div>
+
             {showHeatmapPanel && showHeatmap && (
               <div className="pt-2 border-t border-gray-100 animate-fade-in">
+                <ModelSelector />
                 <Slider
                   label="Opacity"
                   min={0}

@@ -53,12 +53,14 @@ RUN pip install --no-cache-dir \
     gradio \
     fastapi \
     uvicorn[standard] \
-    pydantic
+    pydantic \
+    tensorflow
 
 # Copy application code
 COPY src/ ./src/
 COPY config/ ./config/
 COPY scripts/ ./scripts/
+COPY transmil.py ./
 
 # Create directories for data and outputs
 RUN mkdir -p /app/data /app/outputs /app/cache /app/models
@@ -67,7 +69,7 @@ RUN mkdir -p /app/data /app/outputs /app/cache /app/models
 ENV ENSO_CONFIG=/app/config/default.yaml
 ENV TRANSFORMERS_CACHE=/app/cache/huggingface
 ENV HF_HOME=/app/cache/huggingface
-ENV PYTHONPATH=/app/src
+ENV PYTHONPATH=/app/src:/app
 
 # Expose ports (Gradio UI and FastAPI)
 EXPOSE 7860 8000

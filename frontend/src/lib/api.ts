@@ -2,6 +2,11 @@
 // Backend communication utilities with robust error handling
 
 import type {
+  Tag,
+  Group,
+  SlideFilters,
+  SlideSearchResult,
+  ExtendedSlideInfo,
   AnalysisRequest,
   AnalysisResponse,
   ReportRequest,
@@ -19,9 +24,13 @@ import type {
   BatchAnalyzeResponse,
   BatchAnalysisResult,
   BatchAnalysisSummary,
+  ModelPrediction,
+  AvailableModel,
+  MultiModelResponse,
+  AvailableModelsResponse,
 } from "@/types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://100.111.126.23:8003";
 
 // Configuration for retry behavior
 const RETRY_CONFIG = {
@@ -256,9 +265,13 @@ interface BackendSlideInfo {
   slide_id: string;
   patient_id?: string;
   has_embeddings: boolean;
+  has_level0_embeddings?: boolean;  // Whether level 0 (full res) embeddings exist
   label?: string;
   num_patches?: number;
   patient?: BackendPatientContext;
+  dimensions?: { width: number; height: number };
+  mpp?: number;
+  magnification?: string;
 }
 
 /**
@@ -271,13 +284,14 @@ export async function getSlides(): Promise<SlidesListResponse> {
     slides: slides.map(s => ({
       id: s.slide_id,
       filename: `${s.slide_id}.svs`,
-      dimensions: { width: 0, height: 0 },
-      magnification: 40,
-      mpp: 0.25,
+      dimensions: s.dimensions ?? { width: 0, height: 0 },
+      magnification: s.magnification ? parseInt(s.magnification.replace('x', ''), 10) : 40,
+      mpp: s.mpp ?? 0.25,
       createdAt: new Date().toISOString(),
       // Extended fields from backend
       label: s.label,
       hasEmbeddings: s.has_embeddings,
+      hasLevel0Embeddings: s.has_level0_embeddings ?? false,  // Level 0 embedding status
       numPatches: s.num_patches,
       // Patient context
       patient: s.patient ? {
@@ -550,9 +564,16 @@ export function getDziUrl(slideId: string): string {
 
 /**
  * Get heatmap overlay image URL
+ * @param slideId - Slide identifier
+ * @param modelId - Optional model ID for multi-model heatmaps
+ * @param level - Downsample level (0-4): 0=2048px highest detail, 2=512px default, 4=128px fastest
  */
-export function getHeatmapUrl(slideId: string): string {
-  return `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/heatmap`;
+export function getHeatmapUrl(slideId: string, modelId?: string, level?: number): string {
+  const levelParam = level !== undefined ? `?level=${level}` : '';
+  if (modelId) {
+    return `${API_BASE_URL}/api/heatmap/${encodeURIComponent(slideId)}/${encodeURIComponent(modelId)}${levelParam}`;
+  }
+  return `${API_BASE_URL}/api/heatmap/${encodeURIComponent(slideId)}${levelParam}`;
 }
 
 /**
@@ -634,7 +655,7 @@ export async function healthCheck(): Promise<{ status: string; version: string }
   return fetchApi<{ status: string; version: string }>(
     "/api/health",
     {},
-    { timeoutMs: 5000, skipRetry: true }
+    { timeoutMs: 15000, skipRetry: true }
   );
 }
 
@@ -1090,16 +1111,6 @@ export async function checkConnection(): Promise<boolean> {
     return false;
   }
 }
-
-// ====== Multi-Model Analysis API ======
-
-import type {
-  ModelPrediction,
-  AvailableModel,
-  MultiModelResponse,
-  AvailableModelsResponse,
-} from "@/types";
-
 // Backend multi-model response (snake_case)
 interface BackendModelPrediction {
   model_id: string;
@@ -1186,10 +1197,49 @@ export async function getAvailableModels(): Promise<AvailableModelsResponse> {
  * Analyze a slide with multiple TransMIL models
  * Uses extended timeout for running multiple models
  */
+
+/**
+ * Embed a slide on-demand using DINOv2.
+ * Called automatically before analysis if embeddings don't exist.
+ */
+export async function embedSlide(
+  slideId: string,
+  level: number = 1,
+  force: boolean = false
+): Promise<{ status: string; numPatches: number; message: string; level: number }> {
+  const response = await fetchApi<{
+    status: string;
+    slide_id: string;
+    level: number;
+    num_patches: number;
+    processing_time_seconds?: number;
+    message: string;
+  }>(
+    "/api/embed-slide",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        slide_id: slideId,
+        level: level,
+        force: force,
+      }),
+    },
+    { timeoutMs: 1800000 } // 30 minute timeout for level 0 embedding
+  );
+
+  return {
+    status: response.status,
+    numPatches: response.num_patches,
+    message: response.message,
+    level: response.level,
+  };
+}
+
 export async function analyzeSlideMultiModel(
   slideId: string,
   models?: string[],
-  returnAttention: boolean = false
+  returnAttention: boolean = false,
+  level: number = 1  // 0 = full resolution, 1 = downsampled
 ): Promise<MultiModelResponse> {
   const backend = await fetchApi<BackendMultiModelResponse>(
     "/api/analyze-multi",
@@ -1197,8 +1247,9 @@ export async function analyzeSlideMultiModel(
       method: "POST",
       body: JSON.stringify({
         slide_id: slideId,
-        models: models || null,
+        models: (models === undefined ? null : models),
         return_attention: returnAttention,
+        level: level,
       }),
     },
     { timeoutMs: 120000 } // 2 minute timeout for multi-model analysis
@@ -1219,5 +1270,854 @@ export async function analyzeSlideMultiModel(
     },
     nPatches: backend.n_patches,
     processingTimeMs: backend.processing_time_ms,
+  };
+}
+
+
+// Backend response types (snake_case)
+interface BackendTag {
+  name: string;
+  color?: string;
+  count: number;
+}
+
+interface BackendGroup {
+  id: string;
+  name: string;
+  description?: string;
+  slide_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackendSlideSearchResult {
+  slides: BackendSlideInfo[];
+  total: number;
+  page: number;
+  per_page: number;
+  filters: SlideFilters;
+}
+
+// ====== Tags API ======
+
+/**
+ * Get all tags with their usage counts
+ */
+export async function getAllTags(): Promise<Tag[]> {
+  const backend = await fetchApi<BackendTag[]>("/api/tags");
+  return backend.map(t => ({
+    name: t.name,
+    color: t.color,
+    count: t.count,
+  }));
+}
+
+/**
+ * Add tags to a slide
+ */
+export async function addTagsToSlide(slideId: string, tags: string[]): Promise<void> {
+  await fetchApi<{ success: boolean }>(
+    `/api/slides/${encodeURIComponent(slideId)}/tags`,
+    {
+      method: "POST",
+      body: JSON.stringify({ tags }),
+    }
+  );
+}
+
+/**
+ * Remove a tag from a slide
+ */
+export async function removeTagFromSlide(slideId: string, tag: string): Promise<void> {
+  await fetchApi<{ success: boolean }>(
+    `/api/slides/${encodeURIComponent(slideId)}/tags/${encodeURIComponent(tag)}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
+
+// ====== Groups API ======
+
+/**
+ * Get all slide groups
+ */
+export async function getGroups(): Promise<Group[]> {
+  const backend = await fetchApi<BackendGroup[]>("/api/groups");
+  return backend.map(g => ({
+    id: g.id,
+    name: g.name,
+    description: g.description,
+    slideIds: g.slide_ids,
+    createdAt: g.created_at,
+    updatedAt: g.updated_at,
+  }));
+}
+
+/**
+ * Create a new slide group
+ */
+export async function createGroup(name: string, description?: string): Promise<Group> {
+  const backend = await fetchApi<BackendGroup>(
+    "/api/groups",
+    {
+      method: "POST",
+      body: JSON.stringify({ name, description }),
+    }
+  );
+  return {
+    id: backend.id,
+    name: backend.name,
+    description: backend.description,
+    slideIds: backend.slide_ids,
+    createdAt: backend.created_at,
+    updatedAt: backend.updated_at,
+  };
+}
+
+/**
+ * Update a slide group
+ */
+export async function updateGroup(groupId: string, updates: Partial<Group>): Promise<Group> {
+  const backend = await fetchApi<BackendGroup>(
+    `/api/groups/${encodeURIComponent(groupId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: updates.name,
+        description: updates.description,
+        slide_ids: updates.slideIds,
+      }),
+    }
+  );
+  return {
+    id: backend.id,
+    name: backend.name,
+    description: backend.description,
+    slideIds: backend.slide_ids,
+    createdAt: backend.created_at,
+    updatedAt: backend.updated_at,
+  };
+}
+
+/**
+ * Delete a slide group
+ */
+export async function deleteGroup(groupId: string): Promise<void> {
+  await fetchApi<{ success: boolean }>(
+    `/api/groups/${encodeURIComponent(groupId)}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
+
+/**
+ * Add slides to a group
+ */
+export async function addSlidesToGroup(groupId: string, slideIds: string[]): Promise<void> {
+  await fetchApi<{ success: boolean }>(
+    `/api/groups/${encodeURIComponent(groupId)}/slides`,
+    {
+      method: "POST",
+      body: JSON.stringify({ slide_ids: slideIds }),
+    }
+  );
+}
+
+/**
+ * Remove a slide from a group
+ */
+export async function removeSlideFromGroup(groupId: string, slideId: string): Promise<void> {
+  await fetchApi<{ success: boolean }>(
+    `/api/groups/${encodeURIComponent(groupId)}/slides/${encodeURIComponent(slideId)}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
+
+// ====== Search/Filter API ======
+
+/**
+ * Search and filter slides with pagination
+ */
+export async function searchSlides(filters: SlideFilters): Promise<SlideSearchResult> {
+  const params = new URLSearchParams();
+  
+  if (filters.search) params.set("search", filters.search);
+  if (filters.tags?.length) params.set("tags", filters.tags.join(","));
+  if (filters.groupId) params.set("group_id", filters.groupId);
+  if (filters.hasEmbeddings !== undefined) params.set("has_embeddings", String(filters.hasEmbeddings));
+  if (filters.label) params.set("label", filters.label);
+  if (filters.minPatches !== undefined) params.set("min_patches", String(filters.minPatches));
+  if (filters.maxPatches !== undefined) params.set("max_patches", String(filters.maxPatches));
+  if (filters.starred !== undefined) params.set("starred", String(filters.starred));
+  if (filters.dateFrom) params.set("date_from", filters.dateFrom);
+  if (filters.dateTo) params.set("date_to", filters.dateTo);
+  if (filters.sortBy) params.set("sort_by", filters.sortBy);
+  if (filters.sortOrder) params.set("sort_order", filters.sortOrder);
+  if (filters.page !== undefined) params.set("page", String(filters.page));
+  if (filters.perPage !== undefined) params.set("per_page", String(filters.perPage));
+
+  const backend = await fetchApi<BackendSlideSearchResult>(
+    `/api/slides/search?${params.toString()}`
+  );
+
+  return {
+    slides: backend.slides.map(s => ({
+      id: s.slide_id,
+      filename: `${s.slide_id}.svs`,
+      dimensions: s.dimensions ?? { width: 0, height: 0 },
+      magnification: s.magnification ? parseInt(s.magnification.replace('x', ''), 10) : 40,
+      mpp: s.mpp ?? 0.25,
+      createdAt: new Date().toISOString(),
+      label: s.label,
+      hasEmbeddings: s.has_embeddings,
+      numPatches: s.num_patches,
+      patient: s.patient ? {
+        age: s.patient.age,
+        sex: s.patient.sex,
+        stage: s.patient.stage,
+        grade: s.patient.grade,
+        prior_lines: s.patient.prior_lines,
+        histology: s.patient.histology,
+      } : undefined,
+    })),
+    total: backend.total,
+    page: backend.page,
+    perPage: backend.per_page,
+    filters: backend.filters,
+  };
+}
+
+// ====== Metadata API ======
+
+/**
+ * Update slide custom metadata
+ */
+export async function updateSlideMetadata(
+  slideId: string, 
+  metadata: Record<string, unknown>
+): Promise<void> {
+  await fetchApi<{ success: boolean }>(
+    `/api/slides/${encodeURIComponent(slideId)}/metadata`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ metadata }),
+    }
+  );
+}
+
+/**
+ * Toggle slide star status
+ * Returns the new starred state
+ */
+export async function toggleSlideStar(slideId: string): Promise<boolean> {
+  const result = await fetchApi<{ starred: boolean }>(
+    `/api/slides/${encodeURIComponent(slideId)}/star`,
+    {
+      method: "POST",
+    }
+  );
+  return result.starred;
+}
+
+// ====== Bulk Operations API ======
+
+/**
+ * Add tags to multiple slides at once
+ */
+export async function bulkAddTags(slideIds: string[], tags: string[]): Promise<void> {
+  await fetchApi<{ success: boolean; count: number }>(
+    "/api/bulk/tags",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        slide_ids: slideIds,
+        tags,
+      }),
+    }
+  );
+}
+
+/**
+ * Add multiple slides to a group at once
+ */
+export async function bulkAddToGroup(slideIds: string[], groupId: string): Promise<void> {
+  await fetchApi<{ success: boolean; count: number }>(
+    "/api/bulk/group",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        slide_ids: slideIds,
+        group_id: groupId,
+      }),
+    }
+  );
+}
+
+// ====== Embedding Task Polling ======
+
+export interface EmbeddingTaskStatus {
+  task_id: string;
+  slide_id: string;
+  level: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number;  // 0-100
+  message: string;
+  num_patches: number;
+  processing_time_seconds: number;
+  error: string | null;
+  elapsed_seconds: number;
+  embedding_path?: string;
+}
+
+export interface EmbedSlideResponse {
+  status: 'exists' | 'completed' | 'started' | 'in_progress';
+  task_id?: string;
+  slide_id: string;
+  level: number;
+  num_patches?: number;
+  message: string;
+  estimated_time_minutes?: number;
+  progress?: number;
+}
+
+/**
+ * Start embedding for a slide. For level 0, returns a task_id to poll.
+ */
+export async function embedSlideAsync(
+  slideId: string,
+  level: number = 1,
+  force: boolean = false
+): Promise<EmbedSlideResponse> {
+  const response = await fetchApi<EmbedSlideResponse>(
+    "/api/embed-slide",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        slide_id: slideId,
+        level: level,
+        force: force,
+        async: level === 0,  // Force async for level 0
+      }),
+    },
+    { timeoutMs: 120000 }  // 2 min timeout for initial request
+  );
+  return response;
+}
+
+/**
+ * Get status of an embedding task.
+ */
+export async function getEmbeddingTaskStatus(taskId: string): Promise<EmbeddingTaskStatus> {
+  return fetchApi<EmbeddingTaskStatus>(
+    `/api/embed-slide/status/${encodeURIComponent(taskId)}`,
+    {},
+    { timeoutMs: 10000, skipRetry: true }
+  );
+}
+
+/**
+ * Poll embedding task until completion or failure.
+ * Calls onProgress callback with status updates.
+ * Returns final status when done.
+ */
+export async function pollEmbeddingTask(
+  taskId: string,
+  onProgress?: (status: EmbeddingTaskStatus) => void,
+  pollIntervalMs: number = 2000,
+  maxWaitMs: number = 1800000  // 30 minutes max
+): Promise<EmbeddingTaskStatus> {
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const status = await getEmbeddingTaskStatus(taskId);
+      
+      if (onProgress) {
+        onProgress(status);
+      }
+      
+      if (status.status === 'completed' || status.status === 'failed') {
+        return status;
+      }
+      
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    } catch (error) {
+      // On network error, wait and retry
+      console.warn('Polling error, retrying...', error);
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs * 2));
+    }
+  }
+  
+  throw new AtlasApiError({
+    code: 'TIMEOUT',
+    message: `Embedding task ${taskId} did not complete within ${maxWaitMs / 60000} minutes`,
+    isTimeout: true,
+  });
+}
+
+/**
+ * Embed a slide with automatic polling for level 0.
+ * Returns when embedding is complete.
+ */
+export async function embedSlideWithPolling(
+  slideId: string,
+  level: number = 1,
+  force: boolean = false,
+  onProgress?: (status: { phase: string; progress: number; message: string }) => void
+): Promise<{ status: string; numPatches: number; message: string; level: number }> {
+  // Start embedding
+  const response = await embedSlideAsync(slideId, level, force);
+  
+  // If already exists or completed inline, return immediately
+  if (response.status === 'exists' || response.status === 'completed') {
+    if (onProgress) {
+      onProgress({
+        phase: 'complete',
+        progress: 100,
+        message: response.message,
+      });
+    }
+    return {
+      status: response.status,
+      numPatches: response.num_patches || 0,
+      message: response.message,
+      level: response.level,
+    };
+  }
+  
+  // If started as background task, poll for completion
+  if (response.status === 'started' || response.status === 'in_progress') {
+    if (!response.task_id) {
+      throw new AtlasApiError({
+        code: 'INVALID_RESPONSE',
+        message: 'Background task started but no task_id returned',
+      });
+    }
+    
+    if (onProgress) {
+      onProgress({
+        phase: 'embedding',
+        progress: response.progress || 0,
+        message: response.message,
+      });
+    }
+    
+    // Poll until complete
+    const finalStatus = await pollEmbeddingTask(
+      response.task_id,
+      (status) => {
+        if (onProgress) {
+          onProgress({
+            phase: status.status === 'completed' ? 'complete' : 'embedding',
+            progress: status.progress,
+            message: status.message,
+          });
+        }
+      }
+    );
+    
+    if (finalStatus.status === 'failed') {
+      throw new AtlasApiError({
+        code: 'EMBEDDING_FAILED',
+        message: finalStatus.error || 'Embedding failed',
+      });
+    }
+    
+    return {
+      status: finalStatus.status,
+      numPatches: finalStatus.num_patches,
+      message: finalStatus.message,
+      level: level,
+    };
+  }
+  
+  // Unexpected status
+  throw new AtlasApiError({
+    code: 'INVALID_RESPONSE',
+    message: `Unexpected embedding status: ${response.status}`,
+  });
+}
+
+// ====== Async Report Generation ======
+
+export interface ReportTaskStatus {
+  task_id: string;
+  slide_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number;
+  message: string;
+  stage: string;
+  error?: string;
+  elapsed_seconds: number;
+  result?: {
+    slide_id: string;
+    report_json: Record<string, unknown>;
+    summary_text: string;
+  };
+}
+
+export interface AsyncReportResponse {
+  task_id: string;
+  slide_id: string;
+  status: string;
+  message: string;
+  estimated_time_seconds: number;
+}
+
+/**
+ * Start async report generation
+ * Returns a task_id for polling
+ */
+export async function startReportGeneration(slideId: string): Promise<AsyncReportResponse> {
+  return fetchApi<AsyncReportResponse>(
+    '/api/report/async',
+    {
+      method: 'POST',
+      body: JSON.stringify({ slide_id: slideId }),
+    },
+    { timeoutMs: 10000 }
+  );
+}
+
+/**
+ * Poll report generation status
+ */
+export async function getReportStatus(taskId: string): Promise<ReportTaskStatus> {
+  return fetchApi<ReportTaskStatus>(
+    `/api/report/status/${encodeURIComponent(taskId)}`,
+    { method: 'GET' },
+    { timeoutMs: 10000 }
+  );
+}
+
+/**
+ * Generate report with async polling (improved UX)
+ * Returns progress updates via callback, then final report
+ */
+export async function generateReportWithProgress(
+  request: ReportRequest,
+  onProgress?: (progress: number, message: string) => void
+): Promise<StructuredReport> {
+  // Start async generation
+  const asyncResponse = await startReportGeneration(request.slideId);
+  const taskId = asyncResponse.task_id;
+  
+  // Poll for completion
+  const maxWaitMs = 120000; // 2 minute max wait
+  const pollIntervalMs = 1000; // Poll every second
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxWaitMs) {
+    const status = await getReportStatus(taskId);
+    
+    // Report progress
+    if (onProgress) {
+      onProgress(status.progress, status.message);
+    }
+    
+    if (status.status === 'completed' && status.result) {
+      // Transform backend response to frontend format
+      return transformBackendReport(status.result);
+    }
+    
+    if (status.status === 'failed') {
+      throw new AtlasApiError({
+        code: 'REPORT_GENERATION_FAILED',
+        message: status.error || 'Report generation failed',
+      });
+    }
+    
+    // Wait before next poll
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+  
+  throw new AtlasApiError({
+    code: 'REPORT_TIMEOUT',
+    message: 'Report generation timed out after 2 minutes',
+    isTimeout: true,
+  });
+}
+
+/**
+ * Transform backend report to frontend StructuredReport format
+ */
+function transformBackendReport(backend: {
+  slide_id: string;
+  report_json: Record<string, unknown>;
+  summary_text: string;
+}): StructuredReport {
+  const reportJson = backend.report_json as {
+    case_id?: string;
+    task?: string;
+    model_output?: {
+      label: string;
+      probability: number;
+      calibration_note?: string;
+    };
+    evidence?: Array<{
+      patch_id?: string;
+      coordinates?: number[];
+      morphology_description?: string;
+      significance?: string;
+      attention_weight?: number;
+    }>;
+    similar_examples?: Array<{
+      example_id?: string;
+      slide_id?: string;
+      label?: string;
+      distance?: number;
+      similarity_score?: number;
+    }>;
+    limitations?: string[];
+    suggested_next_steps?: string[];
+    safety_statement?: string;
+    decision_support?: {
+      risk_level: string;
+      confidence_level: string;
+      confidence_score: number;
+      primary_recommendation: string;
+      supporting_rationale?: string[];
+      alternative_considerations?: string[];
+      guideline_references?: Array<{
+        source: string;
+        section: string;
+        recommendation: string;
+        url?: string;
+      }>;
+      uncertainty_statement?: string;
+      quality_warnings?: string[];
+      suggested_workup?: string[];
+      interpretation_note?: string;
+      caveat?: string;
+    };
+  };
+
+  const modelOutput = reportJson.model_output || { label: 'unknown', probability: 0.5 };
+  
+  const evidence = (reportJson.evidence || []).map((e, idx) => ({
+    patchId: e.patch_id || `patch_${idx}`,
+    coordsLevel0: (e.coordinates || [0, 0]) as [number, number],
+    morphologyDescription: e.morphology_description || 
+      `High-attention region with attention weight ${(e.attention_weight || 0).toFixed(3)}`,
+    whyThisPatchMatters: e.significance ||
+      'This region shows morphological patterns associated with the predicted classification.',
+  }));
+
+  const similarExamples = (reportJson.similar_examples || []).map((s) => ({
+    exampleId: s.example_id || s.slide_id || 'unknown',
+    label: s.label || 'unknown',
+    distance: s.distance ?? (1 - (s.similarity_score || 0)),
+  }));
+
+  const decisionSupport = reportJson.decision_support ? {
+    risk_level: reportJson.decision_support.risk_level as import('@/types').RiskLevel,
+    confidence_level: reportJson.decision_support.confidence_level as import('@/types').ConfidenceLevel,
+    confidence_score: reportJson.decision_support.confidence_score,
+    primary_recommendation: reportJson.decision_support.primary_recommendation,
+    supporting_rationale: reportJson.decision_support.supporting_rationale || [],
+    alternative_considerations: reportJson.decision_support.alternative_considerations || [],
+    guideline_references: reportJson.decision_support.guideline_references || [],
+    uncertainty_statement: reportJson.decision_support.uncertainty_statement || 
+      'Prediction confidence should be interpreted in the context of slide quality.',
+    quality_warnings: reportJson.decision_support.quality_warnings || [],
+    suggested_workup: reportJson.decision_support.suggested_workup || [],
+    interpretation_note: reportJson.decision_support.interpretation_note ||
+      'This is an AI-generated interpretation. Clinical correlation is essential.',
+    caveat: reportJson.decision_support.caveat ||
+      'This tool is for research purposes only.',
+  } : undefined;
+
+  const defaultLimitations = [
+    'This is an uncalibrated research model',
+    'Prediction is based on morphological patterns only',
+    'Model trained on limited dataset',
+  ];
+
+  const defaultNextSteps = [
+    'Correlate findings with clinical history',
+    'Review high-attention regions',
+    'Consider molecular profiling',
+  ];
+
+  return {
+    caseId: reportJson.case_id || backend.slide_id,
+    task: reportJson.task || 'Bevacizumab treatment response prediction',
+    generatedAt: new Date().toISOString(),
+    modelOutput: {
+      label: modelOutput.label.toUpperCase(),
+      score: modelOutput.probability,
+      confidence: Math.abs(modelOutput.probability - 0.5) * 2,
+      calibrationNote: modelOutput.calibration_note || 
+        'Model probability requires external validation.',
+    },
+    evidence,
+    similarExamples,
+    limitations: reportJson.limitations?.length ? reportJson.limitations : defaultLimitations,
+    suggestedNextSteps: reportJson.suggested_next_steps?.length ? reportJson.suggested_next_steps : defaultNextSteps,
+    safetyStatement: reportJson.safety_statement || 
+      'This is a research tool. All findings must be validated by qualified clinicians.',
+    summary: backend.summary_text,
+    decisionSupport,
+  };
+}
+
+
+// ====== Async Batch Analysis API ======
+
+/**
+ * Async batch task response types
+ */
+export interface AsyncBatchTaskStatus {
+  task_id: string;
+  status: "pending" | "running" | "completed" | "cancelled" | "failed";
+  progress: number;
+  current_slide_index: number;
+  current_slide_id: string;
+  total_slides: number;
+  completed_slides: number;
+  message: string;
+  error?: string;
+  elapsed_seconds: number;
+  cancel_requested: boolean;
+  results_count: number;
+  // Full results only when completed
+  results?: Array<{
+    slide_id: string;
+    prediction: string;
+    score: number;
+    confidence: number;
+    patches_analyzed: number;
+    requires_review: boolean;
+    uncertainty_level: string;
+    error?: string;
+  }>;
+  summary?: {
+    total: number;
+    completed: number;
+    failed: number;
+    responders: number;
+    non_responders: number;
+    uncertain: number;
+    avg_confidence: number;
+    requires_review_count: number;
+  };
+  processing_time_ms?: number;
+}
+
+/**
+ * Start async batch analysis with progress tracking
+ */
+export async function startBatchAnalysisAsync(
+  slideIds: string[],
+  concurrency: number = 4
+): Promise<{ task_id: string; status: string; total_slides: number; message: string }> {
+  return fetchApi<{ task_id: string; status: string; total_slides: number; message: string }>(
+    "/api/analyze-batch/async",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        slide_ids: slideIds,
+        concurrency,
+      }),
+    }
+  );
+}
+
+/**
+ * Get status of an async batch analysis task
+ */
+export async function getBatchAnalysisStatus(
+  taskId: string
+): Promise<AsyncBatchTaskStatus> {
+  return fetchApi<AsyncBatchTaskStatus>(
+    `/api/analyze-batch/status/${taskId}`
+  );
+}
+
+/**
+ * Cancel a running batch analysis task
+ */
+export async function cancelBatchAnalysis(
+  taskId: string
+): Promise<{ success: boolean; message: string; completed_slides?: number }> {
+  return fetchApi<{ success: boolean; message: string; completed_slides?: number }>(
+    `/api/analyze-batch/cancel/${taskId}`,
+    { method: "POST" }
+  );
+}
+
+/**
+ * List all batch analysis tasks
+ */
+export async function listBatchTasks(
+  status?: string
+): Promise<{ tasks: AsyncBatchTaskStatus[]; total: number }> {
+  const params = status ? `?status=${status}` : "";
+  return fetchApi<{ tasks: AsyncBatchTaskStatus[]; total: number }>(
+    `/api/analyze-batch/tasks${params}`
+  );
+}
+
+/**
+ * Poll batch analysis until completion or cancellation
+ * @param taskId - Task ID to poll
+ * @param onProgress - Callback for progress updates
+ * @param pollIntervalMs - Poll interval in milliseconds (default 1000)
+ * @returns Final task status with results
+ */
+export async function pollBatchAnalysis(
+  taskId: string,
+  onProgress?: (status: AsyncBatchTaskStatus) => void,
+  pollIntervalMs: number = 1000
+): Promise<AsyncBatchTaskStatus> {
+  let status = await getBatchAnalysisStatus(taskId);
+  
+  while (status.status === "pending" || status.status === "running") {
+    onProgress?.(status);
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    status = await getBatchAnalysisStatus(taskId);
+  }
+  
+  onProgress?.(status);
+  return status;
+}
+
+/**
+ * Convert async batch results to the standard BatchAnalyzeResponse format
+ */
+export function convertAsyncBatchResults(
+  asyncStatus: AsyncBatchTaskStatus
+): BatchAnalyzeResponse | null {
+  if (!asyncStatus.results || !asyncStatus.summary) {
+    return null;
+  }
+  
+  return {
+    results: asyncStatus.results.map((r) => ({
+      slideId: r.slide_id,
+      prediction: r.prediction,
+      score: r.score,
+      confidence: r.confidence,
+      patchesAnalyzed: r.patches_analyzed,
+      requiresReview: r.requires_review,
+      uncertaintyLevel: r.uncertainty_level as BatchAnalysisResult["uncertaintyLevel"],
+      error: r.error,
+    })),
+    summary: {
+      total: asyncStatus.summary.total,
+      completed: asyncStatus.summary.completed,
+      failed: asyncStatus.summary.failed,
+      responders: asyncStatus.summary.responders,
+      nonResponders: asyncStatus.summary.non_responders,
+      uncertain: asyncStatus.summary.uncertain,
+      avgConfidence: asyncStatus.summary.avg_confidence,
+      requiresReviewCount: asyncStatus.summary.requires_review_count,
+    },
+    processingTimeMs: asyncStatus.processing_time_ms || asyncStatus.elapsed_seconds * 1000,
   };
 }

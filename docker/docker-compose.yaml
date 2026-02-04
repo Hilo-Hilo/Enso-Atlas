@@ -21,14 +21,15 @@ services:
       TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-0}"
       HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
     volumes:
-      # Persistent data storage
-      - atlas-data:/app/data
-      - atlas-outputs:/app/outputs
+      # Bind mount local data directory with full TCGA embeddings
+      - /home/hansonwen/med-gemma-hackathon/data:/app/data
+      - /home/hansonwen/med-gemma-hackathon/outputs:/app/outputs
       - atlas-cache:/app/cache
       # Model storage (pre-downloaded)
-      - atlas-models:/app/models
-      # Optional: mount local slides for processing
-      # - /path/to/hospital/slides:/app/data/slides:ro
+      - /home/hansonwen/.cache/huggingface:/root/.cache/huggingface
+      - /home/hansonwen/med-gemma-hackathon/models:/app/models
+      # Source code mount for development (allows live editing)
+      - /home/hansonwen/med-gemma-hackathon/src:/app/src:ro
     ports:
       - "7862:7860"
       - "8003:8000"
@@ -41,8 +42,6 @@ services:
       start_period: 60s
 
 volumes:
-  atlas-data:
-    driver: local
   atlas-outputs:
     driver: local
   atlas-cache:

@@ -89,7 +89,9 @@ class MedGemmaReporter:
         from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor
 
         # Determine device
-        if torch.cuda.is_available():
+        # Force CPU to avoid CUDA driver issues on Blackwell GPUs
+        use_cpu = True  # Set to False to re-enable CUDA when driver is updated
+        if not use_cpu and torch.cuda.is_available():
             self._device = torch.device("cuda")
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             self._device = torch.device("mps")
@@ -122,6 +124,37 @@ class MedGemmaReporter:
 
         self._model.eval()
         logger.info("MedGemma model loaded successfully")
+
+
+    def _warmup_inference(self) -> None:
+        """Run a test inference to warm up CUDA kernels."""
+        import torch
+        
+        self._load_model()
+        
+        # Short test prompt
+        test_prompt = "Describe healthy tissue."
+        
+        try:
+            inputs = self._tokenizer(
+                test_prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=128,
+            )
+            inputs = {k: v.to(self._device) for k, v in inputs.items()}
+            
+            with torch.no_grad():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=16,
+                    do_sample=False,
+                    pad_token_id=self._tokenizer.eos_token_id,
+                )
+            
+            logger.info("MedGemma warmup inference completed")
+        except Exception as e:
+            logger.warning(f"MedGemma warmup inference failed: {e}")
 
     def _format_patient_context(self, patient_context: Optional[Dict]) -> str:
         """Format patient context into a clinical description."""

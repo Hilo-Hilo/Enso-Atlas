@@ -18,6 +18,7 @@ import {
   OncologistSummaryView,
   PathologistView,
   BatchAnalysisPanel,
+  AIAssistantPanel,
   recordAnalysis,
   getCaseNotes,
 } from "@/components/panels";
@@ -25,9 +26,12 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
-import { getDziUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel } from "@/lib/api";
+import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling } from "@/lib/api";
 import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
 import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse } from "@/types";
+import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui";
+import { ChevronLeft, ChevronRight, Layers, BarChart3, X } from "lucide-react";
 
 // Dynamically import WSIViewer to prevent SSR issues with OpenSeadragon
 const WSIViewer = nextDynamic(
@@ -35,6 +39,87 @@ const WSIViewer = nextDynamic(
   { ssr: false, loading: () => <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg">Loading viewer...</div> }
 );
 
+// Available models for attention overlay
+const HEATMAP_MODELS = [
+  { id: "platinum_sensitivity", name: "Platinum Sensitivity" },
+  { id: "tumor_grade", name: "Tumor Grade" },
+  { id: "survival_5y", name: "5-Year Survival" },
+  { id: "survival_3y", name: "3-Year Survival" },
+  { id: "survival_1y", name: "1-Year Survival" },
+];
+
+// Mobile Panel Tab Component
+type MobilePanelTab = "slides" | "results";
+
+function MobilePanelTabs({
+  activeTab,
+  onTabChange,
+  hasResults,
+}: {
+  activeTab: MobilePanelTab;
+  onTabChange: (tab: MobilePanelTab) => void;
+  hasResults: boolean;
+}) {
+  return (
+    <div className="flex items-center bg-white border-b border-gray-200 lg:hidden">
+      <button
+        onClick={() => onTabChange("slides")}
+        className={cn(
+          "flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2",
+          activeTab === "slides"
+            ? "text-clinical-600 border-clinical-500 bg-clinical-50/50"
+            : "text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-50"
+        )}
+      >
+        <Layers className="h-4 w-4" />
+        <span>Slides</span>
+      </button>
+      <button
+        onClick={() => onTabChange("results")}
+        className={cn(
+          "flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 relative",
+          activeTab === "results"
+            ? "text-clinical-600 border-clinical-500 bg-clinical-50/50"
+            : "text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-50"
+        )}
+      >
+        <BarChart3 className="h-4 w-4" />
+        <span>Results</span>
+        {hasResults && activeTab !== "results" && (
+          <span className="absolute top-2 right-1/4 w-2 h-2 bg-clinical-500 rounded-full" />
+        )}
+      </button>
+    </div>
+  );
+}
+
+// Collapsible Sidebar Toggle
+function SidebarToggle({
+  side,
+  isOpen,
+  onClick,
+}: {
+  side: "left" | "right";
+  isOpen: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "hidden lg:flex absolute top-1/2 -translate-y-1/2 z-10 w-6 h-12 items-center justify-center bg-white border border-gray-200 shadow-sm hover:bg-gray-50 transition-colors",
+        side === "left" ? "-right-3 rounded-r-lg border-l-0" : "-left-3 rounded-l-lg border-r-0"
+      )}
+      title={isOpen ? "Collapse panel" : "Expand panel"}
+    >
+      {side === "left" ? (
+        isOpen ? <ChevronLeft className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />
+      ) : (
+        isOpen ? <ChevronRight className="h-4 w-4 text-gray-500" /> : <ChevronLeft className="h-4 w-4 text-gray-500" />
+      )}
+    </button>
+  );
+}
 
 export default function HomePage() {
   // State
@@ -62,6 +147,13 @@ export default function HomePage() {
   // Demo mode state
   const [demoMode, setDemoMode] = useState(false);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+
+  // Mobile panel state
+  const [mobilePanelTab, setMobilePanelTab] = useState<MobilePanelTab>("slides");
+
+  // Desktop sidebar collapse state
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
 
   // Check if this is a first visit (show welcome modal)
   useEffect(() => {
@@ -93,11 +185,26 @@ export default function HomePage() {
 
   // Slide QC metrics state
   const [slideQCMetrics, setSlideQCMetrics] = useState<SlideQCMetrics | null>(null);
+  const [selectedModels, setSelectedModels] = useState<string[]>(["platinum_sensitivity", "tumor_grade"]);
+  const [resolutionLevel, setResolutionLevel] = useState<number>(1); // 0 = full res, 1 = downsampled
+  const [heatmapModel, setHeatmapModel] = useState<string | null>(null); // null = legacy CLAM heatmap
+  const [heatmapLevel, setHeatmapLevel] = useState<number>(2); // 0-4, default 2 (512px)
 
   // Multi-model analysis state
   const [multiModelResult, setMultiModelResult] = useState<MultiModelResponse | null>(null);
   const [isAnalyzingMultiModel, setIsAnalyzingMultiModel] = useState(false);
   const [multiModelError, setMultiModelError] = useState<string | null>(null);
+
+  // Embedding progress state for better UX during long operations
+  const [embeddingProgress, setEmbeddingProgress] = useState<{
+    phase: "idle" | "embedding" | "analyzing" | "complete";
+    progress: number;
+    message: string;
+    startTime?: number;
+  } | null>(null);
+  
+  // State for tracking embedding generation separately from analysis
+  const [isGeneratingEmbeddings, setIsGeneratingEmbeddings] = useState(false);
 
   // Slide list state for keyboard navigation
   const [slideList, setSlideList] = useState<SlideInfo[]>([]);
@@ -117,6 +224,7 @@ export default function HomePage() {
     resetZoom: () => void;
     toggleHeatmap: () => void;
     toggleFullscreen: () => void;
+    toggleHeatmapOnly: () => void;
   } | null>(null);
 
   // Analysis hook
@@ -133,7 +241,12 @@ export default function HomePage() {
     retryAnalysis,
     retryReport,
     analysisStep,
+    reportProgress,
+    reportProgressMessage,
   } = useAnalysis();
+
+  // Toast notifications for user feedback
+  const toast = useToast();
 
   // Annotation handlers
   const handleAddAnnotation = useCallback(
@@ -198,7 +311,7 @@ export default function HomePage() {
     };
 
     loadAnnotations();
-  }, [selectedSlide]);
+  }, [selectedSlide, selectedModels]);
 
   // Load slide list for keyboard navigation and batch mode
   useEffect(() => {
@@ -299,6 +412,10 @@ export default function HomePage() {
     viewerControlsRef.current?.toggleFullscreen();
   }, []);
 
+  const handleToggleHeatmapOnly = useCallback(() => {
+    viewerControlsRef.current?.toggleHeatmapOnly();
+  }, []);
+
   const handlePrintReport = useCallback(() => {
     if (report) {
       window.print();
@@ -380,9 +497,215 @@ export default function HomePage() {
     [selectedSlide]
   );
 
+
+  // Handle generating level 0 embeddings (separate from analysis)
+  const handleGenerateEmbeddings = useCallback(async () => {
+    if (!selectedSlide) return;
+
+    setIsGeneratingEmbeddings(true);
+    setEmbeddingProgress({ 
+      phase: "embedding",
+      progress: 0,
+      message: "Starting embedding generation...",
+      startTime: Date.now(),
+    });
+
+    const toastId = toast.loading(
+      "Generating Embeddings",
+      `Starting level ${resolutionLevel} embedding for ${selectedSlide.id}...`
+    );
+
+    try {
+      const embedResult = await embedSlideWithPolling(
+        selectedSlide.id, 
+        resolutionLevel,
+        false,  // don't force re-embed
+        (progress) => {
+          setEmbeddingProgress((prev) => ({
+            phase: progress.phase === 'complete' ? 'complete' : 'embedding',
+            progress: progress.progress,
+            message: progress.message,
+            startTime: prev?.startTime ?? Date.now(),
+          }));
+          
+          toast.updateToast(toastId, {
+            message: `${progress.message} (${Math.round(progress.progress)}%)`,
+          });
+        }
+      );
+      
+      console.log("Embedding result:", embedResult);
+      
+      toast.removeToast(toastId);
+      toast.success(
+        "Embeddings Ready",
+        `Generated embeddings for ${embedResult.numPatches} patches. You can now run analysis.`
+      );
+      
+      // Refresh slide list to update hasLevel0Embeddings status
+      const response = await getSlides();
+      setSlideList(response.slides);
+      
+      // Update selected slide with new embedding status
+      const updatedSlide = response.slides.find(s => s.id === selectedSlide.id);
+      if (updatedSlide) {
+        setSelectedSlide(updatedSlide);
+      }
+      
+    } catch (err) {
+      console.error("Embedding generation failed:", err);
+      toast.removeToast(toastId);
+      
+      const errorMessage = err instanceof Error ? err.message : "Embedding failed";
+      toast.error("Embedding Failed", errorMessage);
+    } finally {
+      setIsGeneratingEmbeddings(false);
+      setEmbeddingProgress(null);
+    }
+  }, [selectedSlide, resolutionLevel, toast]);
+
+  // Handle multi-model analysis with improved error handling and progress
+  const handleMultiModelAnalyze = useCallback(async () => {
+    if (!selectedSlide) return;
+
+    // Check if level 0 is selected but embeddings don't exist
+    if (resolutionLevel === 0 && !selectedSlide.hasLevel0Embeddings) {
+      toast.error(
+        "Embeddings Required",
+        "Please generate Level 0 embeddings first before running analysis."
+      );
+      return;
+    }
+
+    setIsAnalyzingMultiModel(true);
+    setMultiModelError(null);
+    setEmbeddingProgress({ 
+      phase: "embedding",
+      progress: 0,
+      message: "Preparing tissue patches for analysis...",
+      startTime: Date.now(),
+    });
+
+    const toastId = toast.loading(
+      "Starting Analysis",
+      "Checking if slide embeddings exist..."
+    );
+
+    try {
+      // First, ensure embeddings exist (uses background task with polling for level 0)
+      console.log("Checking/generating embeddings for slide:", selectedSlide.id, "level:", resolutionLevel);
+      
+      toast.updateToast(toastId, {
+        message: `Generating Path Foundation embeddings at level ${resolutionLevel} (level 0 may take 5-20 min)...`,
+      });
+
+      // Use the new polling-based embed function
+      const embedResult = await embedSlideWithPolling(
+        selectedSlide.id, 
+        resolutionLevel,
+        false,  // don't force re-embed
+        (progress) => {
+          // Update progress UI with real-time status from backend
+          setEmbeddingProgress((prev) => ({
+            phase: progress.phase === 'complete' ? 'analyzing' : 'embedding',
+            progress: progress.progress,
+            message: progress.message,
+            startTime: prev?.startTime ?? Date.now(),
+          }));
+          
+          toast.updateToast(toastId, {
+            message: `${progress.message} (${Math.round(progress.progress)}%)`,
+          });
+        }
+      );
+      
+      console.log("Embedding result:", embedResult);
+
+      const embeddingMsg = embedResult.status === "exists" 
+        ? "Using cached embeddings" 
+        : `Generated embeddings for ${embedResult.numPatches} patches`;
+      
+      toast.updateToast(toastId, {
+        title: "Embeddings Ready",
+        message: embeddingMsg + ". Running model inference...",
+      });
+      
+      setEmbeddingProgress((prev) => ({
+        phase: "analyzing",
+        progress: 100,
+        message: "Running multi-model inference...",
+        startTime: prev?.startTime
+      }));
+
+      // Then run multi-model analysis with the correct level
+      const result = await analyzeSlideMultiModel(selectedSlide.id, selectedModels, false, resolutionLevel);
+      setMultiModelResult(result);
+      
+      // Success toast
+      toast.removeToast(toastId);
+      toast.success(
+        "Analysis Complete",
+        `Analyzed ${result.nPatches} patches with ${result.byCategory.ovarianCancer.length + result.byCategory.generalPathology.length} models`
+      );
+      
+    } catch (err) {
+      console.error("Multi-model analysis failed:", err);
+      
+      toast.removeToast(toastId);
+      
+      // Determine if it was an embedding error or analysis error
+      const errorMessage = err instanceof Error ? err.message : "Analysis failed";
+      const isEmbeddingError = errorMessage.toLowerCase().includes("embed") || 
+                              errorMessage.toLowerCase().includes("dino") ||
+                              errorMessage.toLowerCase().includes("patch") ||
+                              errorMessage.toLowerCase().includes("timeout");
+      
+      // Check if it's a level 0 embeddings required error
+      const needsLevel0 = errorMessage.toLowerCase().includes("level0_embeddings_required") ||
+                          errorMessage.toLowerCase().includes("level 0");
+      
+      if (needsLevel0) {
+        setMultiModelError(
+          "Level 0 embeddings are required for full-resolution analysis. Please click 'Generate Level 0 Embeddings' first."
+        );
+        toast.error(
+          "Embeddings Required",
+          "Generate Level 0 embeddings before running analysis."
+        );
+      } else if (isEmbeddingError) {
+        const userFriendlyMsg = "Failed to generate slide embeddings. This could be due to:\n" +
+          "• Slide file not found or corrupted\n" +
+          "• GPU memory issues on the server\n" +
+          "• Network timeout (level 0 embedding can take 5-20 minutes)\n\n" +
+          "Please try again or contact support if the issue persists.";
+        
+        setMultiModelError(userFriendlyMsg);
+        toast.error(
+          "Embedding Failed",
+          "Could not generate embeddings for this slide. See details in panel."
+        );
+      } else {
+        setMultiModelError(
+          `Model analysis failed: ${errorMessage}.\n\nThis may be due to server load or a temporary issue. Please try again.`
+        );
+        toast.error(
+          "Analysis Failed",
+          errorMessage.length > 100 ? errorMessage.substring(0, 100) + "..." : errorMessage
+        );
+      }
+    } finally {
+      setIsAnalyzingMultiModel(false);
+      setEmbeddingProgress(null);
+    }
+  }, [selectedSlide, selectedModels, resolutionLevel, toast]);
   // Handle analyze button
   const handleAnalyze = useCallback(async () => {
     if (!selectedSlide) return;
+
+    // On mobile, switch to results tab when analysis starts
+    setMobilePanelTab("results");
+    
+    toast.info("Starting Analysis", "Analyzing slide with CLAM model...");
 
     const startTime = Date.now();
     const result = await analyze({
@@ -400,29 +723,15 @@ export default function HomePage() {
         result.prediction.confidence,
         processingTime
       );
+      toast.success(
+        "CLAM Analysis Complete",
+        `Prediction: ${result.prediction.label} (${Math.round(result.prediction.confidence * 100)}% confidence)`
+      );
     }
 
     // Also run multi-model analysis
     handleMultiModelAnalyze();
-  }, [selectedSlide, analyze]);
-
-  // Handle multi-model analysis
-  const handleMultiModelAnalyze = useCallback(async () => {
-    if (!selectedSlide) return;
-
-    setIsAnalyzingMultiModel(true);
-    setMultiModelError(null);
-
-    try {
-      const result = await analyzeSlideMultiModel(selectedSlide.id);
-      setMultiModelResult(result);
-    } catch (err) {
-      console.error("Multi-model analysis failed:", err);
-      setMultiModelError(err instanceof Error ? err.message : "Analysis failed");
-    } finally {
-      setIsAnalyzingMultiModel(false);
-    }
-  }, [selectedSlide]);
+  }, [selectedSlide, analyze, toast, handleMultiModelAnalyze]);
 
   // Retry multi-model analysis
   const handleRetryMultiModel = useCallback(() => {
@@ -480,9 +789,8 @@ export default function HomePage() {
       setMultiModelResult(null);
       setMultiModelError(null);
       
-      // Optionally auto-analyze the new slide
-      // Uncomment if you want to auto-analyze when clicking a similar case:
-      // analyze({ slideId: slide.id, patchBudget: 8000, magnification: 20 });
+      // Switch to slides tab on mobile
+      setMobilePanelTab("slides");
     } else {
       // Slide not found - show a message or try to load it directly
       console.warn(`Similar case ${caseId} not found in slide list`);
@@ -540,6 +848,7 @@ export default function HomePage() {
     },
     {
       key: "+",
+      modifiers: { shift: true },
       description: "Zoom in",
       category: "Viewer",
       handler: handleViewerZoomIn,
@@ -563,10 +872,17 @@ export default function HomePage() {
       handler: handleToggleHeatmap,
     },
     {
+      key: "j",
+      description: "Toggle heatmap-only mode",
+      category: "Viewer",
+      handler: handleToggleHeatmapOnly,
+    },
+    {
       key: "f",
       description: "Fullscreen viewer",
       category: "Viewer",
       handler: handleToggleFullscreen,
+    handleToggleHeatmapOnly,
     },
     // Panel shortcuts
     {
@@ -628,6 +944,7 @@ export default function HomePage() {
     },
     {
       key: "?",
+      modifiers: { shift: true },
       description: "Show keyboard shortcuts",
       category: "Actions",
       handler: () => setShortcutsModalOpen(true),
@@ -640,6 +957,7 @@ export default function HomePage() {
     handleViewerResetZoom,
     handleToggleHeatmap,
     handleToggleFullscreen,
+    handleToggleHeatmapOnly,
     handleFocusPanel,
     handleFocusSearch,
     handlePrintReport,
@@ -698,7 +1016,177 @@ export default function HomePage() {
 
   // Get DZI and heatmap URLs
   const dziUrl = selectedSlide ? getDziUrl(selectedSlide.id) : undefined;
-  const heatmapData = analysisResult?.heatmap;
+  
+  // Build heatmap data with selected model
+  const heatmapData = selectedSlide ? {
+    imageUrl: getHeatmapUrl(selectedSlide.id, heatmapModel || undefined, heatmapLevel),
+    minValue: 0,
+    maxValue: 1,
+    colorScale: "viridis" as const,
+  } : undefined;
+
+  // Determine if we have results to show
+  const hasResults = !!analysisResult || isAnalyzing;
+
+  // Render left sidebar content
+  const renderLeftSidebarContent = () => (
+    <>
+      <SlideSelector
+        selectedSlideId={selectedSlide?.id ?? null}
+        onSlideSelect={handleSlideSelect}
+        onAnalyze={handleAnalyze}
+        onGenerateEmbeddings={handleGenerateEmbeddings}
+        isAnalyzing={isAnalyzing}
+        analysisStep={analysisStep}
+        selectedModels={selectedModels}
+        onModelsChange={setSelectedModels}
+        resolutionLevel={resolutionLevel}
+        onResolutionChange={setResolutionLevel}
+        isGeneratingEmbeddings={isGeneratingEmbeddings}
+        embeddingProgress={embeddingProgress}
+      />
+
+      {/* Error Display */}
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-start gap-2">
+            <svg
+              className="h-4 w-4 text-red-500 mt-0.5 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-800">
+                Operation Failed
+              </p>
+              <p className="text-xs text-red-700 mt-0.5">{error}</p>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={retryAnalysis}
+                  className="text-xs text-red-700 font-medium hover:text-red-900 underline"
+                >
+                  Retry
+                </button>
+                <button
+                  onClick={clearError}
+                  className="text-xs text-red-600 hover:text-red-800"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Stats Dashboard */}
+      <QuickStatsPanel />
+
+      {/* Case Notes */}
+      <CaseNotesPanel slideId={selectedSlide?.id ?? null} />
+    </>
+  );
+
+  // Render right sidebar content (oncologist mode)
+  const renderRightSidebarContent = () => (
+    <>
+      {/* Prediction Results */}
+      <div ref={predictionPanelRef} tabIndex={-1} className="focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:ring-offset-2 rounded-lg" data-demo="prediction-panel">
+        <PredictionPanel
+          prediction={analysisResult?.prediction ?? null}
+          isLoading={isAnalyzing}
+          processingTime={analysisResult?.processingTimeMs}
+          analysisStep={analysisStep}
+          error={!isAnalyzing && !analysisResult ? error : null}
+          onRetry={retryAnalysis}
+          qcMetrics={slideQCMetrics}
+        />
+      </div>
+
+      {/* Multi-Model Analysis Results */}
+      <div data-demo="multi-model-panel">
+        <MultiModelPredictionPanel
+          multiModelResult={multiModelResult}
+          isLoading={isAnalyzingMultiModel}
+          processingTime={multiModelResult?.processingTimeMs}
+          error={multiModelError}
+          onRunAnalysis={selectedSlide ? handleMultiModelAnalyze : undefined}
+          onRetry={handleRetryMultiModel}
+          embeddingProgress={embeddingProgress}
+        />
+      </div>
+
+      {/* Evidence Patches */}
+      <div ref={evidencePanelRef} tabIndex={-1} className="focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:ring-offset-2 rounded-lg" data-demo="evidence-panel">
+        <EvidencePanel
+          patches={analysisResult?.evidencePatches ?? []}
+          isLoading={isAnalyzing}
+          onPatchClick={handlePatchClick}
+          onPatchZoom={handlePatchZoom}
+          selectedPatchId={selectedPatchId}
+          error={!isAnalyzing && error && !analysisResult ? error : null}
+          onRetry={retryAnalysis}
+        />
+      </div>
+
+      {/* Semantic Search */}
+      <SemanticSearchPanel
+        slideId={selectedSlide?.id ?? null}
+        isAnalyzed={!!analysisResult}
+        onSearch={handleSemanticSearch}
+        results={semanticResults}
+        isSearching={isSearching}
+        error={searchError}
+        onPatchClick={handlePatchClick}
+        selectedPatchId={selectedPatchId}
+      />
+
+      {/* Similar Cases */}
+      <div data-demo="similar-cases">
+        <SimilarCasesPanel
+          cases={analysisResult?.similarCases ?? []}
+          isLoading={isAnalyzing}
+          onCaseClick={handleCaseClick}
+          error={!isAnalyzing && error && !analysisResult ? error : null}
+          onRetry={retryAnalysis}
+        />
+      </div>
+
+      {/* Clinical Report */}
+      <div data-demo="report-panel">
+        <ReportPanel
+          report={report}
+          isLoading={isGeneratingReport}
+          progress={reportProgress}
+          progressMessage={reportProgressMessage}
+          onGenerateReport={
+            analysisResult && !report ? handleGenerateReport : undefined
+          }
+          onExportPdf={report ? handleExportPdf : undefined}
+          onExportJson={report ? handleExportJson : undefined}
+          error={!isGeneratingReport && !report && error ? error : null}
+          onRetry={retryReport}
+        />
+
+      {/* AI Assistant */}
+      <div data-demo="ai-assistant">
+        <AIAssistantPanel
+          slideId={selectedSlide?.id ?? null}
+          clinicalContext=""
+          onAnalysisComplete={(report) => console.log("Agent report:", report)}
+        />
+      </div>
+      </div>
+    </>
+  );
 
   return (
     <div className="flex flex-col h-screen bg-surface-secondary">
@@ -717,11 +1205,20 @@ export default function HomePage() {
         onReconnect={handleReconnect}
       />
 
+      {/* Mobile Panel Tabs - Only show when not in batch mode */}
+      {userViewMode !== "batch" && (
+        <MobilePanelTabs
+          activeTab={mobilePanelTab}
+          onTabChange={setMobilePanelTab}
+          hasResults={hasResults}
+        />
+      )}
+
       {/* Main Content */}
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Batch Mode - Full Width Panel */}
         {userViewMode === "batch" ? (
-          <div className="flex-1 p-6 bg-gray-50">
+          <div className="flex-1 p-3 sm:p-4 lg:p-6 bg-gray-50 overflow-auto">
             <div className="max-w-6xl mx-auto h-full">
               <BatchAnalysisPanel
                 onSlideSelect={(slideId) => {
@@ -742,95 +1239,71 @@ export default function HomePage() {
         <aside
           ref={slideSelectorRef as React.RefObject<HTMLElement>}
           tabIndex={-1}
-          className="w-80 border-r border-surface-border bg-white p-4 overflow-y-auto shrink-0 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500"
+          className={cn(
+            "bg-white border-b lg:border-b-0 lg:border-r border-surface-border overflow-y-auto shrink-0 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative transition-all duration-300",
+            // Mobile: Full width, show/hide based on tab
+            "lg:hidden",
+            mobilePanelTab === "slides" ? "flex-1 p-3 sm:p-4" : "hidden"
+          )}
           data-demo="slide-selector"
         >
-          <SlideSelector
-            selectedSlideId={selectedSlide?.id ?? null}
-            onSlideSelect={handleSlideSelect}
-            onAnalyze={handleAnalyze}
-            isAnalyzing={isAnalyzing}
-            analysisStep={analysisStep}
-          />
+          {renderLeftSidebarContent()}
+        </aside>
 
-          {/* Error Display */}
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="flex items-start gap-2">
-                <svg
-                  className="h-4 w-4 text-red-500 mt-0.5 shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-red-800">
-                    Operation Failed
-                  </p>
-                  <p className="text-xs text-red-700 mt-0.5">{error}</p>
-                  <div className="flex gap-2 mt-2">
-                    <button
-                      onClick={retryAnalysis}
-                      className="text-xs text-red-700 font-medium hover:text-red-900 underline"
-                    >
-                      Retry
-                    </button>
-                    <button
-                      onClick={clearError}
-                      className="text-xs text-red-600 hover:text-red-800"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+        {/* Left Sidebar - Desktop */}
+        <aside
+          ref={slideSelectorRef as React.RefObject<HTMLElement>}
+          tabIndex={-1}
+          className={cn(
+            "hidden lg:block bg-white border-r border-surface-border p-4 overflow-y-auto shrink-0 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative transition-all duration-300",
+            leftSidebarOpen ? "w-72 xl:w-80" : "w-0 p-0 overflow-hidden"
           )}
-
-          {/* Quick Stats Dashboard */}
-          <QuickStatsPanel />
-
-          {/* Case Notes */}
-          <CaseNotesPanel slideId={selectedSlide?.id ?? null} />
+          data-demo="slide-selector"
+        >
+          {leftSidebarOpen && renderLeftSidebarContent()}
+          <SidebarToggle
+            side="left"
+            isOpen={leftSidebarOpen}
+            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+          />
         </aside>
 
         {/* Center - WSI Viewer or Oncologist Summary */}
         <section
           ref={viewerRef as React.RefObject<HTMLElement>}
           tabIndex={-1}
-          className="flex-1 flex flex-col overflow-hidden focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500"
+          className={cn(
+            "flex-1 flex flex-col overflow-hidden focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500",
+            // On mobile, hide when viewing panels
+            "hidden lg:flex",
+            // Show on mobile when we have a slide selected OR when there are no panels to show
+            (selectedSlide || (!hasResults && mobilePanelTab === "results")) && "flex"
+          )}
         >
           {/* View Mode Toggle - Only show in oncologist mode */}
           {userViewMode === "oncologist" && selectedSlide && analysisResult && (
             <div className="flex items-center justify-center gap-2 p-2 bg-white border-b border-gray-200">
-              <span className="text-xs text-gray-500 mr-2">View Mode:</span>
+              <span className="text-xs text-gray-500 mr-2 hidden sm:inline">View Mode:</span>
               <div className="flex items-center bg-gray-100 rounded-lg p-1">
                 <button
                   onClick={() => setViewMode("wsi")}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  className={`px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
                     viewMode === "wsi"
                       ? "bg-white text-clinical-700 shadow-sm"
                       : "text-gray-600 hover:text-gray-900"
                   }`}
                 >
-                  Full WSI Viewer
+                  WSI Viewer
                 </button>
                 <button
                   onClick={() => setViewMode("summary")}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  className={`px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
                     viewMode === "summary"
                       ? "bg-white text-clinical-700 shadow-sm"
                       : "text-gray-600 hover:text-gray-900"
                   }`}
                 >
-                  Oncologist Summary
+                  Summary
                 </button>
               </div>
             </div>
@@ -838,18 +1311,18 @@ export default function HomePage() {
 
           {/* Pathologist mode header */}
           {userViewMode === "pathologist" && selectedSlide && (
-            <div className="flex items-center justify-between px-4 py-2 bg-violet-50 border-b border-violet-200">
-              <span className="text-sm font-medium text-violet-700">
-                WSI Viewer - Full Navigation Mode
+            <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-violet-50 border-b border-violet-200">
+              <span className="text-xs sm:text-sm font-medium text-violet-700">
+                WSI Viewer
               </span>
-              <span className="text-xs text-violet-500">
-                Pan, zoom, and annotate the whole slide image
+              <span className="text-2xs sm:text-xs text-violet-500 hidden sm:inline">
+                Pan, zoom, and annotate
               </span>
             </div>
           )}
 
           {/* Content Area */}
-          <div className="flex-1 p-4 overflow-hidden" data-demo="wsi-viewer">
+          <div className="flex-1 p-2 sm:p-3 lg:p-4 overflow-hidden" data-demo="wsi-viewer">
             {userViewMode === "oncologist" && viewMode === "summary" && analysisResult ? (
               <OncologistSummaryView
                 analysisResult={analysisResult}
@@ -866,13 +1339,19 @@ export default function HomePage() {
                 onRegionClick={handlePatchClick}
                 targetCoordinates={targetCoordinates}
                 className="h-full"
+                heatmapModel={heatmapModel}
+                heatmapLevel={heatmapLevel}
+                onHeatmapLevelChange={setHeatmapLevel}
+                onHeatmapModelChange={setHeatmapModel}
+                availableModels={HEATMAP_MODELS}
+                onControlsReady={(controls) => { viewerControlsRef.current = controls; }}
               />
             ) : (
-              <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg border-2 border-dashed border-gray-300">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 p-4">
+                <div className="text-center max-w-sm">
+                  <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
                     <svg
-                      className="w-8 h-8 text-gray-400"
+                      className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -885,13 +1364,18 @@ export default function HomePage() {
                       />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-1">
+                  <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1">
                     No Slide Selected
                   </h3>
-                  <p className="text-sm text-gray-500 max-w-sm">
-                    Select a whole-slide image from the sidebar to begin analysis.
-                    The slide will be displayed here with interactive viewing and
-                    heatmap overlay capabilities.
+                  <p className="text-xs sm:text-sm text-gray-500">
+                    Select a whole-slide image from the{" "}
+                    <button
+                      onClick={() => setMobilePanelTab("slides")}
+                      className="text-clinical-600 font-medium underline lg:no-underline lg:cursor-default"
+                    >
+                      sidebar
+                    </button>{" "}
+                    to begin analysis.
                   </p>
                 </div>
               </div>
@@ -900,9 +1384,14 @@ export default function HomePage() {
         </section>
 
         {/* Right Sidebar - Results (Oncologist) or Pathologist View */}
-        <aside className={`${userViewMode === "pathologist" ? "w-[420px]" : "w-96"} border-l border-surface-border bg-white p-4 overflow-y-auto shrink-0 space-y-4`}>
+        {/* Mobile Version */}
+        <aside
+          className={cn(
+            "lg:hidden bg-white overflow-y-auto space-y-4",
+            mobilePanelTab === "results" ? "flex-1 p-3 sm:p-4" : "hidden"
+          )}
+        >
           {userViewMode === "pathologist" && selectedSlide && analysisResult ? (
-            /* Pathologist Mode */
             <PathologistView
               analysisResult={analysisResult}
               annotations={annotations}
@@ -914,92 +1403,53 @@ export default function HomePage() {
               slideId={selectedSlide.id}
             />
           ) : (
-            /* Oncologist Mode */
+            renderRightSidebarContent()
+          )}
+        </aside>
+
+        {/* Desktop Version */}
+        <aside
+          className={cn(
+            "hidden lg:block border-l border-surface-border bg-white p-4 overflow-y-auto shrink-0 space-y-4 relative transition-all duration-300",
+            rightSidebarOpen
+              ? userViewMode === "pathologist"
+                ? "w-96 xl:w-[420px]"
+                : "w-80 xl:w-96"
+              : "w-0 p-0 overflow-hidden"
+          )}
+        >
+          {rightSidebarOpen && (
             <>
-              {/* Prediction Results */}
-              <div ref={predictionPanelRef} tabIndex={-1} className="focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:ring-offset-2 rounded-lg" data-demo="prediction-panel">
-                <PredictionPanel
-                  prediction={analysisResult?.prediction ?? null}
-                  isLoading={isAnalyzing}
-                  processingTime={analysisResult?.processingTimeMs}
-                  analysisStep={analysisStep}
-                  error={!isAnalyzing && !analysisResult ? error : null}
-                  onRetry={retryAnalysis}
-                  qcMetrics={slideQCMetrics}
-                />
-              </div>
-
-              {/* Multi-Model Analysis Results */}
-              <div data-demo="multi-model-panel">
-                <MultiModelPredictionPanel
-                  multiModelResult={multiModelResult}
-                  isLoading={isAnalyzingMultiModel}
-                  processingTime={multiModelResult?.processingTimeMs}
-                  error={multiModelError}
-                  onRunAnalysis={selectedSlide ? handleMultiModelAnalyze : undefined}
-                  onRetry={handleRetryMultiModel}
-                />
-              </div>
-
-              {/* Evidence Patches */}
-              <div ref={evidencePanelRef} tabIndex={-1} className="focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:ring-offset-2 rounded-lg" data-demo="evidence-panel">
-                <EvidencePanel
-                  patches={analysisResult?.evidencePatches ?? []}
-                  isLoading={isAnalyzing}
-                  onPatchClick={handlePatchClick}
-                  onPatchZoom={handlePatchZoom}
+              {userViewMode === "pathologist" && selectedSlide && analysisResult ? (
+                <PathologistView
+                  analysisResult={analysisResult}
+                  annotations={annotations}
+                  onAddAnnotation={handleAddAnnotation}
+                  onDeleteAnnotation={handleDeleteAnnotation}
+                  onPatchClick={(patchId) => setSelectedPatchId(patchId)}
+                  onSwitchToOncologistView={() => setUserViewMode("oncologist")}
                   selectedPatchId={selectedPatchId}
-                  error={!isAnalyzing && error && !analysisResult ? error : null}
-                  onRetry={retryAnalysis}
+                  slideId={selectedSlide.id}
                 />
-              </div>
-
-              {/* Semantic Search */}
-              <SemanticSearchPanel
-                slideId={selectedSlide?.id ?? null}
-                isAnalyzed={!!analysisResult}
-                onSearch={handleSemanticSearch}
-                results={semanticResults}
-                isSearching={isSearching}
-                error={searchError}
-                onPatchClick={handlePatchClick}
-                selectedPatchId={selectedPatchId}
-              />
-
-              {/* Similar Cases */}
-              <div data-demo="similar-cases">
-                <SimilarCasesPanel
-                  cases={analysisResult?.similarCases ?? []}
-                  isLoading={isAnalyzing}
-                  onCaseClick={handleCaseClick}
-                  error={!isAnalyzing && error && !analysisResult ? error : null}
-                  onRetry={retryAnalysis}
-                />
-              </div>
-
-              {/* Clinical Report */}
-              <div data-demo="report-panel">
-                <ReportPanel
-                  report={report}
-                  isLoading={isGeneratingReport}
-                  onGenerateReport={
-                    analysisResult && !report ? handleGenerateReport : undefined
-                  }
-                  onExportPdf={report ? handleExportPdf : undefined}
-                  onExportJson={report ? handleExportJson : undefined}
-                  error={!isGeneratingReport && !report && error ? error : null}
-                  onRetry={retryReport}
-                />
-              </div>
+              ) : (
+                renderRightSidebarContent()
+              )}
             </>
           )}
+          <SidebarToggle
+            side="right"
+            isOpen={rightSidebarOpen}
+            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+          />
         </aside>
         </>
         )}
       </main>
 
-      {/* Footer */}
-      <Footer version="0.1.0" />
+      {/* Footer - Hidden on mobile when viewing panels */}
+      <div className="hidden sm:block">
+        <Footer version="0.1.0" />
+      </div>
 
       {/* Patch Zoom Modal */}
       <PatchZoomModal

@@ -448,7 +448,14 @@ function SimilarCaseItem({
   const [thumbnailLoading, setThumbnailLoading] = useState(true);
   
   const distance = case_.distance ?? 0;
-  const similarityScore = Math.max(0, Math.min(100, Math.round((1 - distance) * 100)));
+  // Use pre-computed similarity from backend (already handles L2 to similarity conversion)
+  // Scale to percentage: raw similarity (~0.001-0.003) mapped to display range (60-95%)
+  const rawSimilarity = case_.similarity ?? (distance > 0 ? 1.0 / (1.0 + distance) : 0);
+  // Transform small similarity values to a more intuitive percentage display
+  // Uses log scale to spread out the values meaningfully
+  const similarityScore = Math.max(0, Math.min(100, 
+    Math.round(60 + 35 * Math.min(1, rawSimilarity / 0.003))
+  ));
 
   const isResponder =
     case_.label?.toLowerCase().includes("positive") ||

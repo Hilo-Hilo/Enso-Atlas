@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 interface LogoProps {
   size?: "sm" | "md" | "lg";
-  variant?: "full" | "mark";
+  variant?: "full" | "icon" | "mark";
   className?: string;
 }
 
@@ -24,11 +24,14 @@ export function Logo({ size = "md", variant = "full", className }: LogoProps) {
 
   const { icon, text } = sizeMap[size];
 
+  // For icon-only variant (alias for mark), just render the icon
+  const showWordmark = variant === "full";
+
   return (
-    <div className={cn("flex items-center gap-3", className)}>
+    <div className={cn("flex items-center gap-2 sm:gap-3", className)}>
       {/* Logo Mark - Stylized Enso with microscope lens */}
       <div
-        className="relative flex items-center justify-center"
+        className="relative flex items-center justify-center shrink-0"
         style={{ width: icon, height: icon }}
       >
         <svg
@@ -116,12 +119,12 @@ export function Logo({ size = "md", variant = "full", className }: LogoProps) {
       </div>
 
       {/* Wordmark */}
-      {variant === "full" && (
-        <div className="flex flex-col">
+      {showWordmark && (
+        <div className="flex flex-col min-w-0">
           <span className={cn("font-semibold tracking-tight text-white leading-none", text)}>
             Enso<span className="text-clinical-400">Atlas</span>
           </span>
-          <span className="text-[10px] text-gray-400 tracking-wider uppercase mt-0.5">
+          <span className="text-[10px] text-gray-400 tracking-wider uppercase mt-0.5 hidden sm:block">
             Pathology Evidence Engine
           </span>
         </div>

@@ -26,6 +26,7 @@ export interface SlideInfo {
   // Extended fields from backend
   label?: string;
   hasEmbeddings?: boolean;
+  hasLevel0Embeddings?: boolean; // Whether full-resolution (level 0) embeddings exist
   numPatches?: number;
   patient?: PatientContext;
 }
@@ -371,4 +372,59 @@ export interface MultiModelResponse {
 // Available models response
 export interface AvailableModelsResponse {
   models: AvailableModel[];
+}
+
+// ====== Slide Manager Types ======
+
+// Tag for organizing slides
+export interface Tag {
+  name: string;
+  color?: string;
+  count: number;
+}
+
+// Group for collections of slides
+export interface Group {
+  id: string;
+  name: string;
+  description?: string;
+  slideIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Filters for searching/filtering slides
+export interface SlideFilters {
+  search?: string;
+  tags?: string[];
+  groupId?: string;
+  hasEmbeddings?: boolean;
+  label?: string;
+  minPatches?: number;
+  maxPatches?: number;
+  starred?: boolean;
+  dateFrom?: string;
+  dateTo?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  perPage?: number;
+}
+
+// Search result with pagination
+export interface SlideSearchResult {
+  slides: SlideInfo[];
+  total: number;
+  page: number;
+  perPage: number;
+  filters: SlideFilters;
+}
+
+// Extended SlideInfo fields (add to existing interface via intersection or extend)
+export interface ExtendedSlideInfo extends SlideInfo {
+  tags?: string[];
+  groups?: string[];
+  starred?: boolean;
+  customMetadata?: Record<string, unknown>;
+  notes?: string;
 }
