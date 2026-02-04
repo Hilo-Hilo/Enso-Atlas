@@ -57,6 +57,8 @@ interface ModelPickerProps {
   onSelectionChange: (models: string[]) => void;
   resolutionLevel: number;
   onResolutionChange: (level: number) => void;
+  forceReembed: boolean;
+  onForceReembedChange: (force: boolean) => void;
   disabled?: boolean;
   className?: string;
 }
@@ -66,6 +68,8 @@ export function ModelPicker({
   onSelectionChange,
   resolutionLevel,
   onResolutionChange,
+  forceReembed,
+  onForceReembedChange,
   disabled = false,
   className,
 }: ModelPickerProps) {
@@ -177,6 +181,26 @@ export function ModelPicker({
                 Level 0 provides higher accuracy but may take 5-20 min for first analysis.
               </p>
             )}
+            <label
+              className={cn(
+                "mt-3 flex items-start gap-2 text-xs text-gray-600",
+                disabled && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={forceReembed}
+                onChange={(event) => onForceReembedChange(event.target.checked)}
+                disabled={disabled}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-clinical-600 focus:ring-clinical-500"
+              />
+              <span className="flex-1">
+                <span className="font-medium text-gray-700">Force Re-embed</span>
+                <span className="block text-2xs text-gray-500">
+                  Regenerate embeddings even if cached.
+                </span>
+              </span>
+            </label>
           </div>
 
           {/* Quick Actions */}
@@ -211,45 +235,47 @@ export function ModelPicker({
             </button>
           </div>
 
-          {/* Ovarian Cancer Models */}
-          <div>
-            <div className="flex items-center gap-1.5 mb-2">
-              <Activity className="h-3 w-3 text-pink-500" />
-              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                Ovarian Cancer
-              </span>
+          <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1">
+            {/* Ovarian Cancer Models */}
+            <div>
+              <div className="flex items-center gap-1.5 mb-2">
+                <Activity className="h-3 w-3 text-pink-500" />
+                <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                  Ovarian Cancer
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {ovarianModels.map((model) => (
+                  <ModelCheckbox
+                    key={model.id}
+                    model={model}
+                    checked={selectedModels.includes(model.id)}
+                    onChange={() => toggleModel(model.id)}
+                    disabled={disabled}
+                  />
+                ))}
+              </div>
             </div>
-            <div className="space-y-1.5">
-              {ovarianModels.map((model) => (
-                <ModelCheckbox
-                  key={model.id}
-                  model={model}
-                  checked={selectedModels.includes(model.id)}
-                  onChange={() => toggleModel(model.id)}
-                  disabled={disabled}
-                />
-              ))}
-            </div>
-          </div>
 
-          {/* General Pathology Models */}
-          <div>
-            <div className="flex items-center gap-1.5 mb-2">
-              <FlaskConical className="h-3 w-3 text-blue-500" />
-              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                General Pathology
-              </span>
-            </div>
-            <div className="space-y-1.5">
-              {generalModels.map((model) => (
-                <ModelCheckbox
-                  key={model.id}
-                  model={model}
-                  checked={selectedModels.includes(model.id)}
-                  onChange={() => toggleModel(model.id)}
-                  disabled={disabled}
-                />
-              ))}
+            {/* General Pathology Models */}
+            <div>
+              <div className="flex items-center gap-1.5 mb-2">
+                <FlaskConical className="h-3 w-3 text-blue-500" />
+                <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                  General Pathology
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {generalModels.map((model) => (
+                  <ModelCheckbox
+                    key={model.id}
+                    model={model}
+                    checked={selectedModels.includes(model.id)}
+                    onChange={() => toggleModel(model.id)}
+                    disabled={disabled}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </div>
