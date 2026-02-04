@@ -337,7 +337,7 @@ export function SlideTable({
   const allSelected = slides.length > 0 && slides.every((s) => selectedIds.has(s.id));
   const someSelected = slides.some((s) => selectedIds.has(s.id));
 
-  if (isLoading) {
+  if (isLoading && slides.length === 0) {
     return (
       <div className="overflow-x-auto">
         <table className="w-full">

@@ -274,37 +274,102 @@ interface BackendSlideInfo {
   magnification?: string;
 }
 
+interface BackendSlidesListResponse {
+  slides: BackendSlideInfo[];
+  total?: number;
+  page?: number;
+  per_page?: number;
+}
+
 /**
  * Fetch list of available slides
  */
-export async function getSlides(): Promise<SlidesListResponse> {
-  // Backend returns array with different schema, adapt it
-  const slides = await fetchApi<BackendSlideInfo[]>("/api/slides");
-  return {
-    slides: slides.map(s => ({
+export async function getSlides(params: { page?: number; perPage?: number } = {}): Promise<SlidesListResponse> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set("page", String(params.page));
+  if (params.perPage !== undefined) query.set("per_page", String(params.perPage));
+  const endpoint = query.toString() ? `/api/slides?${query.toString()}` : "/api/slides";
+
+  // Backend may return either an array or a paginated object.
+  const backend = await fetchApi<BackendSlideInfo[] | BackendSlidesListResponse>(endpoint);
+
+  const mapSlides = (items: BackendSlideInfo[]) =>
+    items.map((s) => ({
       id: s.slide_id,
       filename: `${s.slide_id}.svs`,
       dimensions: s.dimensions ?? { width: 0, height: 0 },
-      magnification: s.magnification ? parseInt(s.magnification.replace('x', ''), 10) : 40,
+      magnification: s.magnification ? parseInt(s.magnification.replace("x", ""), 10) : 40,
       mpp: s.mpp ?? 0.25,
       createdAt: new Date().toISOString(),
       // Extended fields from backend
       label: s.label,
       hasEmbeddings: s.has_embeddings,
-      hasLevel0Embeddings: s.has_level0_embeddings ?? false,  // Level 0 embedding status
+      hasLevel0Embeddings: s.has_level0_embeddings ?? false, // Level 0 embedding status
       numPatches: s.num_patches,
       // Patient context
-      patient: s.patient ? {
-        age: s.patient.age,
-        sex: s.patient.sex,
-        stage: s.patient.stage,
-        grade: s.patient.grade,
-        prior_lines: s.patient.prior_lines,
-        histology: s.patient.histology,
-      } : undefined,
-    })),
-    total: slides.length,
-  };
+      patient: s.patient
+        ? {
+            age: s.patient.age,
+            sex: s.patient.sex,
+            stage: s.patient.stage,
+            grade: s.patient.grade,
+            prior_lines: s.patient.prior_lines,
+            histology: s.patient.histology,
+          }
+        : undefined,
+    }));
+
+  if (Array.isArray(backend)) {
+    const mapped = mapSlides(backend);
+    if (params.page !== undefined || params.perPage !== undefined) {
+      const page = params.page ?? 1;
+      const perPage = params.perPage ?? mapped.length || 1;
+      const start = (page - 1) * perPage;
+      const end = start + perPage;
+      return { slides: mapped.slice(start, end), total: mapped.length };
+    }
+    return { slides: mapped, total: mapped.length };
+  }
+
+  const mapped = mapSlides(backend.slides || []);
+  const total = typeof backend.total === "number" ? backend.total : mapped.length;
+  const hasPaginationParams = params.page !== undefined || params.perPage !== undefined;
+
+  if (!hasPaginationParams && typeof backend.total === "number" && total > mapped.length) {
+    const perPage = backend.per_page ?? mapped.length;
+    const totalPages = perPage > 0 ? Math.ceil(total / perPage) : 1;
+
+    if (totalPages > 1) {
+      const pageRequests: Promise<BackendSlideInfo[] | BackendSlidesListResponse>[] = [];
+      for (let page = 2; page <= totalPages; page += 1) {
+        const pageParams = new URLSearchParams();
+        pageParams.set("page", String(page));
+        pageParams.set("per_page", String(perPage));
+        pageRequests.push(
+          fetchApi<BackendSlideInfo[] | BackendSlidesListResponse>(
+            `/api/slides?${pageParams.toString()}`
+          )
+        );
+      }
+
+      const pageResponses = await Promise.all(pageRequests);
+      const extraSlides: BackendSlideInfo[] = [];
+      pageResponses.forEach((response) => {
+        if (Array.isArray(response)) {
+          extraSlides.push(...response);
+        } else if (response.slides) {
+          extraSlides.push(...response.slides);
+        }
+      });
+
+      return {
+        slides: mapped.concat(mapSlides(extraSlides)),
+        total,
+      };
+    }
+  }
+
+  return { slides: mapped, total };
 }
 
 /**

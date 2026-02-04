@@ -215,11 +215,11 @@ export default function SlidesPage() {
         setSlides(result.slides);
         setTotalSlides(result.total);
       } else {
-        const result = await getSlides();
-        // Apply client-side pagination if backend doesn't support it
-        const start = ((filters.page || 1) - 1) * (filters.perPage || 20);
-        const end = start + (filters.perPage || 20);
-        setSlides(result.slides.slice(start, end));
+        const result = await getSlides({
+          page: filters.page,
+          perPage: filters.perPage,
+        });
+        setSlides(result.slides);
         setTotalSlides(result.total);
       }
     } catch (error) {
@@ -594,7 +594,7 @@ export default function SlidesPage() {
                 onAnalyzeSlide={handleAnalyzeSlide}
                 onAddToGroup={handleAddToGroup}
                 onDeleteSlide={handleDeleteSlide}
-                isLoading={isLoading}
+                isLoading={isLoading && slides.length === 0}
               />
             ) : (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -611,7 +611,7 @@ export default function SlidesPage() {
                   sortBy={filters.sortBy}
                   sortOrder={filters.sortOrder}
                   onSort={handleSort}
-                  isLoading={isLoading}
+                  isLoading={isLoading && slides.length === 0}
                 />
               </div>
             )}

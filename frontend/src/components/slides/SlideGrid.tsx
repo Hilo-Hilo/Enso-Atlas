@@ -89,6 +89,7 @@ function SlideCard({
 }) {
   const [showMenu, setShowMenu] = React.useState(false);
   const [imageError, setImageError] = React.useState(false);
+  const [isImageLoaded, setIsImageLoaded] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   // Close menu when clicking outside
@@ -102,6 +103,11 @@ function SlideCard({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  React.useEffect(() => {
+    setImageError(false);
+    setIsImageLoaded(false);
+  }, [slide.id]);
+
   const thumbnailUrl = getThumbnailUrl(slide.id);
 
   return (
@@ -113,17 +119,32 @@ function SlideCard({
     >
       {/* Thumbnail */}
       <div className="relative aspect-[4/3] bg-gray-100 overflow-hidden">
-        {imageError ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
-            <Microscope className="h-12 w-12 text-gray-300" />
-          </div>
-        ) : (
+        {!imageError && (
           <img
             src={thumbnailUrl}
             alt={slide.filename}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            onError={() => setImageError(true)}
+            className={cn(
+              "w-full h-full object-cover group-hover:scale-105 transition-all duration-300",
+              isImageLoaded ? "opacity-100" : "opacity-0"
+            )}
+            onLoad={() => setIsImageLoaded(true)}
+            onError={() => {
+              setImageError(true);
+              setIsImageLoaded(true);
+            }}
+            loading="lazy"
+            decoding="async"
           />
+        )}
+        {!isImageLoaded && !imageError && (
+          <div className="absolute inset-0">
+            <Skeleton className="w-full h-full" />
+          </div>
+        )}
+        {imageError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+            <Microscope className="h-12 w-12 text-gray-300" />
+          </div>
         )}
 
         {/* Selection checkbox overlay */}
@@ -304,7 +325,7 @@ export function SlideGrid({
   onDeleteSlide,
   isLoading,
 }: SlideGridProps) {
-  if (isLoading) {
+  if (isLoading && slides.length === 0) {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
         {Array.from({ length: 12 }).map((_, i) => (
