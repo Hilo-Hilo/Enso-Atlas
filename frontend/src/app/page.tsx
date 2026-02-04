@@ -572,6 +572,9 @@ export default function HomePage() {
   const handleMultiModelAnalyze = useCallback(async () => {
     if (!selectedSlide) return;
 
+    // Clear previous results immediately to avoid showing stale predictions
+    setMultiModelResult(null);
+
     // Check if level 0 is selected but embeddings don't exist
     if (resolutionLevel === 0 && !selectedSlide.hasLevel0Embeddings) {
       toast.error(
