@@ -28,7 +28,7 @@ import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
 import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch } from "@/lib/api";
 import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
-import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse, VisualSearchResponse, SimilarCase } from "@/types";
+import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse, VisualSearchResponse, SimilarCase, StructuredReport } from "@/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui";
 import { ChevronLeft, ChevronRight, Layers, BarChart3, X } from "lucide-react";
@@ -248,7 +248,7 @@ export default function HomePage() {
     isAnalyzing,
     isGeneratingReport,
     analysisResult,
-    report,
+    report: generatedReport,
     error,
     analyze,
     generateSlideReport,
@@ -260,6 +260,10 @@ export default function HomePage() {
     reportProgress,
     reportProgressMessage,
   } = useAnalysis();
+
+  // Report state from agent workflow (AI Assistant). This hydrates the main Clinical Report panel.
+  const [agentReport, setAgentReport] = useState<StructuredReport | null>(null);
+  const report = agentReport ?? generatedReport;
 
   // Toast notifications for user feedback
   const toast = useToast();
@@ -1074,10 +1078,10 @@ export default function HomePage() {
       
       // Prepare prediction data
       const predictionData = analysisResult ? {
-        prediction: analysisResult.prediction,
-        score: analysisResult.score,
-        confidence: analysisResult.confidence,
-        patchesAnalyzed: analysisResult.patchesAnalyzed,
+        prediction: analysisResult.prediction?.label ?? "Unknown",
+        score: analysisResult.prediction?.score ?? 0,
+        confidence: analysisResult.prediction?.confidence ?? 0,
+        patchesAnalyzed: analysisResult.evidencePatches?.length ?? 0,
       } : {
         prediction: report.modelOutput?.label || "Unknown",
         score: report.modelOutput?.score || 0,
@@ -1378,6 +1382,10 @@ export default function HomePage() {
         <AIAssistantPanel
           slideId={selectedSlide?.id ?? null}
           clinicalContext=""
+          onAnalysisComplete={(agentReport) => {
+            // Hydrate the main Clinical Report panel with the agent-generated report
+            setAgentReport(agentReport);
+          }}
         />
       </div>
       </div>

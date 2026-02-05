@@ -24,6 +24,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { StructuredReport } from "@/types";
 
 // API base URL
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://100.111.126.23:8003";
@@ -62,9 +63,61 @@ interface SimilarCase {
 interface AIAssistantPanelProps {
   slideId: string | null;
   clinicalContext?: string;
-  onAnalysisComplete?: (report: Record<string, unknown>) => void;
+  onAnalysisComplete?: (report: StructuredReport) => void;
   onHighlightRegion?: (x: number, y: number, weight: number) => void;
   className?: string;
+}
+
+function normalizeAgentReportToStructuredReport(raw: Record<string, unknown>): StructuredReport {
+  const caseId = (raw.case_id ?? raw.caseId ?? "") as string;
+  const task = (raw.task ?? "Multi-model slide analysis") as string;
+  const generatedAt = (raw.generated_at ?? raw.generatedAt ?? new Date().toISOString()) as string;
+
+  const predictions = (raw.predictions ?? {}) as Record<string, any>;
+  const firstPred = Object.values(predictions)[0] as any;
+  const modelOutput = {
+    label: (firstPred?.label ?? "unknown") as string,
+    score: Number(firstPred?.score ?? 0),
+    confidence: Number(firstPred?.confidence ?? 0),
+    calibrationNote: (firstPred?.calibration_note ?? firstPred?.calibrationNote ?? "") as string,
+  };
+
+  const evidenceRaw = (raw.evidence ?? []) as Array<any>;
+  const evidence = evidenceRaw.map((e, idx) => {
+    const coords = (e.coordinates ?? e.coordsLevel0 ?? [0, 0]) as [number, number];
+    const patchId = (e.patch_id ?? e.patchId ?? e.patch_index ?? idx) as string | number;
+    return {
+      patchId: String(patchId),
+      coordsLevel0: [Number(coords[0] ?? 0), Number(coords[1] ?? 0)] as [number, number],
+      morphologyDescription: String(e.morphology_description ?? e.morphologyDescription ?? ""),
+      whyThisPatchMatters: String(e.significance ?? e.whyThisPatchMatters ?? ""),
+    };
+  });
+
+  const similarCasesRaw = (raw.similar_cases ?? raw.similarCases ?? []) as Array<any>;
+  const similarExamples = similarCasesRaw.map((c, idx) => ({
+    exampleId: String(c.slide_id ?? c.exampleId ?? idx),
+    label: String(c.label ?? "unknown"),
+    distance: Number(c.distance ?? (1 - (c.similarity_score ?? c.similarity ?? 0))),
+  }));
+
+  const limitations = ((raw.limitations ?? []) as Array<any>).map((x) => String(x));
+  const suggestedNextSteps = ((raw.suggested_next_steps ?? raw.suggestedNextSteps ?? []) as Array<any>).map((x) => String(x));
+  const safetyStatement = String(raw.safety_statement ?? raw.safetyStatement ?? "");
+  const summary = String(raw.reasoning_summary ?? raw.summary ?? "");
+
+  return {
+    caseId,
+    task,
+    generatedAt,
+    modelOutput,
+    evidence,
+    similarExamples,
+    limitations,
+    suggestedNextSteps,
+    safetyStatement,
+    summary,
+  };
 }
 
 // Step icon mapping
@@ -397,7 +450,7 @@ export function AIAssistantPanel({
   const [inputMessage, setInputMessage] = useState("");
   const [isFollowupLoading, setIsFollowupLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [report, setReport] = useState<Record<string, unknown> | null>(null);
+  const [report, setReport] = useState<StructuredReport | null>(null);
   const [topEvidence, setTopEvidence] = useState<EvidencePatch[]>([]);
   const [copySuccess, setCopySuccess] = useState(false);
   
@@ -488,8 +541,11 @@ export function AIAssistantPanel({
               
               // Extract report on completion
               if (data.step === "report" && data.status === "complete" && data.data?.report) {
-                setReport(data.data.report as Record<string, unknown>);
-                onAnalysisComplete?.(data.data.report as Record<string, unknown>);
+                const normalized = normalizeAgentReportToStructuredReport(
+                  data.data.report as Record<string, unknown>
+                );
+                setReport(normalized);
+                onAnalysisComplete?.(normalized);
               }
               
               // Handle errors
