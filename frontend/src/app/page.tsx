@@ -26,9 +26,9 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
-import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling } from "@/lib/api";
+import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch } from "@/lib/api";
 import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
-import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse } from "@/types";
+import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse, VisualSearchResponse, SimilarCase } from "@/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui";
 import { ChevronLeft, ChevronRight, Layers, BarChart3, X } from "lucide-react";
@@ -191,6 +191,12 @@ export default function HomePage() {
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+
+  // Visual search (image-to-image) state
+  const [visualSearchResults, setVisualSearchResults] = useState<SimilarCase[]>([]);
+  const [isSearchingVisual, setIsSearchingVisual] = useState(false);
+  const [visualSearchError, setVisualSearchError] = useState<string | null>(null);
+  const [visualSearchQuery, setVisualSearchQuery] = useState<{ slideId: string; patchIndex: number } | null>(null);
 
   // Slide QC metrics state
   const [slideQCMetrics, setSlideQCMetrics] = useState<SlideQCMetrics | null>(null);
@@ -507,6 +513,70 @@ export default function HomePage() {
     [selectedSlide]
   );
 
+  // Handle visual search (find similar patches)
+  const handleVisualSearch = useCallback(
+    async (patch: EvidencePatch) => {
+      if (!selectedSlide) return;
+
+      // Extract patch index from patchId (format: "patch_{index}")
+      const patchIndex = parseInt(patch.patchId.replace(/\D/g, ""), 10) || 0;
+
+      setIsSearchingVisual(true);
+      setVisualSearchError(null);
+      setVisualSearchQuery({ slideId: selectedSlide.id, patchIndex });
+
+      try {
+        const response = await visualSearch({
+          slideId: selectedSlide.id,
+          patchIndex,
+          topK: 10,
+          excludeSameSlide: true,
+        });
+
+        // Convert VisualSearchResultPatch to SimilarCase for the panel
+        const similarCases: SimilarCase[] = response.results.map((r) => ({
+          slideId: r.slideId,
+          patchId: `patch_${r.patchIndex}`,
+          similarity: r.similarity,
+          distance: r.distance,
+          label: r.label,
+          thumbnailUrl: r.thumbnailUrl || undefined,
+          coordinates: r.coordinates ? {
+            x: r.coordinates[0],
+            y: r.coordinates[1],
+            level: 0,
+            width: 224,
+            height: 224,
+          } : undefined,
+        }));
+
+        setVisualSearchResults(similarCases);
+        
+        // Show toast notification
+        toast.success(
+          "Visual Search Complete",
+          `Found ${similarCases.length} similar patches in ${response.searchTimeMs.toFixed(0)}ms`
+        );
+      } catch (err) {
+        console.error("Visual search failed:", err);
+        setVisualSearchError(
+          err instanceof Error ? err.message : "Visual search failed. Please try again."
+        );
+        setVisualSearchResults([]);
+        toast.error("Visual Search Failed", err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        setIsSearchingVisual(false);
+      }
+    },
+    [selectedSlide, toast]
+  );
+
+  // Clear visual search results when slide changes
+  useEffect(() => {
+    setVisualSearchResults([]);
+    setVisualSearchQuery(null);
+    setVisualSearchError(null);
+  }, [selectedSlide?.id]);
 
   // Handle generating level 0 embeddings (separate from analysis)
   const handleGenerateEmbeddings = useCallback(async () => {
@@ -1181,9 +1251,11 @@ export default function HomePage() {
           isLoading={isAnalyzing}
           onPatchClick={handlePatchClick}
           onPatchZoom={handlePatchZoom}
+          onFindSimilar={handleVisualSearch}
           selectedPatchId={selectedPatchId}
           error={!isAnalyzing && error && !analysisResult ? error : null}
           onRetry={retryAnalysis}
+          isSearchingVisual={isSearchingVisual}
         />
       </div>
 
@@ -1199,15 +1271,34 @@ export default function HomePage() {
         selectedPatchId={selectedPatchId}
       />
 
-      {/* Similar Cases */}
+      {/* Similar Cases - shows visual search results when available, otherwise analysis results */}
       <div data-demo="similar-cases">
         <SimilarCasesPanel
-          cases={analysisResult?.similarCases ?? []}
-          isLoading={isAnalyzing}
+          cases={visualSearchResults.length > 0 ? visualSearchResults : (analysisResult?.similarCases ?? [])}
+          isLoading={isAnalyzing || isSearchingVisual}
           onCaseClick={handleCaseClick}
-          error={!isAnalyzing && error && !analysisResult ? error : null}
-          onRetry={retryAnalysis}
+          error={visualSearchError || (!isAnalyzing && error && !analysisResult ? error : null)}
+          onRetry={visualSearchResults.length > 0 ? () => {
+            setVisualSearchResults([]);
+            setVisualSearchError(null);
+          } : retryAnalysis}
         />
+        {visualSearchResults.length > 0 && (
+          <div className="mt-2 flex items-center justify-between px-2">
+            <p className="text-xs text-gray-500">
+              Showing patches similar to query from slide {visualSearchQuery?.slideId?.slice(0, 12)}...
+            </p>
+            <button
+              onClick={() => {
+                setVisualSearchResults([]);
+                setVisualSearchQuery(null);
+              }}
+              className="text-xs text-clinical-600 hover:text-clinical-700 font-medium"
+            >
+              Clear visual search
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Clinical Report */}
