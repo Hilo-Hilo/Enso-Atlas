@@ -29,8 +29,17 @@ from PIL import Image
 from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks, Query
 from .slide_metadata import SlideMetadataManager, create_metadata_router
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
+
+# PDF Export
+try:
+    from .pdf_export import generate_pdf_report
+    PDF_EXPORT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"PDF export not available: {e}")
+    PDF_EXPORT_AVAILABLE = False
+    generate_pdf_report = None
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +415,16 @@ class MultiModelResponse(BaseModel):
     by_category: Dict[str, List[ModelPrediction]]
     n_patches: int
     processing_time_ms: float
+
+
+class PdfExportRequest(BaseModel):
+    """Request for PDF report export."""
+    slide_id: str = Field(..., min_length=1, max_length=256)
+    report_data: Dict[str, Any] = Field(..., description="Structured report from MedGemma")
+    prediction_data: Dict[str, Any] = Field(..., description="Model prediction results")
+    include_heatmap: bool = Field(default=True, description="Include attention heatmap image")
+    include_evidence_patches: bool = Field(default=True, description="Include evidence patch images")
+    patient_context: Optional[Dict[str, Any]] = Field(default=None, description="Patient demographic info")
 
 
 class AvailableModelsResponse(BaseModel):
@@ -2488,6 +2507,145 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             "total": len(tasks)
         }
 
+    # ==================== PDF Export ====================
+    
+    @app.post("/api/export/pdf")
+    async def export_pdf(request: PdfExportRequest):
+        """
+        Generate a professional PDF report for tumor board presentation.
+        
+        Returns the PDF as a downloadable file with attention heatmap and evidence patches.
+        """
+        if not PDF_EXPORT_AVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="PDF export not available. Install reportlab: pip install reportlab>=4.0.0"
+            )
+        
+        slide_id = request.slide_id
+        
+        # Fetch heatmap image if requested
+        heatmap_image = None
+        if request.include_heatmap:
+            try:
+                # Generate heatmap internally
+                emb_path = embeddings_dir / f"{slide_id}.npy"
+                coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+                
+                if emb_path.exists() and classifier is not None and evidence_gen is not None:
+                    embeddings = np.load(emb_path)
+                    
+                    # Load coordinates
+                    patch_size = 224
+                    if coord_path.exists():
+                        coords_arr = np.load(coord_path).astype(np.int64, copy=False)
+                    else:
+                        n_patches = len(embeddings)
+                        grid_size = int(np.ceil(np.sqrt(n_patches)))
+                        grid_x, grid_y = np.meshgrid(
+                            np.arange(grid_size) * patch_size,
+                            np.arange(grid_size) * patch_size,
+                        )
+                        coords_arr = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)[:n_patches]
+                    
+                    coords = [tuple(map(int, c)) for c in coords_arr]
+                    
+                    # CPU-only prediction for heatmap
+                    import torch
+                    from enso_atlas.mil.clam import LegacyCLAMModel
+                    
+                    x = torch.from_numpy(embeddings).float()
+                    model = LegacyCLAMModel(input_dim=384, hidden_dim=256)
+                    
+                    model_path = Path(__file__).parent.parent.parent.parent / "models" / "clam_attention.pt"
+                    if model_path.exists():
+                        checkpoint = torch.load(model_path, map_location=torch.device("cpu"), weights_only=False)
+                        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+                            state_dict = checkpoint["model_state_dict"]
+                        else:
+                            state_dict = checkpoint
+                        model.load_state_dict(state_dict)
+                    
+                    model.eval()
+                    with torch.no_grad():
+                        _, attention = model(x, return_attention=True)
+                    
+                    # Calculate slide dimensions
+                    if coords_arr.size > 0:
+                        x_max = int(coords_arr[:, 0].max()) + patch_size
+                        y_max = int(coords_arr[:, 1].max()) + patch_size
+                        slide_dims = (x_max, y_max)
+                    else:
+                        slide_dims = (patch_size, patch_size)
+                    
+                    # Generate heatmap at reasonable resolution for PDF
+                    heatmap = evidence_gen.create_heatmap(
+                        attention.numpy(), coords, slide_dims, (512, 512), smooth=True, blur_kernel=31
+                    )
+                    
+                    # Convert to PNG bytes
+                    img = Image.fromarray(heatmap)
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    heatmap_image = buf.getvalue()
+                    
+            except Exception as e:
+                logger.warning(f"Failed to generate heatmap for PDF: {e}")
+        
+        # Fetch evidence patch images if requested
+        evidence_patches = None
+        if request.include_evidence_patches:
+            evidence_patches = []
+            evidence_items = request.report_data.get('evidence', [])[:9]  # Max 9 patches
+            
+            for item in evidence_items:
+                patch_data = {
+                    'attention': item.get('attentionWeight', 0),
+                    'image': None
+                }
+                
+                # Try to get patch image
+                patch_id = item.get('patchId', item.get('patch_id'))
+                if patch_id:
+                    try:
+                        # Check for cached patch image
+                        patch_cache_dir = Path(__file__).parent.parent.parent.parent / "outputs" / "patches" / slide_id
+                        patch_path = patch_cache_dir / f"{patch_id}.png"
+                        
+                        if patch_path.exists():
+                            with open(patch_path, 'rb') as f:
+                                patch_data['image'] = f.read()
+                    except Exception as e:
+                        logger.warning(f"Failed to load patch {patch_id}: {e}")
+                
+                evidence_patches.append(patch_data)
+        
+        # Generate PDF
+        try:
+            pdf_bytes = generate_pdf_report(
+                slide_id=slide_id,
+                report_data=request.report_data,
+                prediction_data=request.prediction_data,
+                heatmap_image=heatmap_image,
+                evidence_patches=evidence_patches,
+                institution_name="Enso Labs",
+                patient_context=request.patient_context,
+            )
+        except Exception as e:
+            logger.error(f"PDF generation failed: {e}")
+            raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
+        
+        # Return PDF as downloadable file
+        filename = f"enso-atlas-report-{slide_id}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.pdf"
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(pdf_bytes)),
+            }
+        )
 
 
     @app.get("/api/heatmap/{slide_id}")

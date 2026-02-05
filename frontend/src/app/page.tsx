@@ -998,27 +998,83 @@ export default function HomePage() {
   const handleExportPdf = useCallback(async () => {
     if (!selectedSlide || !report) return;
     if (typeof document === "undefined") return;
+    
     try {
-      // Get case notes for this slide
-      const caseNotes = getCaseNotes(selectedSlide.id);
+      toast.info("Generating PDF", "Creating professional report with heatmap...");
       
-      // Generate PDF client-side
-      const blob = await generatePdfReport({
-        report,
-        slideId: selectedSlide.id,
-        caseNotes,
-        institutionName: "Enso Labs",
-        slideInfo: selectedSlide,
+      // Prepare prediction data
+      const predictionData = analysisResult ? {
+        prediction: analysisResult.prediction,
+        score: analysisResult.score,
+        confidence: analysisResult.confidence,
+        patchesAnalyzed: analysisResult.patchesAnalyzed,
+      } : {
+        prediction: report.modelOutput?.label || "Unknown",
+        score: report.modelOutput?.score || 0,
+        confidence: report.modelOutput?.confidence || 0,
+      };
+      
+      // Call backend PDF export endpoint
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8003"}/api/export/pdf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          slide_id: selectedSlide.id,
+          report_data: report,
+          prediction_data: predictionData,
+          include_heatmap: true,
+          include_evidence_patches: true,
+          patient_context: selectedSlide.patient || report.patientContext || null,
+        }),
       });
       
-      // Download the PDF
-      downloadPdf(blob, `atlas-report-${selectedSlide.id}.pdf`);
+      if (!response.ok) {
+        // Fallback to client-side PDF if server fails
+        console.warn("Server PDF export failed, falling back to client-side");
+        const caseNotes = getCaseNotes(selectedSlide.id);
+        const blob = await generatePdfReport({
+          report,
+          slideId: selectedSlide.id,
+          caseNotes,
+          institutionName: "Enso Labs",
+          slideInfo: selectedSlide,
+        });
+        downloadPdf(blob, `atlas-report-${selectedSlide.id}.pdf`);
+        toast.success("PDF Exported", "Report downloaded (client-side fallback)");
+        return;
+      }
+      
+      // Download the PDF from server response
+      const blob = await response.blob();
+      const filename = response.headers.get("Content-Disposition")
+        ?.split("filename=")[1]
+        ?.replace(/"/g, "") || `atlas-report-${selectedSlide.id}.pdf`;
+      
+      downloadPdf(blob, filename);
+      toast.success("PDF Exported", "Professional report with heatmap downloaded");
     } catch (err) {
       console.error("PDF export failed:", err);
-      const message = err instanceof Error ? err.message : "PDF export failed";
-      toast.error("PDF Export Failed", message);
+      
+      // Fallback to client-side PDF
+      try {
+        const caseNotes = getCaseNotes(selectedSlide.id);
+        const blob = await generatePdfReport({
+          report,
+          slideId: selectedSlide.id,
+          caseNotes,
+          institutionName: "Enso Labs",
+          slideInfo: selectedSlide,
+        });
+        downloadPdf(blob, `atlas-report-${selectedSlide.id}.pdf`);
+        toast.success("PDF Exported", "Report downloaded (client-side)");
+      } catch (fallbackErr) {
+        const message = fallbackErr instanceof Error ? fallbackErr.message : "PDF export failed";
+        toast.error("PDF Export Failed", message);
+      }
     }
-  }, [selectedSlide, report, toast]);
+  }, [selectedSlide, report, analysisResult, toast]);
 
   // Handle JSON export
   const handleExportJson = useCallback(async () => {
