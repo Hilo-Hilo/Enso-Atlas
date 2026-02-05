@@ -29,6 +29,7 @@ import type {
   AvailableModel,
   MultiModelResponse,
   AvailableModelsResponse,
+  SimilarCase,
 } from "@/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://100.111.126.23:8003";
@@ -466,6 +467,46 @@ export async function analyzeSlide(
     },
     processingTimeMs: 0,
   };
+}
+
+/**
+ * Fetch similar cases for a slide using the dedicated FAISS similarity endpoint.
+ * Uses slide-level mean embeddings with cosine similarity (fast, <100ms).
+ */
+export async function fetchSimilarCases(
+  slideId: string,
+  k: number = 5
+): Promise<SimilarCase[]> {
+  interface BackendSimilarResponse {
+    slide_id: string;
+    similar_cases: Array<{
+      slide_id: string;
+      similarity_score: number;
+      distance: number;
+      label?: string | null;
+      n_patches?: number;
+    }>;
+    num_queries: number;
+  }
+
+  try {
+    const backend = await fetchApi<BackendSimilarResponse>(
+      `/api/similar?slide_id=${encodeURIComponent(slideId)}&k=${k}`,
+      {},
+      { timeoutMs: 10000 }
+    );
+
+    return backend.similar_cases.map((s) => ({
+      slideId: s.slide_id,
+      similarity: s.similarity_score,
+      distance: s.distance,
+      label: s.label || undefined,
+      thumbnailUrl: `/api/slides/${s.slide_id}/thumbnail?size=128`,
+    }));
+  } catch (error) {
+    console.warn("[API] Failed to fetch similar cases:", error);
+    return [];
+  }
 }
 
 // Backend report response (different from frontend StructuredReport)

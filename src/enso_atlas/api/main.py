@@ -42,7 +42,10 @@ except ImportError as e:
     PDF_EXPORT_AVAILABLE = False
     generate_pdf_report = None
 
+# Configure logging to show INFO level for our module (Python defaults to WARNING)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # PDF Export (optional)
 try:
@@ -732,8 +735,25 @@ def create_app(
                 logger.warning(f'Failed to build slide-mean FAISS index: {e}')
 
         # Load slide labels from labels.csv for similar case retrieval
-        labels_path = embeddings_dir.parent / "labels.csv"
-        if labels_path.exists():
+        # Check multiple label files (primary + tcga_full)
+        label_files = [
+            embeddings_dir.parent / "labels.csv",
+            embeddings_dir.parent / "tcga_full" / "labels.csv",
+        ]
+        # Build a prefix->full_slide_id lookup for matching short names to full IDs
+        prefix_to_slide_ids: dict[str, list[str]] = {}
+        for sid in available_slides:
+            # Extract prefix before UUID: "TCGA-04-1331-01A-01-BS1.uuid" -> "TCGA-04-1331-01A-01-BS1"
+            parts = sid.split('.')
+            if len(parts) >= 2:
+                prefix = parts[0]
+            else:
+                prefix = sid
+            prefix_to_slide_ids.setdefault(prefix, []).append(sid)
+
+        for labels_path in label_files:
+            if not labels_path.exists():
+                continue
             import csv
             with open(labels_path) as f:
                 reader = csv.DictReader(f)
@@ -746,23 +766,40 @@ def create_app(
                         sid = slide_file.replace(".svs", "").replace(".SVS", "")
                         response = row.get("treatment_response", "")
                         label_val = "responder" if response == "responder" else "non-responder" if response == "non-responder" else ""
-                    if sid and label_val:
-                        # Normalize label format
-                        if label_val == "1":
-                            slide_labels[sid] = "responder"
-                        elif label_val == "0":
-                            slide_labels[sid] = "non-responder"
-                        else:
-                            slide_labels[sid] = label_val
-            logger.info(f"Loaded labels for {len(slide_labels)} slides")
 
-            # Attach labels to slide-mean metadata
-            try:
-                for sid, lab in slide_labels.items():
-                    if sid in slide_mean_meta:
-                        slide_mean_meta[sid]['label'] = lab
-            except Exception as e:
-                logger.warning(f'Failed to attach labels to slide-mean metadata: {e}')
+                    # Normalize label format
+                    if label_val == "1":
+                        label_val = "responder"
+                    elif label_val == "0":
+                        label_val = "non-responder"
+                    # Also check platinum_status column
+                    if not label_val:
+                        platinum = row.get("platinum_status", "")
+                        if platinum == "sensitive":
+                            label_val = "responder"
+                        elif platinum == "resistant":
+                            label_val = "non-responder"
+
+                    if not (sid and label_val):
+                        continue
+
+                    # Direct match (full slide ID in CSV)
+                    if sid in available_slides or '.' in sid:
+                        slide_labels[sid] = label_val
+                    # Prefix match: short slide name -> all matching full IDs
+                    for full_sid in prefix_to_slide_ids.get(sid, []):
+                        if full_sid not in slide_labels:
+                            slide_labels[full_sid] = label_val
+
+        logger.info(f"Loaded labels for {len(slide_labels)} slides")
+
+        # Attach labels to slide-mean metadata
+        try:
+            for sid, lab in slide_labels.items():
+                if sid in slide_mean_meta:
+                    slide_mean_meta[sid]['label'] = lab
+        except Exception as e:
+            logger.warning(f'Failed to attach labels to slide-mean metadata: {e}')
 
 
         # Initialize agent workflow now that models and indexes are ready

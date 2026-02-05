@@ -26,7 +26,7 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
-import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch } from "@/lib/api";
+import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, fetchSimilarCases } from "@/lib/api";
 import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
 import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse, VisualSearchResponse, SimilarCase, StructuredReport } from "@/types";
 import { cn } from "@/lib/utils";
@@ -197,6 +197,11 @@ export default function HomePage() {
   const [isSearchingVisual, setIsSearchingVisual] = useState(false);
   const [visualSearchError, setVisualSearchError] = useState<string | null>(null);
   const [visualSearchQuery, setVisualSearchQuery] = useState<{ slideId: string; patchIndex: number } | null>(null);
+
+  // Similar cases (FAISS slide-level search) state
+  const [similarCases, setSimilarCases] = useState<SimilarCase[]>([]);
+  const [isLoadingSimilarCases, setIsLoadingSimilarCases] = useState(false);
+  const [similarCasesError, setSimilarCasesError] = useState<string | null>(null);
 
   // Slide QC metrics state
   const [slideQCMetrics, setSlideQCMetrics] = useState<SlideQCMetrics | null>(null);
@@ -482,6 +487,9 @@ export default function HomePage() {
       // Clear multi-model results
       setMultiModelResult(null);
       setMultiModelError(null);
+      // Clear similar cases
+      setSimilarCases([]);
+      setSimilarCasesError(null);
 
       // Fetch QC metrics for the selected slide
       try {
@@ -793,6 +801,22 @@ export default function HomePage() {
       setEmbeddingProgress(null);
     }
   }, [selectedSlide, selectedModels, resolutionLevel, forceReembed, toast]);
+
+  // Fetch similar cases from the dedicated FAISS endpoint
+  const handleFetchSimilarCases = useCallback(async (slideId: string) => {
+    setIsLoadingSimilarCases(true);
+    setSimilarCasesError(null);
+    try {
+      const cases = await fetchSimilarCases(slideId, 5);
+      setSimilarCases(cases);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to fetch similar cases";
+      setSimilarCasesError(msg);
+    } finally {
+      setIsLoadingSimilarCases(false);
+    }
+  }, []);
+
   // Handle analyze button
   const handleAnalyze = useCallback(async () => {
     if (!selectedSlide) return;
@@ -801,6 +825,9 @@ export default function HomePage() {
     setMobilePanelTab("results");
     
     toast.info("Starting Analysis", "Running TransMIL prediction...");
+
+    // Fetch similar cases in parallel (fast, uses dedicated FAISS endpoint)
+    handleFetchSimilarCases(selectedSlide.id);
 
     const startTime = Date.now();
     const result = await analyze({
@@ -826,7 +853,7 @@ export default function HomePage() {
 
     // Also run multi-model analysis
     handleMultiModelAnalyze();
-  }, [selectedSlide, analyze, toast, handleMultiModelAnalyze]);
+  }, [selectedSlide, analyze, toast, handleMultiModelAnalyze, handleFetchSimilarCases]);
 
   // Retry multi-model analysis
   const handleRetryMultiModel = useCallback(() => {
@@ -1333,17 +1360,17 @@ export default function HomePage() {
         selectedPatchId={selectedPatchId}
       />
 
-      {/* Similar Cases - shows visual search results when available, otherwise analysis results */}
+      {/* Similar Cases - shows visual search results when available, then FAISS similar cases, then analysis results */}
       <div data-demo="similar-cases">
         <SimilarCasesPanel
-          cases={visualSearchResults.length > 0 ? visualSearchResults : (analysisResult?.similarCases ?? [])}
-          isLoading={isAnalyzing || isSearchingVisual}
+          cases={visualSearchResults.length > 0 ? visualSearchResults : (similarCases.length > 0 ? similarCases : (analysisResult?.similarCases ?? []))}
+          isLoading={isLoadingSimilarCases || isSearchingVisual}
           onCaseClick={handleCaseClick}
-          error={visualSearchError || (!isAnalyzing && error && !analysisResult ? error : null)}
+          error={visualSearchError || similarCasesError || (!isAnalyzing && error && !analysisResult ? error : null)}
           onRetry={visualSearchResults.length > 0 ? () => {
             setVisualSearchResults([]);
             setVisualSearchError(null);
-          } : retryAnalysis}
+          } : similarCasesError && selectedSlide ? () => handleFetchSimilarCases(selectedSlide.id) : retryAnalysis}
         />
         {visualSearchResults.length > 0 && (
           <div className="mt-2 flex items-center justify-between px-2">

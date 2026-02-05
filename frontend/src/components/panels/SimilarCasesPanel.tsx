@@ -448,14 +448,14 @@ function SimilarCaseItem({
   const [thumbnailLoading, setThumbnailLoading] = useState(true);
   
   const distance = case_.distance ?? 0;
-  // Use pre-computed similarity from backend (already handles L2 to similarity conversion)
-  // Scale to percentage: raw similarity (~0.001-0.003) mapped to display range (60-95%)
+  // Use pre-computed similarity from backend
+  // The /api/similar endpoint returns cosine similarity (0-1, typically 0.85-0.98)
+  // The old /api/analyze endpoint returned 1/(1+L2_dist) which gives tiny values
   const rawSimilarity = case_.similarity ?? (distance > 0 ? 1.0 / (1.0 + distance) : 0);
-  // Transform small similarity values to a more intuitive percentage display
-  // Uses log scale to spread out the values meaningfully
-  const similarityScore = Math.max(0, Math.min(100, 
-    Math.round(60 + 35 * Math.min(1, rawSimilarity / 0.003))
-  ));
+  // Auto-detect scale: cosine similarity is typically > 0.5, L2-based is << 0.1
+  const similarityScore = rawSimilarity > 0.1
+    ? Math.round(rawSimilarity * 100)  // Cosine similarity — already 0-1 scale
+    : Math.max(0, Math.min(100, Math.round(60 + 35 * Math.min(1, rawSimilarity / 0.003))));  // L2-based legacy
 
   const isResponder =
     case_.label?.toLowerCase().includes("positive") ||
