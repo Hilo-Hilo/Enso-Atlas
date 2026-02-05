@@ -509,9 +509,11 @@ export function AIAssistantPanel({
     }
   }, [slideId, clinicalContext, onAnalysisComplete]);
   
-  // Send follow-up question
+  // Send follow-up question or standalone chat
   const sendFollowup = useCallback(async () => {
-    if (!sessionId || !inputMessage.trim()) return;
+    if (!inputMessage.trim()) return;
+    // Allow chat even without analysis if we have a slideId
+    if (!sessionId && !slideId) return;
     
     const question = inputMessage.trim();
     setInputMessage("");
@@ -524,13 +526,19 @@ export function AIAssistantPanel({
     ]);
     
     try {
-      const response = await fetch(`${API_BASE}/api/agent/followup`, {
+      // Use agent/followup if we have a session, otherwise use /api/chat for standalone
+      const endpoint = sessionId 
+        ? `${API_BASE}/api/agent/followup`
+        : `${API_BASE}/api/chat`;
+      
+      const body = sessionId
+        ? { session_id: sessionId, question }
+        : { message: question, slide_id: slideId };
+      
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          question,
-        }),
+        body: JSON.stringify(body),
       });
       
       if (!response.ok) {
@@ -561,13 +569,18 @@ export function AIAssistantPanel({
                 // Check if response mentions regions/attention
                 const mentionsRegions = /region|attention|area|patch/i.test(data.reasoning);
                 
+                // Use evidence_patches from response if available, otherwise fall back to topEvidence
+                const evidencePatches = data.evidence_patches 
+                  ? data.evidence_patches as EvidencePatch[]
+                  : (mentionsRegions ? topEvidence.slice(0, 4) : undefined);
+                
                 setChatMessages((prev) => [
                   ...prev,
                   {
                     message: data.reasoning,
                     isUser: false,
                     timestamp: data.timestamp || new Date().toISOString(),
-                    evidencePatches: mentionsRegions ? topEvidence.slice(0, 4) : undefined,
+                    evidencePatches,
                   },
                 ]);
               }
@@ -590,7 +603,7 @@ export function AIAssistantPanel({
       setIsFollowupLoading(false);
       inputRef.current?.focus();
     }
-  }, [sessionId, inputMessage, topEvidence]);
+  }, [sessionId, slideId, inputMessage, topEvidence]);
   
   // Handle Enter key in input
   const handleKeyDown = useCallback(
@@ -878,15 +891,20 @@ export function AIAssistantPanel({
               </div>
             )}
             
-            {/* Suggested Questions */}
-            {sessionId && chatMessages.length === 0 && !isAnalyzing && (
+            {/* Suggested Questions - show for both session-based and standalone chat */}
+            {(sessionId || slideId) && chatMessages.length === 0 && !isAnalyzing && (
               <div className="pt-4 border-t">
                 <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-2">
                   <Lightbulb className="h-3 w-3" />
-                  Ask a Question
+                  {sessionId ? "Ask a Question" : "Quick Questions (No analysis needed)"}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {suggestedQuestions.map((q, i) => (
+                  {(sessionId ? suggestedQuestions : [
+                    "What is the prognosis?",
+                    "What is the predicted treatment response?",
+                    "Show me the high-attention regions",
+                    "How does this compare to similar cases?",
+                  ]).map((q, i) => (
                     <button
                       key={i}
                       onClick={() => {
@@ -899,14 +917,19 @@ export function AIAssistantPanel({
                     </button>
                   ))}
                 </div>
+                {!sessionId && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    💡 Tip: For detailed multi-step analysis, click &quot;Start Analysis&quot; above
+                  </p>
+                )}
               </div>
             )}
           </div>
         )}
       </div>
       
-      {/* Input */}
-      {sessionId && (
+      {/* Input - enabled for both session-based chat and standalone chat with slideId */}
+      {(sessionId || slideId) && (
         <div className="p-4 border-t bg-gray-50">
           <div className="flex items-center gap-2">
             <input
@@ -915,7 +938,10 @@ export function AIAssistantPanel({
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask about predictions, regions, or similar cases..."
+              placeholder={sessionId 
+                ? "Ask about predictions, regions, or similar cases..."
+                : "Ask a question about this slide..."
+              }
               disabled={isFollowupLoading}
               className={cn(
                 "flex-1 px-4 py-2 border rounded-lg text-sm bg-white",

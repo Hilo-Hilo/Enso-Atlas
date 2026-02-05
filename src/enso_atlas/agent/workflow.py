@@ -858,6 +858,130 @@ The prediction suggests favorable response to platinum agents."""
 
 Please rephrase your question using one of these topics."""
 
+    async def _step_report(self, state: AgentState) -> StepResult:
+        """Report: Generate final structured report."""
+        import time
+        start = time.time()
+        
+        state.current_step = AgentStep.REPORT
+        
+        # Build a structured report from collected evidence
+        report = {
+            "case_id": state.context.slide_id,
+            "task": "Multi-model slide analysis for treatment response prediction",
+            "clinical_context": state.context.clinical_context,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            
+            "predictions": {},
+            "evidence": [],
+            "similar_cases": [],
+            "reasoning_summary": "",
+            "limitations": [
+                "This is a research model and should not be used for clinical decisions without validation",
+                "Predictions are based on morphological features only",
+                "Model confidence should be considered when interpreting results",
+            ],
+            "safety_statement": "This analysis is for research and decision support only. All findings must be validated by qualified pathologists and clinicians.",
+        }
+        
+        # Add predictions
+        for model_id, pred in state.predictions.items():
+            if "error" not in pred:
+                report["predictions"][model_id] = {
+                    "model_name": pred.get("model_name", model_id),
+                    "label": pred.get("label"),
+                    "score": pred.get("score"),
+                    "confidence": pred.get("confidence"),
+                }
+        
+        # Add evidence
+        for ev in state.top_evidence[:5]:
+            report["evidence"].append({
+                "rank": ev["rank"],
+                "patch_index": ev["patch_index"],
+                "attention_weight": ev["attention_weight"],
+                "coordinates": ev.get("coordinates"),
+            })
+        
+        # Add similar cases
+        for case in state.similar_cases[:5]:
+            report["similar_cases"].append({
+                "slide_id": case["slide_id"],
+                "similarity_score": case["similarity_score"],
+                "label": case.get("label"),
+            })
+        
+        # Add reasoning summary
+        report["reasoning_summary"] = "\n\n".join(state.reasoning_chain)
+        
+        state.report = report
+        
+        duration = (time.time() - start) * 1000
+        
+        result = StepResult(
+            step=AgentStep.REPORT,
+            status=StepStatus.COMPLETE,
+            message="Generated structured analysis report",
+            data={"report": report},
+            reasoning=f"Report generated with {len(report['predictions'])} model predictions, "
+                     f"{len(report['evidence'])} evidence regions, and {len(report['similar_cases'])} similar cases.",
+            duration_ms=duration,
+        )
+        state.step_results[AgentStep.REPORT] = result
+        return result
+    
+    async def followup(
+        self,
+        session_id: str,
+        question: str,
+    ) -> AsyncIterator[StepResult]:
+        """
+        Handle a follow-up question for an existing session.
+        
+        Uses the stored analysis context to answer questions about:
+        - Treatment response predictions
+        - Evidence regions
+        - Similar cases
+        - Model confidence
+        - Prognosis
+        """
+        state = self._sessions.get(session_id)
+        if state is None:
+            yield StepResult(
+                step=AgentStep.ERROR,
+                status=StepStatus.ERROR,
+                message=f"Session {session_id} not found",
+            )
+            return
+        
+        # Add to conversation history
+        state.conversation_history.append({
+            "role": "user",
+            "content": question,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        })
+        
+        # Generate answer
+        answer = self._generate_answer(question, state)
+        
+        # Add response to history
+        state.conversation_history.append({
+            "role": "assistant",
+            "content": answer,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        })
+        
+        yield StepResult(
+            step=AgentStep.REASON,
+            status=StepStatus.COMPLETE,
+            message="Generated response",
+            reasoning=answer,
+            data={
+                "question": question,
+                "session_id": session_id,
+            },
+        )
+    
     def get_result(self, session_id: str) -> Optional[AgentResult]:
         """Get the final result for a completed session."""
         state = self._sessions.get(session_id)

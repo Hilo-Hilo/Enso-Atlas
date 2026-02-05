@@ -4274,6 +4274,119 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
     else:
         logger.warning("Agent workflow not available - skipping initialization")
 
+    # ====== Chat API Endpoint ======
+    # Initialize ChatManager for RAG-based conversational AI
+    try:
+        from ..llm.chat import ChatManager
+        chat_manager = ChatManager(
+            embeddings_dir=embeddings_dir,
+            multi_model_inference=multi_model_inference,
+            evidence_generator=evidence_gen,
+            medgemma_reporter=reporter,
+            slide_labels=slide_labels,
+            slide_mean_index=slide_mean_index,
+            slide_mean_ids=slide_mean_ids,
+            slide_mean_meta=slide_mean_meta,
+        )
+        logger.info("ChatManager initialized for RAG-based chat")
+        
+        class ChatRequest(BaseModel):
+            """Request for chat endpoint."""
+            message: str = Field(..., min_length=1, max_length=2000)
+            slide_id: Optional[str] = Field(None, max_length=256)
+            session_id: Optional[str] = Field(None, max_length=64)
+            history: Optional[List[Dict[str, str]]] = None
+        
+        class ChatResponse(BaseModel):
+            """Response from chat endpoint."""
+            response: str
+            session_id: str
+            evidence_patches: Optional[List[Dict[str, Any]]] = None
+        
+        async def stream_chat(message: str, slide_id: Optional[str], session_id: Optional[str], history: Optional[List]):
+            """Stream chat responses as SSE."""
+            async for result in chat_manager.chat(
+                message=message,
+                session_id=session_id,
+                slide_id=slide_id,
+                history=history,
+            ):
+                yield f"data: {json.dumps(result)}\n\n"
+        
+        @app.post("/api/chat")
+        async def chat_endpoint(request: ChatRequest):
+            """
+            RAG-based chat endpoint for conversational AI assistant.
+            
+            This endpoint provides a conversational interface for asking questions
+            about slide analysis results. It uses RAG (Retrieval Augmented Generation)
+            to provide context-aware answers based on:
+            
+            - Clinical reports generated for the slide
+            - Model predictions (platinum sensitivity, survival, etc.)
+            - Similar cases from the reference database
+            - High-attention evidence regions
+            
+            Example questions:
+            - "What is the prognosis?"
+            - "Why was this prediction made?"
+            - "Show me the high-attention regions"
+            - "How does this compare to similar cases?"
+            
+            Returns Server-Sent Events (SSE) stream with reasoning steps.
+            
+            Args:
+                message: User question/message
+                slide_id: Optional slide ID for context (required for slide-specific questions)
+                session_id: Optional session ID for multi-turn conversation
+                history: Optional previous chat history
+            
+            Returns:
+                SSE stream with chat response and evidence
+            """
+            return StreamingResponse(
+                stream_chat(
+                    request.message,
+                    request.slide_id,
+                    request.session_id,
+                    request.history,
+                ),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        
+        @app.get("/api/chat/session/{session_id}")
+        async def get_chat_session(session_id: str):
+            """Get chat session history and context."""
+            session = chat_manager._sessions.get(session_id)
+            if not session:
+                raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+            
+            return {
+                "session_id": session.session_id,
+                "slide_id": session.slide_id,
+                "created_at": session.created_at,
+                "history": [
+                    {
+                        "role": msg.role,
+                        "content": msg.content,
+                        "timestamp": msg.timestamp,
+                        "evidence_patches": msg.evidence_patches,
+                    }
+                    for msg in session.history
+                ],
+                "has_context": session.context is not None,
+            }
+        
+        logger.info("Chat API endpoints registered")
+        
+    except Exception as e:
+        logger.warning(f"Failed to initialize ChatManager: {e}")
+
     return app
 
 
