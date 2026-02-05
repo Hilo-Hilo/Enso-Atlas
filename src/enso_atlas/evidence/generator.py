@@ -66,7 +66,11 @@ class EvidenceGenerator:
         Returns:
             RGBA heatmap array of shape (H, W, 4)
         """
-        import cv2
+        # NOTE: We intentionally avoid importing OpenCV here.
+        # On aarch64, some opencv-python-headless wheels have an incompatible
+        # cv2.typing module that crashes at import time (cv2.dnn.DictValue).
+        # For heatmap smoothing we use SciPy instead.
+        from scipy.ndimage import gaussian_filter
 
         slide_w, slide_h = slide_dimensions
         thumb_w, thumb_h = thumbnail_size
@@ -110,7 +114,9 @@ class EvidenceGenerator:
         if smooth:
             # Ensure kernel size is odd
             blur_kernel = blur_kernel if blur_kernel % 2 == 1 else blur_kernel + 1
-            heatmap = cv2.GaussianBlur(heatmap, (blur_kernel, blur_kernel), 0)
+            # Approximate OpenCV kernel-size blur with a Gaussian sigma.
+            sigma = blur_kernel / 4.0
+            heatmap = gaussian_filter(heatmap, sigma=sigma)
 
         # Normalize to 0-1
         if heatmap.max() > heatmap.min():
@@ -122,35 +128,27 @@ class EvidenceGenerator:
         logger.info(f"Created heatmap: {heatmap_colored.shape}, smooth={smooth}")
         return heatmap_colored
 
+
     def _apply_colormap(self, heatmap: np.ndarray) -> np.ndarray:
-        """Apply colormap to grayscale heatmap."""
-        import cv2
+        """Apply colormap to grayscale heatmap.
 
-        # Convert to uint8
-        heatmap_uint8 = (heatmap * 255).astype(np.uint8)
+        We avoid OpenCV colormaps to keep heatmap generation functional on
+        platforms where importing cv2 fails.
 
-        # Apply colormap (OpenCV COLORMAP enum values)
-        colormap_mapping = {
-            "jet": cv2.COLORMAP_JET,
-            "hot": cv2.COLORMAP_HOT,
-            "viridis": cv2.COLORMAP_VIRIDIS,
-            "plasma": cv2.COLORMAP_PLASMA,
-            "inferno": cv2.COLORMAP_INFERNO,
-            "magma": cv2.COLORMAP_MAGMA,
-            "turbo": cv2.COLORMAP_TURBO,
-        }
-        
-        cmap = colormap_mapping.get(self.config.colormap, cv2.COLORMAP_VIRIDIS)
-        colored = cv2.applyColorMap(heatmap_uint8, cmap)
+        Returns RGBA uint8.
+        """
 
-        # Convert BGR to RGB
-        colored = cv2.cvtColor(colored, cv2.COLOR_BGR2RGB)
+        # Simple Jet-like colormap (vectorized). heatmap is float32 in [0, 1].
+        x = heatmap.astype(np.float32)
+        r = np.clip(1.5 - np.abs(4.0 * x - 3.0), 0.0, 1.0)
+        g = np.clip(1.5 - np.abs(4.0 * x - 2.0), 0.0, 1.0)
+        b = np.clip(1.5 - np.abs(4.0 * x - 1.0), 0.0, 1.0)
+        rgb = (np.stack([r, g, b], axis=-1) * 255.0).astype(np.uint8)
 
         # Add alpha channel - stronger alpha where attention is higher
-        # Use nonlinear scaling for better visibility of high-attention regions
-        alpha = np.power(heatmap, 0.7) * 255 * self.config.heatmap_alpha
+        alpha = np.power(x, 0.7) * 255.0 * float(self.config.heatmap_alpha)
         alpha = alpha.astype(np.uint8)
-        heatmap_rgba = np.dstack([colored, alpha])
+        heatmap_rgba = np.dstack([rgb, alpha])
 
         return heatmap_rgba
 
