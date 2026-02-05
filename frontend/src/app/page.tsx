@@ -296,18 +296,9 @@ export default function HomePage() {
       task: (raw.task as string) || 'Multi-model slide analysis',
       generatedAt: (raw.generated_at as string) || new Date().toISOString(),
       modelOutput: {
-        slideId: (raw.case_id as string) || 'Unknown',
-        prediction: {
-          label: primary?.label || 'Unknown',
-          score: primary?.score || 0,
-          confidence: primary?.confidence || 0,
-        },
-        topK: evidence.slice(0, 5).map(e => ({
-          patchId: e.patchId,
-          coordsLevel0: e.coordsLevel0,
-          score: 0,
-        })),
-        processedAt: (raw.generated_at as string) || new Date().toISOString(),
+        label: primary?.label || 'Unknown',
+        score: primary?.score || 0,
+        confidence: primary?.confidence || 0,
       },
       evidence,
       similarExamples,
