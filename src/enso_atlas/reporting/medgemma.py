@@ -280,20 +280,30 @@ Output exactly this JSON format:
 
     def _parse_json_response(self, response: str, case_id: str = "unknown", score: float = 0.0, label: str = "unknown") -> Dict:
         """Extract and parse JSON from model response, mapping simplified output to full report structure."""
-        # Strip markdown code fences if present (```json ... ``` or ``` ... ```)
-        cleaned = response.strip()
-        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
-        cleaned = re.sub(r'\s*```$', '', cleaned)
+        # Extract the FIRST JSON object from markdown code blocks
+        # Model sometimes repeats the JSON multiple times in fences
+        code_block_match = re.search(r'```(?:json)?\s*(\{[^`]*\})\s*```', response)
+        if code_block_match:
+            json_str = code_block_match.group(1).strip()
+        else:
+            # Fallback: find first JSON object directly
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response)
+            json_str = json_match.group() if json_match else None
         
-        # Try to find JSON in the response
-        json_match = re.search(r'\{[\s\S]*\}', cleaned)
+        # Legacy fallback for any JSON
+        if not json_str:
+            cleaned = response.strip()
+            cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+            cleaned = re.sub(r'\s*```$', '', cleaned)
+            json_match = re.search(r'\{[\s\S]*?\}', cleaned)
+            json_str = json_match.group() if json_match else None
         
         parsed = None
-        if json_match:
-            json_str = json_match.group()
+        if json_str:
             # Try to fix truncated JSON by closing brackets
             try:
                 parsed = json.loads(json_str)
+                logger.info("Successfully parsed JSON from MedGemma response")
             except json.JSONDecodeError:
                 # Try to repair truncated JSON
                 for fix in ['"}', '"]', '"]}', '"}]']:
