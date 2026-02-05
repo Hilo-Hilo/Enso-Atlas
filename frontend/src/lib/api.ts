@@ -324,7 +324,7 @@ export async function getSlides(params: { page?: number; perPage?: number } = {}
     const mapped = mapSlides(backend);
     if (params.page !== undefined || params.perPage !== undefined) {
       const page = params.page ?? 1;
-      const perPage = params.perPage ?? mapped.length || 1;
+      const perPage = params.perPage ?? Math.max(mapped.length, 1);
       const start = (page - 1) * perPage;
       const end = start + perPage;
       return { slides: mapped.slice(start, end), total: mapped.length };
@@ -1735,7 +1735,7 @@ export async function embedSlideWithPolling(
   slideId: string,
   level: number = 1,
   force: boolean = false,
-  onProgress?: (status: { phase: string; progress: number; message: string }) => void
+  onProgress?: (status: { phase: "embedding" | "complete"; progress: number; message: string }) => void
 ): Promise<{ status: string; numPatches: number; message: string; level: number }> {
   // Start embedding
   const response = await embedSlideAsync(slideId, level, force);

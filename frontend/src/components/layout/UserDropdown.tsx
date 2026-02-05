@@ -71,7 +71,6 @@ export function UserDropdown({
       description: "View your profile",
       onClick: () => {
         // Placeholder - could open profile modal
-        console.log("Profile clicked");
         onClose();
       },
     },
@@ -89,7 +88,6 @@ export function UserDropdown({
       label: "Notifications",
       description: "Manage alerts",
       onClick: () => {
-        console.log("Notifications clicked");
         onClose();
       },
     },
@@ -150,7 +148,6 @@ export function UserDropdown({
         <button
           onClick={() => {
             // Placeholder - would handle logout
-            console.log("Logout clicked");
             onClose();
           }}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-red-50 transition-colors group"

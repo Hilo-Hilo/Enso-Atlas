@@ -169,7 +169,16 @@ function WorkflowStep({
     error: "bg-red-50 border-red-200",
   };
   
-  const topEvidence = (step.data?.top_evidence as EvidencePatch[]) || [];
+  const stepData = step.data as
+    | {
+        top_evidence?: EvidencePatch[];
+        predictions?: Record<string, AgentPrediction>;
+        similar_cases?: SimilarCase[];
+      }
+    | undefined;
+  const topEvidence = stepData?.top_evidence ?? [];
+  const predictions = stepData?.predictions;
+  const similarCases = stepData?.similar_cases;
 
   return (
     <div className={cn("border rounded-lg transition-all", statusBg[step.status])}>
@@ -218,7 +227,7 @@ function WorkflowStep({
           )}
           
           {/* Evidence Patches */}
-          {topEvidence.length > 0 && slideId && (
+          {topEvidence.length > 0 && Boolean(slideId) && (
             <div>
               <div className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
                 <Eye className="h-3 w-3" />
@@ -229,7 +238,7 @@ function WorkflowStep({
                   <EvidencePatchCard
                     key={i}
                     patch={patch}
-                    slideId={slideId}
+                    slideId={slideId as string}
                     onClick={() => {
                       if (onHighlightRegion && patch.coordinates) {
                         onHighlightRegion(
@@ -246,9 +255,9 @@ function WorkflowStep({
           )}
           
           {/* Predictions */}
-          {step.data?.predictions && (
+          {predictions ? (
             <div className="grid grid-cols-2 gap-2">
-              {Object.entries(step.data.predictions as Record<string, AgentPrediction>).map(([id, pred]) => (
+              {Object.entries(predictions).map(([id, pred]) => (
                 <div key={id} className="bg-white rounded p-2 border">
                   <div className="font-medium text-xs truncate">{pred.model_name}</div>
                   <div className={cn(
@@ -262,14 +271,14 @@ function WorkflowStep({
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
           
           {/* Similar Cases */}
-          {step.data?.similar_cases && (
+          {similarCases ? (
             <div>
               <div className="text-xs font-medium text-gray-500 mb-1">Similar Cases:</div>
               <div className="space-y-1">
-                {(step.data.similar_cases as SimilarCase[]).slice(0, 3).map((c, i) => (
+                {similarCases.slice(0, 3).map((c, i) => (
                   <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
                     <span className="truncate font-mono">{c.slide_id}</span>
                     <span className={cn(
@@ -285,7 +294,7 @@ function WorkflowStep({
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       )}
     </div>

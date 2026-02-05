@@ -531,8 +531,10 @@ export default function HomePage() {
       resolutionLevel,
       forceReembed,
       (progress) => {
+          const nextPhase: "embedding" | "complete" =
+            progress.phase === "complete" ? "complete" : "embedding";
           const nextProgress = {
-            phase: progress.phase === "complete" ? "complete" : "embedding",
+            phase: nextPhase,
             progress: progress.progress,
             message: progress.message,
           };
@@ -547,8 +549,6 @@ export default function HomePage() {
           });
         }
       );
-      
-      console.log("Embedding result:", embedResult);
       
       toast.removeToast(toastId);
       toast.success(
@@ -610,8 +610,6 @@ export default function HomePage() {
 
     try {
       // First, ensure embeddings exist (uses background task with polling for level 0)
-      console.log("Checking/generating embeddings for slide:", selectedSlide.id, "level:", resolutionLevel);
-      
       toast.updateToast(toastId, {
         message: `Generating Path Foundation embeddings at level ${resolutionLevel} (level 0 may take 5-20 min)...`,
       });
@@ -623,8 +621,10 @@ export default function HomePage() {
         forceReembed,
         (progress) => {
           // Update progress UI with real-time status from backend
+          const nextPhase: "embedding" | "analyzing" =
+            progress.phase === "complete" ? "analyzing" : "embedding";
           const nextProgress = {
-            phase: progress.phase === "complete" ? "analyzing" : "embedding",
+            phase: nextPhase,
             progress: progress.progress,
             message: progress.message,
           };
@@ -640,8 +640,6 @@ export default function HomePage() {
         }
       );
       
-      console.log("Embedding result:", embedResult);
-
       const embeddingMsg = embedResult.status === "exists" 
         ? "Using cached embeddings" 
         : `Generated embeddings for ${embedResult.numPatches} patches`;
@@ -903,7 +901,6 @@ export default function HomePage() {
       description: "Fullscreen viewer",
       category: "Viewer",
       handler: handleToggleFullscreen,
-    handleToggleHeatmapOnly,
     },
     // Panel shortcuts
     {
@@ -1018,33 +1015,43 @@ export default function HomePage() {
       downloadPdf(blob, `atlas-report-${selectedSlide.id}.pdf`);
     } catch (err) {
       console.error("PDF export failed:", err);
+      const message = err instanceof Error ? err.message : "PDF export failed";
+      toast.error("PDF Export Failed", message);
     }
-  }, [selectedSlide, report]);
+  }, [selectedSlide, report, toast]);
 
   // Handle JSON export
   const handleExportJson = useCallback(async () => {
     if (!selectedSlide || !report) return;
     if (typeof document === "undefined") return;
-    const caseNotes = getCaseNotes(selectedSlide.id);
-    const exportPayload = {
-      exportedAt: new Date().toISOString(),
-      slide: selectedSlide,
-      analysis: analysisResult,
-      report,
-      qcMetrics: slideQCMetrics,
-      semanticResults,
-      multiModelResult,
-      caseNotes,
-    };
-    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `atlas-report-${selectedSlide.id}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const caseNotes = getCaseNotes(selectedSlide.id);
+      const exportPayload = {
+        exportedAt: new Date().toISOString(),
+        slide: selectedSlide,
+        analysis: analysisResult,
+        report,
+        qcMetrics: slideQCMetrics,
+        semanticResults,
+        multiModelResult,
+        caseNotes,
+      };
+      const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `atlas-report-${selectedSlide.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("JSON export failed:", err);
+      const message = err instanceof Error ? err.message : "JSON export failed";
+      toast.error("JSON Export Failed", message);
+    }
   }, [
     selectedSlide,
     report,
@@ -1052,6 +1059,7 @@ export default function HomePage() {
     slideQCMetrics,
     semanticResults,
     multiModelResult,
+    toast,
   ]);
 
   // Get DZI and heatmap URLs
@@ -1223,7 +1231,6 @@ export default function HomePage() {
         <AIAssistantPanel
           slideId={selectedSlide?.id ?? null}
           clinicalContext=""
-          onAnalysisComplete={(report) => console.log("Agent report:", report)}
         />
       </div>
       </div>

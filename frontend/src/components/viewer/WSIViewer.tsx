@@ -93,6 +93,7 @@ export function WSIViewer({
   const [activeTool, setActiveTool] = useState<"pan" | "crosshair">("pan");
   const [heatmapLoaded, setHeatmapLoaded] = useState(false);
   const [heatmapError, setHeatmapError] = useState(false);
+  const heatmapImageUrl = heatmap?.imageUrl;
   
   // Store activeTool in ref for click handler
   const activeToolRef = useRef(activeTool);
@@ -248,7 +249,7 @@ export function WSIViewer({
   // Handle heatmap overlay with OpenSeadragon
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer || !isReady || !heatmap) return;
+    if (!viewer || !isReady || !heatmapImageUrl) return;
 
     // Remove existing overlay if present
     if (heatmapOverlayRef.current) {
@@ -268,11 +269,12 @@ export function WSIViewer({
 
     // Create image inside container
     const img = document.createElement("img");
-    img.src = heatmap.imageUrl;
+    img.src = heatmapImageUrl;
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.objectFit = "fill";
-    img.style.opacity = showHeatmap ? String(heatmapOpacity) : "0";
+    // Initial opacity is updated in a separate effect to avoid re-creating overlays.
+    img.style.opacity = "0";
     img.style.transition = "opacity 0.3s ease";
     img.style.pointerEvents = "none";
     img.style.imageRendering = "pixelated"; // Sharp square tiles
@@ -285,7 +287,7 @@ export function WSIViewer({
     img.onerror = () => {
       setHeatmapError(true);
       setHeatmapLoaded(false);
-      console.error("Failed to load heatmap image:", heatmap.imageUrl);
+      console.error("Failed to load heatmap image:", heatmapImageUrl);
     };
 
     overlayDiv.appendChild(img);
@@ -297,7 +299,6 @@ export function WSIViewer({
     if (tiledImage) {
       // Get the bounds of the tiled image in viewport coordinates
       const bounds = tiledImage.getBounds(true);
-      console.log("Heatmap overlay bounds:", bounds);
       
       viewer.addOverlay({
         element: overlayDiv,
@@ -321,7 +322,7 @@ export function WSIViewer({
         }
       }
     };
-  }, [heatmap?.imageUrl, isReady]); // Only recreate on imageUrl change
+  }, [heatmapImageUrl, isReady]); // Only recreate on imageUrl change
 
   // Update heatmap opacity separately (doesn't recreate overlay)
   useEffect(() => {
