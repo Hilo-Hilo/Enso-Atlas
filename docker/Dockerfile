@@ -1,13 +1,13 @@
 # Enso Atlas - Production Dockerfile
 # Optimized for NVIDIA DGX Spark deployment (ARM64 + CUDA)
-# Using TF 25.02 for Blackwell GPU support (sm_121)
+# Using PyTorch base for proper CUDA support (MedGemma/Transformers needs PyTorch)
+# TensorFlow for Path Foundation runs on CPU (acceptable - embeddings are pre-computed)
 #
 # Build: docker build --network=host -t enso-atlas .
 # Run:   docker run --gpus all --ipc=host -p 7860:7860 -v ./models:/app/models enso-atlas
 
-# NVIDIA TensorFlow 25.02 container - has Blackwell GPU support
-# TF 2.17.0 with CUDA kernels for sm_121 (GB10)
-FROM nvcr.io/nvidia/tensorflow:25.02-tf2-py3
+# NVIDIA PyTorch container - proper ARM64 + CUDA support for Blackwell
+FROM nvcr.io/nvidia/pytorch:25.12-py3
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -18,8 +18,8 @@ ENV CUDA_HOME=/usr/local/cuda
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 ENV PATH=/usr/local/cuda/bin:$PATH
 
-# Print base image TensorFlow build info
-RUN python -c "import tensorflow as tf; print(f'TensorFlow: {tf.__version__}'); print(f'GPUs: {tf.config.list_physical_devices(\"GPU\")}')" || true
+# Print base image PyTorch build info
+RUN python -c "import torch; print(f'PyTorch: {torch.__version__} CUDA: {torch.cuda.is_available()}')"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -41,12 +41,12 @@ WORKDIR /app
 # Copy requirements first for caching
 COPY requirements.txt .
 
-# Install Python dependencies (includes PyTorch for TransMIL)
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install PyTorch with CUDA support for TransMIL model
-# Using pip index for ARM64 compatibility
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# Install TensorFlow for Path Foundation (CPU mode is acceptable)
+# Embeddings are pre-computed, TF is only used for on-demand embedding
+RUN pip install --no-cache-dir tensorflow
 
 # Install additional packages
 RUN pip install --no-cache-dir \
