@@ -22,6 +22,40 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _patch_torch_autocast():
+    """Patch torch.is_autocast_enabled for transformers 5.0+ compatibility.
+    
+    Newer transformers calls torch.is_autocast_enabled() with no arguments,
+    but some PyTorch versions have a different signature. This patches it to work.
+    """
+    import torch
+    
+    original_is_autocast_enabled = torch.is_autocast_enabled
+    
+    def patched_is_autocast_enabled(*args, **kwargs):
+        try:
+            return original_is_autocast_enabled()
+        except TypeError:
+            # Old signature expected an argument
+            if args or kwargs:
+                return original_is_autocast_enabled(*args, **kwargs)
+            # Try to get CPU autocast status
+            try:
+                return torch.is_autocast_cpu_enabled() or torch.is_autocast_cuda_enabled()
+            except Exception:
+                return False
+    
+    torch.is_autocast_enabled = patched_is_autocast_enabled
+    logger.info("Patched torch.is_autocast_enabled for transformers compatibility")
+
+
+# Apply patch on module load
+try:
+    _patch_torch_autocast()
+except Exception as e:
+    logger.warning(f"Failed to patch torch.is_autocast_enabled: {e}")
+
+
 @dataclass
 class ReportingConfig:
     """MedGemma reporting configuration."""
