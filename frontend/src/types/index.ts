@@ -429,3 +429,44 @@ export interface ExtendedSlideInfo extends SlideInfo {
   customMetadata?: Record<string, unknown>;
   notes?: string;
 }
+
+// ====== Visual Search (Image-to-Image) Types ======
+
+// Request for visual similarity search
+export interface VisualSearchRequest {
+  slideId?: string;
+  patchIndex?: number;
+  coordinates?: [number, number];
+  patchEmbedding?: number[];
+  topK?: number;
+  excludeSameSlide?: boolean;
+}
+
+// Single result from visual search
+export interface VisualSearchResultPatch {
+  slideId: string;
+  patchIndex: number;
+  coordinates?: [number, number];
+  distance: number;
+  similarity: number;
+  label?: string;
+  thumbnailUrl?: string;
+}
+
+// Response from visual search
+export interface VisualSearchResponse {
+  querySlideId?: string;
+  queryPatchIndex?: number;
+  queryCoordinates?: [number, number];
+  results: VisualSearchResultPatch[];
+  totalPatchesSearched: number;
+  searchTimeMs: number;
+}
+
+// Visual search status
+export interface VisualSearchStatus {
+  indexLoaded: boolean;
+  totalPatches: number;
+  totalSlides: number;
+  embeddingDim: number;
+}

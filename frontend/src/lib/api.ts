@@ -2333,3 +2333,93 @@ export function convertAsyncBatchResults(
     processingTimeMs: asyncStatus.processing_time_ms || asyncStatus.elapsed_seconds * 1000,
   };
 }
+
+// ====== Visual Search (Image-to-Image Similarity) ======
+
+// Backend response type (snake_case)
+interface BackendVisualSearchResultPatch {
+  slide_id: string;
+  patch_index: number;
+  coordinates?: [number, number];
+  distance: number;
+  similarity: number;
+  label?: string;
+  thumbnail_url?: string;
+}
+
+interface BackendVisualSearchResponse {
+  query_slide_id?: string;
+  query_patch_index?: number;
+  query_coordinates?: [number, number];
+  results: BackendVisualSearchResultPatch[];
+  total_patches_searched: number;
+  search_time_ms: number;
+}
+
+/**
+ * Search for visually similar patches across the database using FAISS.
+ * 
+ * Finds histologically similar regions by comparing patch embeddings.
+ * Can search by:
+ * - Patch index within a slide
+ * - Coordinates within a slide
+ * - Direct embedding vector
+ */
+export async function visualSearch(
+  request: import("@/types").VisualSearchRequest
+): Promise<import("@/types").VisualSearchResponse> {
+  const body: Record<string, unknown> = {
+    top_k: request.topK ?? 10,
+    exclude_same_slide: request.excludeSameSlide ?? true,
+  };
+  
+  if (request.slideId) body.slide_id = request.slideId;
+  if (request.patchIndex !== undefined) body.patch_index = request.patchIndex;
+  if (request.coordinates) body.coordinates = request.coordinates;
+  if (request.patchEmbedding) body.patch_embedding = request.patchEmbedding;
+  
+  const backend = await fetchApi<BackendVisualSearchResponse>(
+    "/api/search/visual",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    { timeoutMs: 30000 }
+  );
+  
+  return {
+    querySlideId: backend.query_slide_id,
+    queryPatchIndex: backend.query_patch_index,
+    queryCoordinates: backend.query_coordinates,
+    results: backend.results.map((r) => ({
+      slideId: r.slide_id,
+      patchIndex: r.patch_index,
+      coordinates: r.coordinates,
+      distance: r.distance,
+      similarity: r.similarity,
+      label: r.label,
+      thumbnailUrl: r.thumbnail_url,
+    })),
+    totalPatchesSearched: backend.total_patches_searched,
+    searchTimeMs: backend.search_time_ms,
+  };
+}
+
+/**
+ * Get the status of the visual search FAISS index.
+ */
+export async function getVisualSearchStatus(): Promise<import("@/types").VisualSearchStatus> {
+  const backend = await fetchApi<{
+    index_loaded: boolean;
+    total_patches: number;
+    total_slides: number;
+    embedding_dim: number;
+  }>("/api/search/visual/status");
+  
+  return {
+    indexLoaded: backend.index_loaded,
+    totalPatches: backend.total_patches,
+    totalSlides: backend.total_slides,
+    embeddingDim: backend.embedding_dim,
+  };
+}

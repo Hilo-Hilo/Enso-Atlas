@@ -374,6 +374,46 @@ class SemanticSearchResponse(BaseModel):
     embedding_model: str = "siglip-so400m"
 
 
+# ====== Visual Search (Image-to-Image) Models ======
+
+class VisualSearchRequest(BaseModel):
+    """Request for image-to-image visual similarity search using FAISS.
+    
+    Find histologically similar patches across the entire database.
+    Can specify either:
+    - patch_embedding: Direct embedding vector to search with
+    - slide_id + patch_index: Look up embedding from stored data
+    - slide_id + coordinates: Look up patch by its (x, y) location
+    """
+    slide_id: Optional[str] = Field(None, max_length=256, description="Source slide ID to look up patch embedding")
+    patch_index: Optional[int] = Field(None, ge=0, description="Index of the patch in the source slide")
+    coordinates: Optional[List[int]] = Field(None, description="[x, y] coordinates of the patch")
+    patch_embedding: Optional[List[float]] = Field(None, description="Direct embedding vector (384-dim)")
+    top_k: int = Field(default=10, ge=1, le=50, description="Number of similar patches to return")
+    exclude_same_slide: bool = Field(default=True, description="Exclude patches from the same slide")
+
+
+class VisualSearchResultPatch(BaseModel):
+    """Single similar patch result from visual search."""
+    slide_id: str
+    patch_index: int
+    coordinates: Optional[List[int]] = None
+    distance: float
+    similarity: float  # Converted from distance for easier interpretation
+    label: Optional[str] = None  # Slide label if known (e.g., responder/non-responder)
+    thumbnail_url: Optional[str] = None
+
+
+class VisualSearchResponse(BaseModel):
+    """Response from visual similarity search."""
+    query_slide_id: Optional[str] = None
+    query_patch_index: Optional[int] = None
+    query_coordinates: Optional[List[int]] = None
+    results: List[VisualSearchResultPatch]
+    total_patches_searched: int
+    search_time_ms: float
+
+
 # ====== Multi-Model Prediction Models ======
 
 class ModelPrediction(BaseModel):
@@ -2984,6 +3024,200 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             "embedding_dim": medsiglip_embedder.EMBEDDING_DIM if medsiglip_embedder else None,
             "input_size": medsiglip_embedder.INPUT_SIZE if medsiglip_embedder else None,
             "cached_slides": list(slide_siglip_embeddings.keys()) if slide_siglip_embeddings else [],
+        }
+
+    # ====== Visual Search (Image-to-Image Similarity) ======
+
+    @app.post("/api/search/visual", response_model=VisualSearchResponse)
+    async def visual_search(request: VisualSearchRequest):
+        """
+        Find visually similar patches across the entire database using FAISS.
+        
+        This endpoint enables image-to-image search: given a query patch (by embedding,
+        index, or coordinates), find the most histologically similar patches from all
+        slides in the database.
+        
+        Use cases:
+        - "Find Similar Patches" button on evidence patches
+        - Compare tumor morphology across cases
+        - Identify similar stroma/inflammatory patterns
+        - Educational: show similar cases for training
+        
+        The search uses Path Foundation patch embeddings and FAISS for efficient
+        approximate nearest neighbor search.
+        """
+        import time
+        start_time = time.time()
+        
+        # Validate request - need at least one way to identify the query patch
+        has_embedding = request.patch_embedding is not None
+        has_slide_patch = request.slide_id is not None and request.patch_index is not None
+        has_slide_coords = request.slide_id is not None and request.coordinates is not None
+        
+        if not (has_embedding or has_slide_patch or has_slide_coords):
+            raise HTTPException(
+                status_code=400,
+                detail="Must provide either patch_embedding, (slide_id + patch_index), or (slide_id + coordinates)"
+            )
+        
+        query_embedding = None
+        query_slide_id = request.slide_id
+        query_patch_index = request.patch_index
+        query_coordinates = request.coordinates
+        
+        # Case 1: Direct embedding provided
+        if has_embedding:
+            query_embedding = np.array(request.patch_embedding, dtype=np.float32)
+            if len(query_embedding.shape) == 1:
+                query_embedding = query_embedding.reshape(1, -1)
+        
+        # Case 2: Look up by slide_id + patch_index
+        elif has_slide_patch:
+            emb_path = embeddings_dir / f"{request.slide_id}.npy"
+            if not emb_path.exists():
+                raise HTTPException(status_code=404, detail=f"Slide {request.slide_id} not found")
+            
+            embeddings = np.load(emb_path)
+            if request.patch_index >= len(embeddings):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Patch index {request.patch_index} out of range (slide has {len(embeddings)} patches)"
+                )
+            
+            query_embedding = embeddings[request.patch_index:request.patch_index+1].astype(np.float32)
+            
+            # Also get coordinates if available
+            coord_path = embeddings_dir / f"{request.slide_id}_coords.npy"
+            if coord_path.exists():
+                coords = np.load(coord_path)
+                if request.patch_index < len(coords):
+                    query_coordinates = [int(coords[request.patch_index][0]), int(coords[request.patch_index][1])]
+        
+        # Case 3: Look up by slide_id + coordinates
+        elif has_slide_coords:
+            emb_path = embeddings_dir / f"{request.slide_id}.npy"
+            coord_path = embeddings_dir / f"{request.slide_id}_coords.npy"
+            
+            if not emb_path.exists():
+                raise HTTPException(status_code=404, detail=f"Slide {request.slide_id} not found")
+            if not coord_path.exists():
+                raise HTTPException(status_code=404, detail=f"Coordinates not found for slide {request.slide_id}")
+            
+            embeddings = np.load(emb_path)
+            coords = np.load(coord_path)
+            
+            # Find patch closest to requested coordinates
+            target_x, target_y = request.coordinates[0], request.coordinates[1]
+            distances = np.sqrt((coords[:, 0] - target_x)**2 + (coords[:, 1] - target_y)**2)
+            query_patch_index = int(np.argmin(distances))
+            
+            query_embedding = embeddings[query_patch_index:query_patch_index+1].astype(np.float32)
+            query_coordinates = [int(coords[query_patch_index][0]), int(coords[query_patch_index][1])]
+        
+        # Perform FAISS search
+        if evidence_gen is None or evidence_gen._faiss_index is None:
+            raise HTTPException(status_code=503, detail="FAISS index not initialized")
+        
+        # Search with extra results to allow filtering
+        search_k = request.top_k * 3 if request.exclude_same_slide else request.top_k
+        search_k = min(search_k, evidence_gen._faiss_index.ntotal)
+        
+        try:
+            distances, indices = evidence_gen._faiss_index.search(query_embedding, search_k)
+        except Exception as e:
+            logger.error(f"FAISS search failed: {e}")
+            raise HTTPException(status_code=500, detail=f"FAISS search failed: {str(e)}")
+        
+        # Build results
+        results = []
+        seen_slide_patches = set()
+        
+        for dist, idx in zip(distances[0], indices[0]):
+            if idx < 0 or idx >= len(evidence_gen._reference_metadata):
+                continue
+            
+            meta = evidence_gen._reference_metadata[idx]
+            result_slide_id = meta.get("slide_id", "unknown")
+            result_patch_index = meta.get("patch_index", 0)
+            
+            # Skip same slide if requested
+            if request.exclude_same_slide and result_slide_id == query_slide_id:
+                continue
+            
+            # Deduplicate by (slide_id, patch_index)
+            key = (result_slide_id, result_patch_index)
+            if key in seen_slide_patches:
+                continue
+            seen_slide_patches.add(key)
+            
+            # Get coordinates if available
+            result_coordinates = None
+            coord_path = embeddings_dir / f"{result_slide_id}_coords.npy"
+            if coord_path.exists():
+                try:
+                    coords = np.load(coord_path)
+                    if result_patch_index < len(coords):
+                        result_coordinates = [int(coords[result_patch_index][0]), int(coords[result_patch_index][1])]
+                except Exception as e:
+                    logger.warning(f"Failed to load coords for {result_slide_id}: {e}")
+            
+            # Get slide label if available
+            result_label = slide_labels.get(result_slide_id)
+            
+            # Convert L2 distance to similarity score (higher = more similar)
+            # Using inverse distance formula: similarity = 1 / (1 + distance)
+            similarity = 1.0 / (1.0 + float(dist))
+            
+            # Generate thumbnail URL
+            thumbnail_url = None
+            if result_coordinates:
+                thumbnail_url = f"/api/slides/{result_slide_id}/patches/{result_patch_index}"
+            
+            results.append(VisualSearchResultPatch(
+                slide_id=result_slide_id,
+                patch_index=result_patch_index,
+                coordinates=result_coordinates,
+                distance=float(dist),
+                similarity=similarity,
+                label=result_label,
+                thumbnail_url=thumbnail_url,
+            ))
+            
+            if len(results) >= request.top_k:
+                break
+        
+        search_time_ms = (time.time() - start_time) * 1000
+        
+        log_audit_event(
+            "visual_search",
+            slide_id=query_slide_id,
+            details={
+                "patch_index": query_patch_index,
+                "coordinates": query_coordinates,
+                "num_results": len(results),
+                "search_time_ms": search_time_ms,
+            },
+        )
+        
+        return VisualSearchResponse(
+            query_slide_id=query_slide_id,
+            query_patch_index=query_patch_index,
+            query_coordinates=query_coordinates,
+            results=results,
+            total_patches_searched=evidence_gen._faiss_index.ntotal if evidence_gen._faiss_index else 0,
+            search_time_ms=round(search_time_ms, 2),
+        )
+
+    @app.get("/api/search/visual/status")
+    async def visual_search_status():
+        """Check the status of the visual search FAISS index."""
+        index_loaded = evidence_gen is not None and evidence_gen._faiss_index is not None
+        
+        return {
+            "index_loaded": index_loaded,
+            "total_patches": evidence_gen._faiss_index.ntotal if index_loaded else 0,
+            "total_slides": len(available_slides),
+            "embedding_dim": 384,  # Path Foundation embedding dimension
         }
 
     # ====== Slide Quality Control ======

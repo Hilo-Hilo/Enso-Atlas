@@ -22,6 +22,7 @@ import {
   Circle,
   Filter,
   X,
+  Search,
 } from "lucide-react";
 import type { EvidencePatch, PatchCoordinates, TissueType } from "@/types";
 
@@ -134,9 +135,11 @@ interface EvidencePanelProps {
   isLoading?: boolean;
   onPatchClick?: (coords: PatchCoordinates) => void;
   onPatchZoom?: (patch: EvidencePatch) => void;
+  onFindSimilar?: (patch: EvidencePatch) => void;
   selectedPatchId?: string;
   error?: string | null;
   onRetry?: () => void;
+  isSearchingVisual?: boolean;
 }
 
 export function EvidencePanel({
@@ -144,9 +147,11 @@ export function EvidencePanel({
   isLoading,
   onPatchClick,
   onPatchZoom,
+  onFindSimilar,
   selectedPatchId,
   error,
   onRetry,
+  isSearchingVisual,
 }: EvidencePanelProps) {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [currentPage, setCurrentPage] = useState(0);
@@ -398,6 +403,8 @@ export function EvidencePanel({
                   isSelected={selectedPatchId === patch.id}
                   onClick={() => onPatchClick?.(patch.coordinates)}
                   onZoom={() => onPatchZoom?.(patch)}
+                  onFindSimilar={onFindSimilar ? () => onFindSimilar(patch) : undefined}
+                  isSearching={isSearchingVisual}
                 />
               ))}
             </div>
@@ -411,6 +418,8 @@ export function EvidencePanel({
                   isSelected={selectedPatchId === patch.id}
                   onClick={() => onPatchClick?.(patch.coordinates)}
                   onZoom={() => onPatchZoom?.(patch)}
+                  onFindSimilar={onFindSimilar ? () => onFindSimilar(patch) : undefined}
+                  isSearching={isSearchingVisual}
                 />
               ))}
             </div>
@@ -481,6 +490,8 @@ interface PatchThumbnailProps {
   isSelected: boolean;
   onClick: () => void;
   onZoom?: () => void;
+  onFindSimilar?: () => void;
+  isSearching?: boolean;
 }
 
 function PatchThumbnail({
@@ -489,6 +500,8 @@ function PatchThumbnail({
   isSelected,
   onClick,
   onZoom,
+  onFindSimilar,
+  isSearching,
 }: PatchThumbnailProps) {
   const [thumbnailError, setThumbnailError] = useState(false);
   const [thumbnailLoading, setThumbnailLoading] = useState(!!patch.thumbnailUrl);
@@ -595,24 +608,52 @@ function PatchThumbnail({
                 ({patch.coordinates.x}, {patch.coordinates.y})
               </span>
             </div>
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                onZoom?.();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
+            <div className="flex items-center gap-1">
+              {onFindSimilar && (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!isSearching) onFindSimilar();
+                  }}
+                  onKeyDown={(e) => {
+                    if ((e.key === "Enter" || e.key === " ") && !isSearching) {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      onFindSimilar();
+                    }
+                  }}
+                  className={cn(
+                    "p-1 rounded transition-colors cursor-pointer",
+                    isSearching
+                      ? "bg-clinical-500/50 cursor-wait"
+                      : "bg-white/20 hover:bg-clinical-500/60"
+                  )}
+                  title="Find similar patches"
+                >
+                  <Search className={cn("h-4 w-4", isSearching && "animate-pulse")} />
+                </div>
+              )}
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
                   e.stopPropagation();
-                  e.preventDefault();
                   onZoom?.();
-                }
-              }}
-              className="p-1 bg-white/20 rounded hover:bg-white/40 transition-colors cursor-pointer"
-              title="View enlarged"
-            >
-              <ZoomIn className="h-4 w-4" />
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onZoom?.();
+                  }
+                }}
+                className="p-1 bg-white/20 rounded hover:bg-white/40 transition-colors cursor-pointer"
+                title="View enlarged"
+              >
+                <ZoomIn className="h-4 w-4" />
+              </div>
             </div>
           </div>
         </div>
@@ -633,6 +674,8 @@ interface PatchListItemProps {
   isSelected: boolean;
   onClick: () => void;
   onZoom?: () => void;
+  onFindSimilar?: () => void;
+  isSearching?: boolean;
 }
 
 function PatchListItem({
@@ -641,6 +684,8 @@ function PatchListItem({
   isSelected,
   onClick,
   onZoom,
+  onFindSimilar,
+  isSearching,
 }: PatchListItemProps) {
   const attentionPercent = Math.round(patch.attentionWeight * 100);
 
@@ -721,25 +766,53 @@ function PatchListItem({
         )}
       </div>
 
-      {/* Zoom button */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={(e) => {
-          e.stopPropagation();
-          onZoom?.();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
+      {/* Action buttons */}
+      <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+        {onFindSimilar && (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!isSearching) onFindSimilar();
+            }}
+            onKeyDown={(e) => {
+              if ((e.key === "Enter" || e.key === " ") && !isSearching) {
+                e.stopPropagation();
+                e.preventDefault();
+                onFindSimilar();
+              }
+            }}
+            className={cn(
+              "p-1.5 rounded-lg transition-all cursor-pointer",
+              isSearching
+                ? "bg-clinical-100 cursor-wait"
+                : "hover:bg-clinical-100"
+            )}
+            title="Find similar patches"
+          >
+            <Search className={cn("h-4 w-4 text-clinical-600", isSearching && "animate-pulse")} />
+          </div>
+        )}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={(e) => {
             e.stopPropagation();
-            e.preventDefault();
             onZoom?.();
-          }
-        }}
-        className="shrink-0 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-clinical-100 cursor-pointer"
-        title="View enlarged"
-      >
-        <ZoomIn className="h-4 w-4 text-clinical-600" />
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.stopPropagation();
+              e.preventDefault();
+              onZoom?.();
+            }
+          }}
+          className="p-1.5 rounded-lg hover:bg-clinical-100 cursor-pointer"
+          title="View enlarged"
+        >
+          <ZoomIn className="h-4 w-4 text-clinical-600" />
+        </div>
       </div>
     </button>
   );
