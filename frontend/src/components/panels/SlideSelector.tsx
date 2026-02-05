@@ -18,7 +18,6 @@ import {
   Search,
   SortAsc,
   SortDesc,
-  Filter,
   ChevronDown,
   Microscope,
   Hash,
@@ -265,9 +264,9 @@ export function SlideSelector({
               size="sm"
               onClick={() => setShowFilters(!showFilters)}
               className={cn("p-1.5", showFilters && "bg-clinical-50")}
-              title="Filter options"
+              title="Sort options"
             >
-              <Filter className="h-4 w-4" />
+              <SortAsc className="h-4 w-4" />
             </Button>
             <Button
               variant="ghost"

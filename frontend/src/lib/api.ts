@@ -456,10 +456,10 @@ export async function analyzeSlide(
       similarity: s.similarity_score,
       distance: s.distance,
       label: s.label || undefined,
-      thumbnailUrl: `${API_BASE_URL}/api/slides/${s.slide_id}/thumbnail?size=128`,
+      thumbnailUrl: `/api/slides/${s.slide_id}/thumbnail?size=128`,
     })),
     heatmap: {
-      imageUrl: `${API_BASE_URL}/api/heatmap/${backend.slide_id}`,
+      imageUrl: `/api/heatmap/${backend.slide_id}`,
       minValue: 0,
       maxValue: 1,
       colorScale: "viridis",
@@ -624,9 +624,15 @@ export async function generateReport(
 
 /**
  * Get Deep Zoom Image (DZI) metadata for OpenSeadragon
+ * 
+ * Uses local Next.js API proxy to avoid CORS issues.
+ * The proxy routes through /api/slides/{id}/dzi and /api/slides/{id}/dzi_files/...
+ * which forward to the backend while keeping same-origin.
  */
 export function getDziUrl(slideId: string): string {
-  return `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/dzi`;
+  // Use local proxy to avoid CORS - OpenSeadragon will fetch tiles from
+  // /api/slides/{id}/dzi_files/{level}/{col}_{row}.jpeg (relative to DZI URL)
+  return `/api/slides/${encodeURIComponent(slideId)}/dzi`;
 }
 
 /**
@@ -634,27 +640,33 @@ export function getDziUrl(slideId: string): string {
  * @param slideId - Slide identifier
  * @param modelId - Optional model ID for multi-model heatmaps
  * @param level - Downsample level (0-4): 0=2048px highest detail, 2=512px default, 4=128px fastest
+ * 
+ * Uses local Next.js API proxy to avoid CORS issues.
  */
 export function getHeatmapUrl(slideId: string, modelId?: string, level?: number): string {
   const levelParam = level !== undefined ? `?level=${level}` : '';
   if (modelId) {
-    return `${API_BASE_URL}/api/heatmap/${encodeURIComponent(slideId)}/${encodeURIComponent(modelId)}${levelParam}`;
+    return `/api/heatmap/${encodeURIComponent(slideId)}/${encodeURIComponent(modelId)}${levelParam}`;
   }
-  return `${API_BASE_URL}/api/heatmap/${encodeURIComponent(slideId)}${levelParam}`;
+  return `/api/heatmap/${encodeURIComponent(slideId)}${levelParam}`;
 }
 
 /**
  * Get thumbnail URL for a slide
+ * 
+ * Uses local Next.js API proxy to avoid CORS issues.
  */
 export function getThumbnailUrl(slideId: string): string {
-  return `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/thumbnail`;
+  return `/api/slides/${encodeURIComponent(slideId)}/thumbnail`;
 }
 
 /**
  * Get patch image URL
+ * 
+ * Uses local Next.js API proxy to avoid CORS issues.
  */
 export function getPatchUrl(slideId: string, patchId: string): string {
-  return `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/patches/${encodeURIComponent(patchId)}`;
+  return `/api/slides/${encodeURIComponent(slideId)}/patches/${encodeURIComponent(patchId)}`;
 }
 
 /**
