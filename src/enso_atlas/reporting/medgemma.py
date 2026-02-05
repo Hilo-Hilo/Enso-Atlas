@@ -27,12 +27,12 @@ class ReportingConfig:
     """MedGemma reporting configuration."""
     # Use local path in container, fallback to HuggingFace ID
     model: str = "/app/models/medgemma-4b-it"
-    max_evidence_patches: int = 8
-    max_similar_cases: int = 5
-    max_input_tokens: int = 3072
-    max_output_tokens: int = 2048
-    max_generation_time_s: float = 240.0
-    temperature: float = 0.3
+    max_evidence_patches: int = 4  # Reduced for shorter prompts
+    max_similar_cases: int = 0  # Skip similar cases to reduce prompt size
+    max_input_tokens: int = 512  # Simplified prompt is much shorter
+    max_output_tokens: int = 256  # Simplified response needs fewer tokens
+    max_generation_time_s: float = 120.0  # Faster with shorter output
+    temperature: float = 0.1  # Lower temp for more predictable JSON
     top_p: float = 0.9
 
 
@@ -259,87 +259,21 @@ class MedGemmaReporter:
         case_id: str = "unknown",
         patient_context: Optional[Dict] = None,
     ) -> str:
-        """Build the prompt for MedGemma."""
+        """Build a simplified prompt for MedGemma to avoid token limits."""
 
-        # Format patient context
-        patient_desc = self._format_patient_context(patient_context)
-
-        # Build evidence description
-        evidence_text = "\n".join([
-            f"- Patch {p['rank']}: Attention weight {p['attention_weight']:.3f}, "
-            f"coordinates ({p['coordinates'][0]}, {p['coordinates'][1]})"
-            for p in evidence_patches[:self.config.max_evidence_patches]
+        # Keep evidence description minimal - just top 4 patches
+        top_patches = evidence_patches[:4]
+        evidence_text = ", ".join([
+            f"patch_{p['rank']}(attn={p['attention_weight']:.2f})"
+            for p in top_patches
         ])
 
-        # Build similar cases description
-        similar_text = ""
-        if similar_cases and self.config.max_similar_cases > 0:
-            similar_cases_deduped = []
-            seen = set()
-            for s in similar_cases[:self.config.max_similar_cases]:
-                case_key = s.get("metadata", {}).get("slide_id", "unknown")
-                if case_key not in seen:
-                    seen.add(case_key)
-                    similar_cases_deduped.append(s)
+        # Simple, short prompt requesting minimal JSON
+        prompt = f"""Pathology case {case_id}: Model predicts "{label}" (score={score:.2f}) for bevacizumab response.
+Top evidence: {evidence_text}
 
-            similar_text = "\n".join([
-                f"- Similar case: {s.get('metadata', {}).get('slide_id', 'unknown')}, "
-                f"distance: {s['distance']:.3f}"
-                for s in similar_cases_deduped
-            ])
-
-        prompt = f"""You are a medical AI assistant helping prepare a tumor board summary for a pathology case. You must be cautious, factual, and clearly state limitations.
-
-CASE ID: {case_id}
-
-PATIENT CONTEXT:
-{patient_desc}
-
-MODEL PREDICTION:
-- Classification: {label}
-- Probability score: {score:.3f}
-- Task: Bevacizumab treatment response prediction
-
-EVIDENCE PATCHES (ordered by model attention):
-{evidence_text}
-
-SIMILAR CASES FROM REFERENCE COHORT:
-{similar_text if similar_text else "No similar cases available in reference cohort."}
-
-Generate a structured JSON report with the following format:
-{{
-    "case_id": "{case_id}",
-    "task": "Bevacizumab treatment response prediction from H&E histopathology",
-    "model_output": {{
-        "label": "{label}",
-        "probability": {score:.3f},
-        "calibration_note": "Model probability, not clinical certainty. Requires external validation."
-    }},
-    "evidence": [
-        {{
-            "patch_id": "patch_N",
-            "morphology_description": "Brief description of visible morphology",
-            "significance": "Why this region may be relevant"
-        }}
-    ],
-    "similar_examples": [],
-    "limitations": [
-        "List specific limitations of this analysis"
-    ],
-    "suggested_next_steps": [
-        "Suggested confirmatory tests or additional evaluation"
-    ],
-    "safety_statement": "This is a research decision-support tool, not a diagnostic device. All findings must be validated by qualified pathologists. Do not use for standalone clinical decision-making."
-}}
-
-IMPORTANT CONSTRAINTS:
-1. Do NOT recommend specific treatments or drugs
-2. Do NOT claim clinical certainty
-3. DO cite specific patch IDs when describing evidence
-4. DO acknowledge model limitations
-5. Keep descriptions factual and based only on the provided evidence
-
-Generate the JSON report:"""
+Return ONLY this JSON (no explanation):
+{{"prediction":"{label}","confidence":{score:.2f},"key_findings":["finding1","finding2"],"recommendation":"one sentence"}}"""
 
         return prompt
 
@@ -349,8 +283,8 @@ Generate the JSON report:"""
             return max(1, len(prompt.split()))
         return len(self._tokenizer.encode(prompt, add_special_tokens=False))
 
-    def _parse_json_response(self, response: str) -> Dict:
-        """Extract and parse JSON from model response."""
+    def _parse_json_response(self, response: str, case_id: str = "unknown", score: float = 0.0, label: str = "unknown") -> Dict:
+        """Extract and parse JSON from model response, mapping simplified output to full report structure."""
         # Strip markdown code fences if present (```json ... ``` or ``` ... ```)
         cleaned = response.strip()
         cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
@@ -358,20 +292,51 @@ Generate the JSON report:"""
         
         # Try to find JSON in the response
         json_match = re.search(r'\{[\s\S]*\}', cleaned)
-
+        
+        parsed = None
         if json_match:
+            json_str = json_match.group()
+            # Try to fix truncated JSON by closing brackets
             try:
-                return json.loads(json_match.group())
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse JSON: {e}")
+                parsed = json.loads(json_str)
+            except json.JSONDecodeError:
+                # Try to repair truncated JSON
+                for fix in ['"}', '"]', '"]}', '"}]']:
+                    try:
+                        parsed = json.loads(json_str + fix)
+                        logger.info("Repaired truncated JSON with suffix: %s", fix)
+                        break
+                    except json.JSONDecodeError:
+                        continue
+                if parsed is None:
+                    logger.warning(f"Failed to parse JSON even after repair attempts")
+
+        # Map simplified response to full report structure
+        if parsed:
+            key_findings = parsed.get("key_findings", [])
+            recommendation = parsed.get("recommendation", "Review with pathology team")
+            
+            return {
+                "case_id": case_id,
+                "task": "Bevacizumab treatment response prediction from H&E histopathology",
+                "model_output": {
+                    "label": parsed.get("prediction", label),
+                    "probability": parsed.get("confidence", score),
+                    "calibration_note": "Model probability, not clinical certainty. Requires external validation."
+                },
+                "evidence": [{"patch_id": f"patch_{i+1}", "morphology_description": f, "significance": "High attention region"} for i, f in enumerate(key_findings[:3])],
+                "limitations": ["AI prediction requires pathologist validation", "Based on H&E morphology only"],
+                "suggested_next_steps": [recommendation] if recommendation else ["Pathology review recommended"],
+                "safety_statement": "This is a research decision-support tool, not a diagnostic device. All findings must be validated by qualified pathologists."
+            }
 
         # Return a minimal valid structure if parsing fails
         return {
-            "case_id": "unknown",
-            "task": "Report generation failed",
+            "case_id": case_id,
+            "task": "Bevacizumab treatment response prediction from H&E histopathology",
             "model_output": {
-                "label": "unknown",
-                "probability": 0.0,
+                "label": label,
+                "probability": score,
                 "calibration_note": "Report generation encountered an error"
             },
             "evidence": [],
@@ -635,7 +600,7 @@ Generate the JSON report:"""
 
                 # Parse JSON
                 logger.info("MedGemma parsing JSON response")
-                report = self._parse_json_response(response)
+                report = self._parse_json_response(response, case_id=case_id, score=score, label=label)
 
                 # Validate
                 logger.info("MedGemma validating report")
