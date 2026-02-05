@@ -28,15 +28,35 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _find_medsiglip_model() -> str:
+    """Find MedSigLIP model path, checking common locations."""
+    import os
+    candidates = [
+        os.environ.get("MEDSIGLIP_MODEL_PATH", ""),
+        "/app/models/medsiglip",  # Docker path
+        os.path.expanduser("~/med-gemma-hackathon/models/medsiglip"),  # Local dev
+        "models/medsiglip",  # Relative path
+    ]
+    for path in candidates:
+        if path and Path(path).exists():
+            return path
+    # Fallback to HuggingFace Hub
+    return "google/siglip-so400m-patch14-384"
+
+
 @dataclass
 class MedSigLIPConfig:
     """MedSigLIP configuration."""
-    model_id: str = "/app/models/medsiglip"  # Local MedSigLIP model (google/medsiglip-448)
+    model_id: str = ""  # Auto-detected if empty
     # Fallback: "google/siglip-so400m-patch14-384" for general SigLIP
     batch_size: int = 32
     precision: str = "fp16"  # fp16 or fp32
     cache_dir: str = "data/embeddings/medsiglip_cache"
     device: str = "auto"  # auto, cuda, cpu
+    
+    def __post_init__(self):
+        if not self.model_id:
+            self.model_id = _find_medsiglip_model()
 
 
 class MedSigLIPEmbedder:
