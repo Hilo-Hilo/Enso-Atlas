@@ -21,7 +21,7 @@ import type { PatchCoordinates, HeatmapData } from "@/types";
 
 // Heatmap model options
 const HEATMAP_MODELS = [
-  { id: null, name: "Legacy CLAM" },
+  { id: null, name: "Legacy Model" },
   { id: "platinum_sensitivity", name: "Platinum Sensitivity" },
   { id: "tumor_grade", name: "Tumor Grade" },
   { id: "survival_5y", name: "5-Year Survival" },

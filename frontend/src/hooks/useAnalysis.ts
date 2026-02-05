@@ -14,7 +14,7 @@ import { analyzeSlide, generateReportWithProgress, analyzeWithUncertainty, gener
 // Analysis progress steps
 export const ANALYSIS_STEPS = [
   { id: "embeddings", label: "Loading slide embeddings...", description: "Retrieving pre-computed feature vectors" },
-  { id: "prediction", label: "Running CLAM prediction...", description: "Multiple instance learning inference" },
+  { id: "prediction", label: "Running TransMIL prediction...", description: "Multiple instance learning inference" },
   { id: "similar", label: "Finding similar cases...", description: "FAISS vector similarity search" },
   { id: "evidence", label: "Generating evidence...", description: "Extracting top attention regions" },
 ] as const;

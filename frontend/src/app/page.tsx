@@ -197,7 +197,7 @@ export default function HomePage() {
   const [selectedModels, setSelectedModels] = useState<string[]>(["platinum_sensitivity", "tumor_grade"]);
   const [resolutionLevel, setResolutionLevel] = useState<number>(1); // 0 = full res, 1 = downsampled
   const [forceReembed, setForceReembed] = useState(false);
-  const [heatmapModel, setHeatmapModel] = useState<string | null>(null); // null = legacy CLAM heatmap
+  const [heatmapModel, setHeatmapModel] = useState<string | null>(null); // null = legacy model heatmap
   const [heatmapLevel, setHeatmapLevel] = useState<number>(2); // 0-4, default 2 (512px)
 
   // Multi-model analysis state
@@ -724,7 +724,7 @@ export default function HomePage() {
     // On mobile, switch to results tab when analysis starts
     setMobilePanelTab("results");
     
-    toast.info("Starting Analysis", "Analyzing slide with CLAM model...");
+    toast.info("Starting Analysis", "Running TransMIL prediction...");
 
     const startTime = Date.now();
     const result = await analyze({
@@ -743,7 +743,7 @@ export default function HomePage() {
         processingTime
       );
       toast.success(
-        "CLAM Analysis Complete",
+        "Analysis Complete",
         `Prediction: ${result.prediction.label} (${Math.round(result.prediction.confidence * 100)}% confidence)`
       );
     }
