@@ -745,6 +745,25 @@ def create_app(
             except Exception as e:
                 logger.warning(f'Failed to attach labels to slide-mean metadata: {e}')
 
+
+        # Initialize agent workflow now that models and indexes are ready
+        if AGENT_AVAILABLE:
+            try:
+                agent_workflow = AgentWorkflow(
+                    embeddings_dir=embeddings_dir,
+                    multi_model_inference=multi_model_inference,
+                    evidence_generator=evidence_gen,
+                    medgemma_reporter=reporter,
+                    slide_labels=slide_labels,
+                    slide_mean_index=slide_mean_index,
+                    slide_mean_ids=slide_mean_ids,
+                    slide_mean_meta=slide_mean_meta,
+                )
+                set_agent_workflow(agent_workflow)
+                logger.info("Agent workflow initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize agent workflow: {e}")
+
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
@@ -4645,26 +4664,15 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
 
 
-    # Initialize agent workflow for multi-step analysis
+    # Agent workflow routes (workflow instance is initialized during startup, after models are loaded)
     if AGENT_AVAILABLE:
         try:
-            agent_workflow = AgentWorkflow(
-                embeddings_dir=embeddings_dir,
-                multi_model_inference=multi_model_inference,
-                evidence_generator=evidence_gen,
-                medgemma_reporter=reporter,
-                slide_labels=slide_labels,
-                slide_mean_index=slide_mean_index,
-                slide_mean_ids=slide_mean_ids,
-                slide_mean_meta=slide_mean_meta,
-            )
-            set_agent_workflow(agent_workflow)
             app.include_router(agent_router)
-            logger.info("Agent workflow initialized and routes registered")
+            logger.info("Agent workflow routes registered")
         except Exception as e:
-            logger.warning(f"Failed to initialize agent workflow: {e}")
+            logger.warning(f"Failed to register agent workflow routes: {e}")
     else:
-        logger.warning("Agent workflow not available - skipping initialization")
+        logger.warning("Agent workflow not available - skipping registration")
 
     # ====== Chat API Endpoint ======
     # Initialize ChatManager for RAG-based conversational AI
