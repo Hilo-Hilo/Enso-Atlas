@@ -1011,6 +1011,7 @@ export default function HomePage() {
         slideId: selectedSlide.id,
         caseNotes,
         institutionName: "Enso Labs",
+        slideInfo: selectedSlide,
       });
       
       // Download the PDF
@@ -1024,7 +1025,18 @@ export default function HomePage() {
   const handleExportJson = useCallback(async () => {
     if (!selectedSlide || !report) return;
     if (typeof document === "undefined") return;
-    const blob = new Blob([JSON.stringify(report, null, 2)], {
+    const caseNotes = getCaseNotes(selectedSlide.id);
+    const exportPayload = {
+      exportedAt: new Date().toISOString(),
+      slide: selectedSlide,
+      analysis: analysisResult,
+      report,
+      qcMetrics: slideQCMetrics,
+      semanticResults,
+      multiModelResult,
+      caseNotes,
+    };
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -1033,7 +1045,14 @@ export default function HomePage() {
     a.download = `atlas-report-${selectedSlide.id}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [selectedSlide, report]);
+  }, [
+    selectedSlide,
+    report,
+    analysisResult,
+    slideQCMetrics,
+    semanticResults,
+    multiModelResult,
+  ]);
 
   // Get DZI and heatmap URLs
   const dziUrl = selectedSlide ? getDziUrl(selectedSlide.id) : undefined;

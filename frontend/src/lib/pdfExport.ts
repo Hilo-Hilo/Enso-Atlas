@@ -2,7 +2,7 @@
 // Uses jsPDF to generate professional clinical reports
 
 import jsPDF from "jspdf";
-import type { StructuredReport } from "@/types";
+import type { StructuredReport, SlideInfo, PatientContext } from "@/types";
 import type { CaseNote } from "@/components/panels/CaseNotesPanel";
 
 interface PdfExportOptions {
@@ -10,6 +10,8 @@ interface PdfExportOptions {
   slideId: string;
   caseNotes?: CaseNote[];
   institutionName?: string;
+  slideInfo?: SlideInfo;
+  patientContext?: PatientContext;
 }
 
 // Helper to safely format numbers
@@ -34,7 +36,15 @@ function safeCoords(coords: unknown): string {
  * Generate a professional PDF report from analysis results
  */
 export async function generatePdfReport(options: PdfExportOptions): Promise<Blob> {
-  const { report, slideId, caseNotes = [], institutionName = "Enso Labs" } = options;
+  const {
+    report,
+    slideId,
+    caseNotes = [],
+    institutionName = "Enso Labs",
+    slideInfo,
+    patientContext,
+  } = options;
+  const resolvedPatientContext = patientContext || slideInfo?.patient || report.patientContext;
 
   const doc = new jsPDF({
     orientation: "portrait",
@@ -122,6 +132,35 @@ export async function generatePdfReport(options: PdfExportOptions): Promise<Blob
 
   yPos += 28;
 
+  // ========== PATIENT & SLIDE INFO ==========
+  if (resolvedPatientContext || slideInfo) {
+    drawSectionHeader("Patient & Slide Information", [75, 75, 75]);
+
+    const infoLines: string[] = [];
+    if (resolvedPatientContext?.age !== undefined) infoLines.push(`Age: ${resolvedPatientContext.age}`);
+    if (resolvedPatientContext?.sex) infoLines.push(`Sex: ${resolvedPatientContext.sex}`);
+    if (resolvedPatientContext?.stage) infoLines.push(`Stage: ${resolvedPatientContext.stage}`);
+    if (resolvedPatientContext?.grade) infoLines.push(`Grade: ${resolvedPatientContext.grade}`);
+    if (resolvedPatientContext?.histology) infoLines.push(`Histology: ${resolvedPatientContext.histology}`);
+    if (resolvedPatientContext?.prior_lines !== undefined) {
+      infoLines.push(`Prior lines: ${resolvedPatientContext.prior_lines}`);
+    }
+
+    if (slideInfo?.magnification) infoLines.push(`Magnification: ${slideInfo.magnification}x`);
+    if (slideInfo?.mpp !== undefined) infoLines.push(`MPP: ${safeNumber(slideInfo.mpp, 3)} um/px`);
+    if (slideInfo?.dimensions?.width && slideInfo?.dimensions?.height) {
+      infoLines.push(`Dimensions: ${slideInfo.dimensions.width} x ${slideInfo.dimensions.height}`);
+    }
+    if (slideInfo?.label) infoLines.push(`Slide label: ${slideInfo.label}`);
+
+    if (infoLines.length === 0) {
+      addWrappedText("No additional patient or slide context available.", 9);
+    } else {
+      infoLines.forEach((line) => addWrappedText(line, 9));
+    }
+    yPos += 2;
+  }
+
   // ========== MODEL OUTPUT ==========
   drawSectionHeader("Model Prediction");
 
@@ -157,7 +196,7 @@ export async function generatePdfReport(options: PdfExportOptions): Promise<Blob
   yPos += 4;
 
   // ========== CLINICAL SUMMARY ==========
-  drawSectionHeader("Clinical Summary");
+  drawSectionHeader("MedGemma Summary");
   addWrappedText(report.summary, 10);
   yPos += 6;
 
@@ -165,7 +204,13 @@ export async function generatePdfReport(options: PdfExportOptions): Promise<Blob
   if (report.evidence.length > 0) {
     drawSectionHeader("Supporting Evidence");
 
-    report.evidence.forEach((item, index) => {
+    const evidenceItems = report.evidence.slice(0, 5);
+    if (report.evidence.length > evidenceItems.length) {
+      addWrappedText(`Showing top ${evidenceItems.length} of ${report.evidence.length} evidence patches.`, 8);
+      yPos += 2;
+    }
+
+    evidenceItems.forEach((item, index) => {
       checkPageBreak(25);
 
       doc.setFontSize(10);

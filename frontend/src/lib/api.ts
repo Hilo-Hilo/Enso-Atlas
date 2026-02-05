@@ -13,6 +13,7 @@ import type {
   SlideInfo,
   SlidesListResponse,
   StructuredReport,
+  PatientContext,
   ApiError,
   SemanticSearchResponse,
   SlideQCMetrics,
@@ -602,6 +603,7 @@ export async function generateReport(
     caseId: reportJson.case_id || backend.slide_id,
     task: reportJson.task || "Bevacizumab treatment response prediction",
     generatedAt: new Date().toISOString(),
+    patientContext: reportJson.patient_context as PatientContext | undefined,
     modelOutput: {
       label: modelOutput.label.toUpperCase(),
       score: modelOutput.probability,
@@ -1919,6 +1921,7 @@ function transformBackendReport(backend: {
   const reportJson = backend.report_json as {
     case_id?: string;
     task?: string;
+    patient_context?: PatientContext;
     model_output?: {
       label: string;
       probability: number;
@@ -2013,6 +2016,7 @@ function transformBackendReport(backend: {
     caseId: reportJson.case_id || backend.slide_id,
     task: reportJson.task || 'Bevacizumab treatment response prediction',
     generatedAt: new Date().toISOString(),
+    patientContext: reportJson.patient_context,
     modelOutput: {
       label: modelOutput.label.toUpperCase(),
       score: modelOutput.probability,

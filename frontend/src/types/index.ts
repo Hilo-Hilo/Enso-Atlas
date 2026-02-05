@@ -95,6 +95,7 @@ export interface StructuredReport {
   caseId: string;
   task: string;
   generatedAt: string;
+  patientContext?: PatientContext;
   modelOutput: PredictionResult;
   evidence: Array<{
     patchId: string;
