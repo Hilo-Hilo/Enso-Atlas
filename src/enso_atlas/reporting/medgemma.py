@@ -30,7 +30,7 @@ class ReportingConfig:
     max_evidence_patches: int = 4  # Reduced for shorter prompts
     max_similar_cases: int = 0  # Skip similar cases to reduce prompt size
     max_input_tokens: int = 512  # Simplified prompt is much shorter
-    max_output_tokens: int = 256  # Simplified response needs fewer tokens
+    max_output_tokens: int = 512  # Allow enough tokens for JSON response
     max_generation_time_s: float = 120.0  # Faster with shorter output
     temperature: float = 0.1  # Lower temp for more predictable JSON
     top_p: float = 0.9
@@ -261,19 +261,14 @@ class MedGemmaReporter:
     ) -> str:
         """Build a simplified prompt for MedGemma to avoid token limits."""
 
-        # Keep evidence description minimal - just top 4 patches
-        top_patches = evidence_patches[:4]
-        evidence_text = ", ".join([
-            f"patch_{p['rank']}(attn={p['attention_weight']:.2f})"
-            for p in top_patches
-        ])
+        # Very simple, directive prompt
+        prompt = f"""Task: Return JSON for bevacizumab response prediction.
 
-        # Simple, short prompt requesting minimal JSON
-        prompt = f"""Pathology case {case_id}: Model predicts "{label}" (score={score:.2f}) for bevacizumab response.
-Top evidence: {evidence_text}
+Prediction: {label}
+Confidence: {score:.2f}
 
-Return ONLY this JSON (no explanation):
-{{"prediction":"{label}","confidence":{score:.2f},"key_findings":["finding1","finding2"],"recommendation":"one sentence"}}"""
+Output exactly this JSON format:
+{{"prediction":"{label}","confidence":{score:.2f},"key_findings":["morphological pattern consistent with {label}","tissue architecture assessment"],"recommendation":"Correlate with clinical context"}}"""
 
         return prompt
 
