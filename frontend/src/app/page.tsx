@@ -265,49 +265,7 @@ export default function HomePage() {
   const [agentReport, setAgentReport] = useState<StructuredReport | null>(null);
   const report = agentReport ?? generatedReport;
 
-  // Normalize agent workflow report (snake_case) to StructuredReport (camelCase)
-  const normalizeAgentReport = useCallback((raw: Record<string, unknown>): StructuredReport | null => {
-    if (!raw || typeof raw !== 'object') return null;
-    
-    // Extract predictions from snake_case format
-    const predictions = raw.predictions as Record<string, { model_name?: string; label?: string; score?: number; confidence?: number }> | undefined;
-    const primaryKey = predictions ? Object.keys(predictions)[0] : null;
-    const primary = primaryKey && predictions ? predictions[primaryKey] : null;
-    
-    // Extract evidence from snake_case format
-    const rawEvidence = raw.evidence as Array<{ patch_index?: number; attention_weight?: number; coordinates?: [number, number] }> | undefined;
-    const evidence = (rawEvidence || []).map((e, i) => ({
-      patchId: `patch-${e.patch_index ?? i}`,
-      coordsLevel0: (e.coordinates || [0, 0]) as [number, number],
-      morphologyDescription: `Patch ${e.patch_index ?? i} with attention ${((e.attention_weight || 0) * 100).toFixed(1)}%`,
-      whyThisPatchMatters: `High attention region (${((e.attention_weight || 0) * 100).toFixed(1)}% weight)`,
-    }));
-    
-    // Extract similar cases from snake_case format
-    const rawSimilar = raw.similar_cases as Array<{ slide_id?: string; similarity_score?: number; label?: string | null }> | undefined;
-    const similarExamples = (rawSimilar || []).map((s, i) => ({
-      exampleId: s.slide_id || `case-${i}`,
-      label: s.label || 'Unknown',
-      distance: 1 - (s.similarity_score || 0),
-    }));
-    
-    return {
-      caseId: (raw.case_id as string) || 'Unknown',
-      task: (raw.task as string) || 'Multi-model slide analysis',
-      generatedAt: (raw.generated_at as string) || new Date().toISOString(),
-      modelOutput: {
-        label: primary?.label || 'Unknown',
-        score: primary?.score || 0,
-        confidence: primary?.confidence || 0,
-      },
-      evidence,
-      similarExamples,
-      limitations: (raw.limitations as string[]) || ['Research model - not for clinical use'],
-      suggestedNextSteps: [],
-      safetyStatement: (raw.safety_statement as string) || 'This analysis is for research and decision support only.',
-      summary: (raw.reasoning_summary as string) || 'Analysis complete.',
-    };
-  }, []);
+
 
   // Toast notifications for user feedback
   const toast = useToast();
@@ -1426,12 +1384,9 @@ export default function HomePage() {
         <AIAssistantPanel
           slideId={selectedSlide?.id ?? null}
           clinicalContext=""
-          onAnalysisComplete={(rawAgentReport) => {
-            // Normalize and hydrate the main Clinical Report panel with the agent-generated report
-            const normalized = normalizeAgentReport(rawAgentReport);
-            if (normalized) {
-              setAgentReport(normalized);
-            }
+          onAnalysisComplete={(normalizedReport) => {
+            // AIAssistantPanel already normalizes the report, just store it
+            setAgentReport(normalizedReport);
           }}
         />
       </div>
