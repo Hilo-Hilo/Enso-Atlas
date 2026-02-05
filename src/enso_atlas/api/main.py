@@ -1806,15 +1806,24 @@ def create_app(
 
         # Try MedGemma report generation
         if reporter is not None:
+            timeout_s = None
             try:
-                report = await asyncio.to_thread(
-                    reporter.generate_report,
-                    evidence_patches=evidence_patches,
-                    score=score,
-                    label=label,
-                    similar_cases=similar_cases,
-                    case_id=slide_id,
-                    patient_context=patient_ctx,
+                timeout_s = getattr(reporter.config, "max_generation_time_s", None)
+                if timeout_s is None:
+                    timeout_s = 120.0
+                timeout_s = max(10.0, float(timeout_s) + 10.0)
+
+                report = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        reporter.generate_report,
+                        evidence_patches=evidence_patches,
+                        score=score,
+                        label=label,
+                        similar_cases=similar_cases,
+                        case_id=slide_id,
+                        patient_context=patient_ctx,
+                    ),
+                    timeout=timeout_s,
                 )
 
                 # Merge decision support into structured report
@@ -1826,6 +1835,12 @@ def create_app(
                     slide_id=slide_id,
                     report_json=structured,
                     summary_text=report["summary"],
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "MedGemma report generation timed out after %.1fs for slide %s",
+                    timeout_s or 0.0,
+                    slide_id,
                 )
             except Exception as e:
                 logger.warning(f"MedGemma report generation failed, using template: {e}")
@@ -2185,7 +2200,7 @@ should incorporate all available clinical, pathological, and molecular data."""
             
             report_task_manager.update_task(task_id,
                 progress=60,
-                message="Generating report with MedGemma (this may take 20-30s)..."
+                message="Generating report with MedGemma (this may take up to 120s)..."
             )
             
             # Generate report
@@ -2194,6 +2209,16 @@ should incorporate all available clinical, pathological, and molecular data."""
             
             if reporter is not None:
                 try:
+                    max_time = getattr(reporter.config, "max_generation_time_s", None)
+                    max_tokens = getattr(reporter.config, "max_output_tokens", None)
+                    max_time_display = f"{float(max_time):.1f}s" if max_time is not None else "none"
+                    logger.info(
+                        "Starting MedGemma report generation for %s (max_time=%s, max_new_tokens=%s)",
+                        slide_id,
+                        max_time_display,
+                        max_tokens,
+                    )
+
                     stop_event = threading.Event()
                     def _progress_heartbeat():
                         progress = 60

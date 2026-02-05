@@ -31,7 +31,7 @@ class ReportingConfig:
     max_similar_cases: int = 5
     max_input_tokens: int = 3072
     max_output_tokens: int = 512
-    max_generation_time_s: float = 30.0
+    max_generation_time_s: float = 120.0
     temperature: float = 0.3
     top_p: float = 0.9
 
@@ -91,6 +91,7 @@ class MedGemmaReporter:
         self._warmup_done = False
         self._effective_max_input_tokens = None
         self._supports_max_time = None
+        self._supports_stopping_criteria = None
 
     def _load_model(self) -> None:
         """Load MedGemma model."""
@@ -167,9 +168,12 @@ class MedGemmaReporter:
                     self._model.generation_config.eos_token_id = self._tokenizer.eos_token_id
 
             try:
-                self._supports_max_time = "max_time" in inspect.signature(self._model.generate).parameters
+                generate_params = inspect.signature(self._model.generate).parameters
+                self._supports_max_time = "max_time" in generate_params
+                self._supports_stopping_criteria = "stopping_criteria" in generate_params
             except (TypeError, ValueError):
                 self._supports_max_time = False
+                self._supports_stopping_criteria = False
 
             logger.info("MedGemma model loaded successfully")
 
@@ -490,6 +494,11 @@ Generate the JSON report:"""
             try:
                 with self._generate_lock:
                     # Tokenize
+                    logger.info(
+                        "MedGemma tokenizing prompt (prompt_tokens=%d, max_input_tokens=%d)",
+                        prompt_tokens,
+                        self._effective_max_input_tokens,
+                    )
                     inputs = self._tokenizer(
                         prompt,
                         return_tensors="pt",
@@ -498,16 +507,38 @@ Generate the JSON report:"""
                     )
                     inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
-                    max_new_tokens = max(64, int(self.config.max_output_tokens))
+                    input_len = int(inputs["input_ids"].shape[1])
+                    logger.info("MedGemma tokenization complete (input_ids=%d)", input_len)
+
+                    configured_max_new_tokens = int(self.config.max_output_tokens)
+                    if configured_max_new_tokens <= 0:
+                        configured_max_new_tokens = 256
+                    if configured_max_new_tokens > 512:
+                        logger.warning(
+                            "max_output_tokens=%d too high; capping to 512",
+                            configured_max_new_tokens,
+                        )
+                        configured_max_new_tokens = 512
+                    max_new_tokens = max(64, configured_max_new_tokens)
+
                     max_time = self.config.max_generation_time_s
+                    if max_time is not None:
+                        try:
+                            max_time = float(max_time)
+                        except (TypeError, ValueError):
+                            max_time = None
+                    if max_time is not None and max_time <= 0:
+                        max_time = None
+
+                    max_time_display = f"{max_time:.1f}s" if max_time is not None else "none"
 
                     logger.info(
-                        "MedGemma generation start (prompt_tokens=%d, max_new_tokens=%d, max_time=%.1fs)",
+                        "MedGemma generation start (prompt_tokens=%d, input_ids=%d, max_new_tokens=%d, max_time=%s)",
                         prompt_tokens,
+                        input_len,
                         max_new_tokens,
-                        max_time,
+                        max_time_display,
                     )
-                    start_time = time.time()
 
                     # Generate
                     gen_kwargs = {
@@ -516,10 +547,44 @@ Generate the JSON report:"""
                         "top_p": self.config.top_p,
                         "do_sample": self.config.temperature > 0,
                         "pad_token_id": self._tokenizer.eos_token_id,
+                        "eos_token_id": self._tokenizer.eos_token_id,
                         "use_cache": True,
                     }
-                    if self._supports_max_time:
+                    gen_start = time.monotonic()
+                    if self._supports_max_time and max_time is not None:
                         gen_kwargs["max_time"] = max_time
+                    elif max_time is not None and self._supports_stopping_criteria:
+                        try:
+                            from transformers.generation.stopping_criteria import (
+                                StoppingCriteria,
+                                StoppingCriteriaList,
+                            )
+
+                            class _TimeLimitCriteria(StoppingCriteria):
+                                def __init__(self, start_time: float, max_time_s: float):
+                                    self._start_time = start_time
+                                    self._max_time_s = max_time_s
+
+                                def __call__(self, input_ids, scores, **kwargs):
+                                    return (time.monotonic() - self._start_time) >= self._max_time_s
+
+                            gen_kwargs["stopping_criteria"] = StoppingCriteriaList(
+                                [_TimeLimitCriteria(gen_start, max_time)]
+                            )
+                            logger.info(
+                                "MedGemma using stopping criteria for time limit (%.1fs)",
+                                max_time,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to set time limit stopping criteria: %s",
+                                e,
+                            )
+                    elif max_time is not None:
+                        logger.warning(
+                            "MedGemma generate() does not support max_time or stopping_criteria; "
+                            "generation may run long"
+                        )
 
                     with torch.inference_mode():
                         outputs = self._model.generate(
@@ -527,27 +592,48 @@ Generate the JSON report:"""
                             **gen_kwargs,
                         )
 
-                    gen_elapsed = time.time() - start_time
+                    gen_elapsed = time.monotonic() - gen_start
+                    output_ids = outputs[0]
+                    new_tokens = int(output_ids.shape[0] - input_len)
                     hit_time_limit = (
-                        bool(self._supports_max_time)
-                        and max_time is not None
+                        max_time is not None
                         and gen_elapsed >= max_time - 0.5
                     )
+                    if hit_time_limit:
+                        logger.warning("MedGemma generation reached time limit (%.1fs)", max_time)
+                    if new_tokens >= max_new_tokens:
+                        logger.warning(
+                            "MedGemma generation hit max_new_tokens=%d (new_tokens=%d)",
+                            max_new_tokens,
+                            new_tokens,
+                        )
                     logger.info(
-                        "MedGemma generation finished in %.1fs",
+                        "MedGemma generation finished in %.1fs (new_tokens=%d)",
                         gen_elapsed,
+                        new_tokens,
                     )
 
                 # Decode
+                decode_start = time.monotonic()
                 response = self._tokenizer.decode(
-                    outputs[0][inputs["input_ids"].shape[1]:],
+                    output_ids[inputs["input_ids"].shape[1]:],
                     skip_special_tokens=True,
                 )
+                decode_elapsed = time.monotonic() - decode_start
+                logger.info(
+                    "MedGemma decode finished in %.2fs (chars=%d)",
+                    decode_elapsed,
+                    len(response),
+                )
+                if not response.strip():
+                    logger.warning("MedGemma decode produced empty response")
 
                 # Parse JSON
+                logger.info("MedGemma parsing JSON response")
                 report = self._parse_json_response(response)
 
                 # Validate
+                logger.info("MedGemma validating report")
                 if self._validate_report(report):
                     logger.info("Generated valid report")
                     return report
