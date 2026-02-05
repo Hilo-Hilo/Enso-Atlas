@@ -58,6 +58,10 @@ RUN pip install --no-cache-dir \
     uvicorn[standard] \
     pydantic
 
+# Fix OpenCV compatibility issue (cv2.dnn.DictValue AttributeError)
+# The NVIDIA base image has a newer OpenCV that breaks cv2.typing imports
+RUN pip install opencv-python-headless==4.8.1.78 --force-reinstall
+
 # Copy application code
 COPY src/ ./src/
 COPY config/ ./config/
