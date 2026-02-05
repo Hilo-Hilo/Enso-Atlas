@@ -1,13 +1,13 @@
 # Enso Atlas - Production Dockerfile
 # Optimized for NVIDIA DGX Spark deployment (ARM64 + CUDA)
-# Reference: DeepSeek-OCR-Web Dockerfile (working ARM64 setup)
+# Using TF 25.02 for Blackwell GPU support (sm_121)
 #
 # Build: docker build --network=host -t enso-atlas .
-# Run:   docker run --gpus all -p 7860:7860 -v ./models:/app/models enso-atlas
+# Run:   docker run --gpus all --ipc=host -p 7860:7860 -v ./models:/app/models enso-atlas
 
-# NVIDIA PyTorch container with CUDA support (ARM64 compatible)
-# Same base as DeepSeek OCR which works on DGX Spark
-FROM nvcr.io/nvidia/pytorch:25.12-py3
+# NVIDIA TensorFlow 25.02 container - has Blackwell GPU support
+# TF 2.17.0 with CUDA kernels for sm_121 (GB10)
+FROM nvcr.io/nvidia/tensorflow:25.02-tf2-py3
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -18,11 +18,10 @@ ENV CUDA_HOME=/usr/local/cuda
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 ENV PATH=/usr/local/cuda/bin:$PATH
 
-# Print base image PyTorch build info
-RUN python -c "import torch; print(f'PyTorch: {torch.__version__} (CUDA: {torch.version.cuda})')"
+# Print base image TensorFlow build info
+RUN python -c "import tensorflow as tf; print(f'TensorFlow: {tf.__version__}'); print(f'GPUs: {tf.config.list_physical_devices(\"GPU\")}')" || true
 
 # Install system dependencies
-# Note: Using opencv-python-headless to avoid GL dependencies
 RUN apt-get update && apt-get install -y \
     openslide-tools \
     libopenslide0 \
@@ -42,8 +41,12 @@ WORKDIR /app
 # Copy requirements first for caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies (includes PyTorch for TransMIL)
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install PyTorch with CUDA support for TransMIL model
+# Using pip index for ARM64 compatibility
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
 # Install additional packages
 RUN pip install --no-cache-dir \
@@ -53,8 +56,7 @@ RUN pip install --no-cache-dir \
     gradio \
     fastapi \
     uvicorn[standard] \
-    pydantic \
-    tensorflow
+    pydantic
 
 # Copy application code
 COPY src/ ./src/
