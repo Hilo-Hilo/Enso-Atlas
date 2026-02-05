@@ -13,6 +13,9 @@ from typing import List, Dict, Optional, Any
 import logging
 import json
 import re
+import threading
+import time
+import inspect
 
 import numpy as np
 
@@ -25,7 +28,10 @@ class ReportingConfig:
     # Use local path in container, fallback to HuggingFace ID
     model: str = "/app/models/medgemma-4b-it"
     max_evidence_patches: int = 8
-    max_output_tokens: int = 1024
+    max_similar_cases: int = 5
+    max_input_tokens: int = 3072
+    max_output_tokens: int = 512
+    max_generation_time_s: float = 30.0
     temperature: float = 0.3
     top_p: float = 0.9
 
@@ -79,82 +85,133 @@ class MedGemmaReporter:
         self._tokenizer = None
         self._processor = None
         self._device = None
+        self._load_lock = threading.Lock()
+        self._warmup_lock = threading.Lock()
+        self._generate_lock = threading.Lock()
+        self._warmup_done = False
+        self._effective_max_input_tokens = None
+        self._supports_max_time = None
 
     def _load_model(self) -> None:
         """Load MedGemma model."""
         if self._model is not None:
             return
 
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor
+        with self._load_lock:
+            if self._model is not None:
+                return
 
-        # Determine device
-        # Force CPU to avoid CUDA driver issues on Blackwell GPUs
-        use_cpu = True  # Set to False to re-enable CUDA when driver is updated
-        if not use_cpu and torch.cuda.is_available():
-            self._device = torch.device("cuda")
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            self._device = torch.device("mps")
-        else:
-            self._device = torch.device("cpu")
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor
 
-        logger.info(f"Loading MedGemma model on {self._device}")
+            # Determine device
+            # Force CPU to avoid CUDA driver issues on Blackwell GPUs
+            use_cpu = True  # Set to False to re-enable CUDA when driver is updated
+            if not use_cpu and torch.cuda.is_available():
+                self._device = torch.device("cuda")
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                self._device = torch.device("mps")
+            else:
+                self._device = torch.device("cpu")
 
-        # Load tokenizer and model
-        model_id = self.config.model
+            logger.info(f"Loading MedGemma model on {self._device}")
 
-        self._tokenizer = AutoTokenizer.from_pretrained(model_id)
+            # Load tokenizer and model
+            model_id = self.config.model
 
-        # Try to load processor for multimodal input
-        try:
-            self._processor = AutoProcessor.from_pretrained(model_id)
-        except Exception:
-            logger.warning("Could not load processor; using text-only mode")
-            self._processor = None
+            self._tokenizer = AutoTokenizer.from_pretrained(model_id)
+            if self._tokenizer.pad_token_id is None:
+                self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
 
-        # Load model with appropriate precision
-        self._model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16 if self._device.type == "cuda" else torch.float32,
-            device_map="auto" if self._device.type == "cuda" else None,
-        )
+            # Try to load processor for multimodal input
+            try:
+                self._processor = AutoProcessor.from_pretrained(model_id)
+            except Exception:
+                logger.warning("Could not load processor; using text-only mode")
+                self._processor = None
 
-        if self._device.type != "cuda":
-            self._model = self._model.to(self._device)
+            # Load model with appropriate precision
+            model_kwargs = {
+                "torch_dtype": torch.float16 if self._device.type == "cuda" else torch.float32,
+                "device_map": "auto" if self._device.type == "cuda" else None,
+                "low_cpu_mem_usage": True,
+            }
+            try:
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    **model_kwargs,
+                )
+            except TypeError:
+                model_kwargs.pop("low_cpu_mem_usage", None)
+                self._model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    **model_kwargs,
+                )
 
-        self._model.eval()
-        logger.info("MedGemma model loaded successfully")
+            if self._device.type != "cuda":
+                self._model = self._model.to(self._device)
+
+            self._model.eval()
+
+            # Track effective max input tokens for prompt trimming
+            model_max = getattr(self._tokenizer, "model_max_length", None)
+            if model_max is None or model_max > 100000:
+                model_max = self.config.max_input_tokens
+            self._effective_max_input_tokens = min(self.config.max_input_tokens, model_max)
+
+            # Ensure generation config has sane padding defaults
+            if getattr(self._model, "generation_config", None) is not None:
+                if self._model.generation_config.pad_token_id is None:
+                    self._model.generation_config.pad_token_id = self._tokenizer.pad_token_id
+                if self._model.generation_config.eos_token_id is None:
+                    self._model.generation_config.eos_token_id = self._tokenizer.eos_token_id
+
+            try:
+                self._supports_max_time = "max_time" in inspect.signature(self._model.generate).parameters
+            except (TypeError, ValueError):
+                self._supports_max_time = False
+
+            logger.info("MedGemma model loaded successfully")
 
 
     def _warmup_inference(self) -> None:
         """Run a test inference to warm up CUDA kernels."""
-        import torch
-        
-        self._load_model()
-        
-        # Short test prompt
-        test_prompt = "Describe healthy tissue."
-        
-        try:
-            inputs = self._tokenizer(
-                test_prompt,
-                return_tensors="pt",
-                truncation=True,
-                max_length=128,
-            )
-            inputs = {k: v.to(self._device) for k, v in inputs.items()}
-            
-            with torch.no_grad():
-                outputs = self._model.generate(
-                    **inputs,
-                    max_new_tokens=16,
-                    do_sample=False,
-                    pad_token_id=self._tokenizer.eos_token_id,
+        if self._warmup_done:
+            return
+
+        with self._warmup_lock:
+            if self._warmup_done:
+                return
+
+            import torch
+
+            self._load_model()
+
+            # Short test prompt
+            test_prompt = "Describe healthy tissue."
+
+            try:
+                inputs = self._tokenizer(
+                    test_prompt,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=128,
                 )
-            
-            logger.info("MedGemma warmup inference completed")
-        except Exception as e:
-            logger.warning(f"MedGemma warmup inference failed: {e}")
+                inputs = {k: v.to(self._device) for k, v in inputs.items()}
+
+                with torch.inference_mode():
+                    self._model.generate(
+                        **inputs,
+                        max_new_tokens=16,
+                        do_sample=False,
+                        pad_token_id=self._tokenizer.eos_token_id,
+                    )
+
+                logger.info("MedGemma warmup inference completed")
+            except Exception as e:
+                logger.warning(f"MedGemma warmup inference failed: {e}")
+            finally:
+                self._warmup_done = True
 
     def _format_patient_context(self, patient_context: Optional[Dict]) -> str:
         """Format patient context into a clinical description."""
@@ -212,10 +269,10 @@ class MedGemmaReporter:
 
         # Build similar cases description
         similar_text = ""
-        if similar_cases:
+        if similar_cases and self.config.max_similar_cases > 0:
             similar_cases_deduped = []
             seen = set()
-            for s in similar_cases[:5]:
+            for s in similar_cases[:self.config.max_similar_cases]:
                 case_key = s.get("metadata", {}).get("slide_id", "unknown")
                 if case_key not in seen:
                     seen.add(case_key)
@@ -281,6 +338,12 @@ IMPORTANT CONSTRAINTS:
 Generate the JSON report:"""
 
         return prompt
+
+    def _count_prompt_tokens(self, prompt: str) -> int:
+        """Estimate token count for the prompt."""
+        if self._tokenizer is None:
+            return max(1, len(prompt.split()))
+        return len(self._tokenizer.encode(prompt, add_special_tokens=False))
 
     def _parse_json_response(self, response: str) -> Dict:
         """Extract and parse JSON from model response."""
@@ -365,33 +428,114 @@ Generate the JSON report:"""
             Structured report dictionary
         """
         self._load_model()
+        if not self._warmup_done:
+            self._warmup_inference()
 
         import torch
 
+        evidence_limit = min(len(evidence_patches), self.config.max_evidence_patches)
+        similar_limit = min(len(similar_cases), self.config.max_similar_cases)
+
         prompt = self._build_prompt(
-            evidence_patches, score, label, similar_cases, case_id, patient_context
+            evidence_patches[:evidence_limit],
+            score,
+            label,
+            similar_cases[:similar_limit],
+            case_id,
+            patient_context,
         )
+        prompt_tokens = self._count_prompt_tokens(prompt)
+
+        if self._effective_max_input_tokens is None:
+            self._effective_max_input_tokens = self.config.max_input_tokens
+
+        if prompt_tokens > self._effective_max_input_tokens:
+            logger.warning(
+                "Prompt too long (%d tokens > %d); dropping similar cases",
+                prompt_tokens,
+                self._effective_max_input_tokens,
+            )
+            if similar_limit > 0:
+                similar_limit = 0
+                prompt = self._build_prompt(
+                    evidence_patches[:evidence_limit],
+                    score,
+                    label,
+                    [],
+                    case_id,
+                    patient_context,
+                )
+                prompt_tokens = self._count_prompt_tokens(prompt)
+
+        while prompt_tokens > self._effective_max_input_tokens and evidence_limit > 3:
+            evidence_limit -= 1
+            prompt = self._build_prompt(
+                evidence_patches[:evidence_limit],
+                score,
+                label,
+                [],
+                case_id,
+                patient_context,
+            )
+            prompt_tokens = self._count_prompt_tokens(prompt)
+
+        if prompt_tokens > self._effective_max_input_tokens:
+            logger.warning(
+                "Prompt still long (%d tokens); tokenizer will truncate to %d tokens",
+                prompt_tokens,
+                self._effective_max_input_tokens,
+            )
 
         for attempt in range(max_retries + 1):
             try:
-                # Tokenize
-                inputs = self._tokenizer(
-                    prompt,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=4096,
-                )
-                inputs = {k: v.to(self._device) for k, v in inputs.items()}
+                with self._generate_lock:
+                    # Tokenize
+                    inputs = self._tokenizer(
+                        prompt,
+                        return_tensors="pt",
+                        truncation=prompt_tokens > self._effective_max_input_tokens,
+                        max_length=self._effective_max_input_tokens,
+                    )
+                    inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
-                # Generate
-                with torch.no_grad():
-                    outputs = self._model.generate(
-                        **inputs,
-                        max_new_tokens=self.config.max_output_tokens,
-                        temperature=self.config.temperature,
-                        top_p=self.config.top_p,
-                        do_sample=True,
-                        pad_token_id=self._tokenizer.eos_token_id,
+                    max_new_tokens = max(64, int(self.config.max_output_tokens))
+                    max_time = self.config.max_generation_time_s
+
+                    logger.info(
+                        "MedGemma generation start (prompt_tokens=%d, max_new_tokens=%d, max_time=%.1fs)",
+                        prompt_tokens,
+                        max_new_tokens,
+                        max_time,
+                    )
+                    start_time = time.time()
+
+                    # Generate
+                    gen_kwargs = {
+                        "max_new_tokens": max_new_tokens,
+                        "temperature": self.config.temperature,
+                        "top_p": self.config.top_p,
+                        "do_sample": self.config.temperature > 0,
+                        "pad_token_id": self._tokenizer.eos_token_id,
+                        "use_cache": True,
+                    }
+                    if self._supports_max_time:
+                        gen_kwargs["max_time"] = max_time
+
+                    with torch.inference_mode():
+                        outputs = self._model.generate(
+                            **inputs,
+                            **gen_kwargs,
+                        )
+
+                    gen_elapsed = time.time() - start_time
+                    hit_time_limit = (
+                        bool(self._supports_max_time)
+                        and max_time is not None
+                        and gen_elapsed >= max_time - 0.5
+                    )
+                    logger.info(
+                        "MedGemma generation finished in %.1fs",
+                        gen_elapsed,
                     )
 
                 # Decode
@@ -409,6 +553,9 @@ Generate the JSON report:"""
                     return report
                 else:
                     logger.warning(f"Report validation failed, attempt {attempt + 1}")
+                    if hit_time_limit:
+                        logger.warning("MedGemma hit generation time limit; skipping retries")
+                        break
 
             except Exception as e:
                 logger.error(f"Report generation error (attempt {attempt + 1}): {e}")

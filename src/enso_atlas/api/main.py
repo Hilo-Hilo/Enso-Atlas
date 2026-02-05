@@ -12,6 +12,7 @@ Provides REST API endpoints for the professional frontend:
 
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+import asyncio
 import logging
 import json
 import base64
@@ -1806,7 +1807,8 @@ def create_app(
         # Try MedGemma report generation
         if reporter is not None:
             try:
-                report = reporter.generate_report(
+                report = await asyncio.to_thread(
+                    reporter.generate_report,
                     evidence_patches=evidence_patches,
                     score=score,
                     label=label,
@@ -2078,6 +2080,7 @@ should incorporate all available clinical, pathological, and molecular data."""
     ):
         """Background task to generate report."""
         import time
+        import threading
         
         task = report_task_manager.get_task(task_id)
         if not task:
@@ -2191,6 +2194,22 @@ should incorporate all available clinical, pathological, and molecular data."""
             
             if reporter is not None:
                 try:
+                    stop_event = threading.Event()
+                    def _progress_heartbeat():
+                        progress = 60
+                        while not stop_event.wait(5):
+                            progress = min(85, progress + 2)
+                            report_task_manager.update_task(
+                                task_id,
+                                progress=progress,
+                                stage="generating",
+                                message="MedGemma is generating the report..."
+                            )
+
+                    heartbeat = threading.Thread(target=_progress_heartbeat, daemon=True)
+                    heartbeat.start()
+
+                    gen_start = time.time()
                     report = reporter.generate_report(
                         evidence_patches=evidence_patches,
                         score=score,
@@ -2199,14 +2218,23 @@ should incorporate all available clinical, pathological, and molecular data."""
                         case_id=slide_id,
                         patient_context=patient_ctx,
                     )
+                    logger.info(
+                        "MedGemma report generation completed for %s in %.1fs",
+                        slide_id,
+                        time.time() - gen_start,
+                    )
                     
                     report_json = report["structured"]
                     summary_text = report["summary"]
                     
                     if decision_support_data:
                         report_json["decision_support"] = decision_support_data
-                        
+
+                    stop_event.set()
+                    heartbeat.join(timeout=1)
                 except Exception as e:
+                    stop_event.set()
+                    heartbeat.join(timeout=1)
                     logger.warning(f"MedGemma failed: {e}")
             
             # Fallback to template if MedGemma failed
