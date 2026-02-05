@@ -39,7 +39,7 @@ evidence:
 reporting:
   model: "google/medgemma-4b-it"  # or path to local model
   max_evidence_patches: 8  # Patches to include in prompt
-  max_output_tokens: 1024
+  max_output_tokens: 2048
   temperature: 0.3
   top_p: 0.9
   
