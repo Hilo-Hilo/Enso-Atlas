@@ -3728,7 +3728,8 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     mean_val = patch_array.mean()
                     std_val = patch_array.std()
                     
-                    if mean_val < 235 and std_val > 15:
+                    # Relaxed thresholds for more patches (was mean<235, std>15)
+                    if mean_val < 245 and std_val > 10:
                         patches.append(patch_array)
                         coords.append([x0, y0])
                     
@@ -3871,7 +3872,8 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     mean_val = patch_array.mean()
                     std_val = patch_array.std()
                     
-                    if mean_val < 235 and std_val > 15:
+                    # Relaxed thresholds for more patches (was mean<235, std>15)
+                    if mean_val < 245 and std_val > 10:
                         patches.append(patch_array)
                         coords.append([x0, y0])
                     
