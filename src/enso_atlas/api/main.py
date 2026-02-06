@@ -909,6 +909,31 @@ def create_app(
             "uptime": time.time() - _STARTUP_TIME,
         }
 
+    # ====== Tags & Groups stubs ======
+    # These endpoints are called by the Slide Manager frontend.
+    # Return empty arrays until full implementation is needed.
+
+    @app.get("/api/tags")
+    async def get_tags():
+        """List all tags (stub)."""
+        return []
+
+    @app.post("/api/tags")
+    async def create_tag(request: dict):
+        """Create a tag (stub)."""
+        return {"name": request.get("name", ""), "color": request.get("color", "#888"), "count": 0}
+
+    @app.get("/api/groups")
+    async def get_groups():
+        """List all slide groups (stub)."""
+        return []
+
+    @app.post("/api/groups")
+    async def create_group(request: dict):
+        """Create a slide group (stub)."""
+        import uuid
+        return {"id": str(uuid.uuid4()), "name": request.get("name", ""), "description": request.get("description", ""), "slide_ids": [], "created_at": "", "updated_at": ""}
+
     @app.get("/api/health")
     async def api_health_check():
         """Health check endpoint (aliased for frontend compatibility)."""
