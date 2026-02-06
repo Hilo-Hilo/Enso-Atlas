@@ -579,3 +579,241 @@ class CLAMClassifier:
             "is_uncertain": is_uncertain,
             "n_samples": n_samples,
         }
+
+
+# ---------------------------------------------------------------------------
+# TransMIL Classifier -- drop-in alternative to CLAMClassifier
+# ---------------------------------------------------------------------------
+
+class TransMILClassifier:
+    """
+    TransMIL (Transformer-based MIL) classifier.
+
+    Provides the same public interface as CLAMClassifier so the two can be
+    swapped transparently:
+
+        classifier.load(path)
+        score, attention = classifier.predict(embeddings)
+
+    The underlying model is imported from ``models/transmil.py``.
+    """
+
+    def __init__(self, config: MILConfig):
+        self.config = config
+        self._model = None
+        self._device = None
+        self._is_trained = False
+
+    def _setup_device(self):
+        """Select the best available device."""
+        import torch
+
+        if torch.cuda.is_available():
+            self._device = torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self._device = torch.device("mps")
+        else:
+            self._device = torch.device("cpu")
+
+        return self._device
+
+    def _build_model(self, cfg_override: Optional[Dict] = None):
+        """
+        Instantiate the TransMIL network.
+
+        Args:
+            cfg_override: Optional dict of constructor kwargs that takes
+                precedence over ``self.config`` (used when loading a
+                checkpoint that stores its own config).
+        """
+        # Lazy import so the rest of the module does not require the models
+        # package to be on sys.path at import time.
+        import importlib
+        import sys
+        from pathlib import Path as _Path
+
+        # Ensure the models/ directory is importable.
+        models_dir = str(_Path(__file__).resolve().parents[3] / "models")
+        if models_dir not in sys.path:
+            sys.path.insert(0, models_dir)
+
+        from transmil import TransMIL  # type: ignore[import-untyped]
+
+        c = cfg_override or {}
+        self._model = TransMIL(
+            input_dim=c.get("input_dim", self.config.input_dim),
+            hidden_dim=c.get("hidden_dim", getattr(self.config, "hidden_dim", 512)),
+            num_classes=c.get("num_classes", 1),
+            num_heads=c.get("num_heads", getattr(self.config, "attention_heads", 8)),
+            num_layers=c.get("num_layers", 2),
+            dropout=c.get("dropout", self.config.dropout),
+        )
+        return self._model
+
+    # ----- public API (mirrors CLAMClassifier) -----
+
+    def load(self, path: str | Path) -> None:
+        """
+        Load a trained TransMIL checkpoint from disk.
+
+        Supports both wrapped checkpoints (with ``model_state_dict`` key)
+        and plain state-dicts.
+        """
+        import torch
+
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"TransMIL checkpoint not found: {path}")
+
+        self._setup_device()
+
+        checkpoint = torch.load(path, map_location=self._device, weights_only=False)
+
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+            cfg = checkpoint.get("config", {})
+        else:
+            state_dict = checkpoint
+            cfg = {}
+
+        self._build_model(cfg_override=cfg)
+        self._model.load_state_dict(state_dict)
+        self._model.to(self._device)
+        self._model.eval()
+        self._is_trained = True
+
+        logger.info("Loaded TransMIL model from %s", path)
+
+    def save(self, path: str | Path) -> None:
+        """Save the model state dict to *path*."""
+        import torch
+
+        if self._model is None:
+            raise RuntimeError("No model to save")
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self._model.state_dict(), path)
+        logger.info("Saved TransMIL model to %s", path)
+
+    def predict(self, embeddings: np.ndarray) -> Tuple[float, np.ndarray]:
+        """
+        Predict for a single slide.
+
+        Args:
+            embeddings: Patch embeddings of shape ``(n_patches, embedding_dim)``.
+
+        Returns:
+            ``(probability, attention_weights)`` where *probability* is a
+            float in [0, 1] and *attention_weights* is a 1-D array of
+            length ``n_patches``.
+        """
+        import torch
+
+        if self._model is None:
+            self._setup_device()
+            self._build_model()
+            self._model.to(self._device)
+            logger.warning("Using untrained TransMIL model for prediction")
+
+        self._model.eval()
+
+        x = torch.from_numpy(embeddings).float().to(self._device)
+
+        with torch.no_grad():
+            prob, attention = self._model(x, return_attention=True)
+
+        return prob.item(), attention.cpu().numpy()
+
+    def predict_batch(
+        self,
+        embeddings_list: List[np.ndarray],
+    ) -> List[Tuple[float, np.ndarray]]:
+        """
+        Predict for multiple slides.
+
+        Args:
+            embeddings_list: List of per-slide embedding arrays.
+
+        Returns:
+            List of ``(probability, attention_weights)`` tuples.
+        """
+        return [self.predict(emb) for emb in embeddings_list]
+
+    def predict_with_uncertainty(
+        self,
+        embeddings: np.ndarray,
+        n_samples: int = 20,
+    ) -> Dict[str, float | np.ndarray]:
+        """
+        MC-Dropout uncertainty estimation (same semantics as CLAMClassifier).
+
+        Runs *n_samples* stochastic forward passes with dropout enabled
+        and returns summary statistics.
+        """
+        import torch
+
+        if self._model is None:
+            self._setup_device()
+            self._build_model()
+            self._model.to(self._device)
+            logger.warning("Using untrained TransMIL model for prediction")
+
+        self._model.train()  # enable dropout
+
+        x = torch.from_numpy(embeddings).float().to(self._device)
+
+        predictions = []
+        attention_samples = []
+
+        with torch.no_grad():
+            for _ in range(n_samples):
+                prob, attention = self._model(x, return_attention=True)
+                predictions.append(prob.item())
+                attention_samples.append(attention.cpu().numpy())
+
+        self._model.eval()
+
+        predictions_arr = np.array(predictions)
+        attention_arr = np.array(attention_samples)
+
+        mean_pred = float(np.mean(predictions_arr))
+        std_pred = float(np.std(predictions_arr))
+
+        ci_lower = float(max(0.0, mean_pred - 2 * std_pred))
+        ci_upper = float(min(1.0, mean_pred + 2 * std_pred))
+
+        mean_attention = np.mean(attention_arr, axis=0)
+        attention_std = np.std(attention_arr, axis=0)
+
+        UNCERTAINTY_THRESHOLD = 0.15
+
+        return {
+            "prediction": "RESPONDER" if mean_pred > 0.5 else "NON-RESPONDER",
+            "probability": mean_pred,
+            "uncertainty": std_pred,
+            "confidence_interval": [ci_lower, ci_upper],
+            "attention_weights": mean_attention,
+            "attention_uncertainty": attention_std,
+            "samples": predictions_arr.tolist(),
+            "is_uncertain": std_pred > UNCERTAINTY_THRESHOLD,
+            "n_samples": n_samples,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Factory helper
+# ---------------------------------------------------------------------------
+
+def create_classifier(config: MILConfig) -> CLAMClassifier | TransMILClassifier:
+    """
+    Instantiate the appropriate MIL classifier based on ``config.architecture``.
+
+    Supported values for ``config.architecture``:
+      - ``"clam"`` (default) -- CLAMClassifier
+      - ``"transmil"``       -- TransMILClassifier
+    """
+    arch = getattr(config, "architecture", "clam").lower()
+    if arch == "transmil":
+        return TransMILClassifier(config)
+    return CLAMClassifier(config)
