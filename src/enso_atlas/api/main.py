@@ -541,16 +541,19 @@ def create_app(
     slide_mean_ids: list[str] = []
     slide_mean_meta: dict[str, dict] = {}  # slide_id -> metadata (n_patches, label, patient, etc.)
     # Directories (may be updated at startup if we fall back to demo data)
-    slides_dir: Path = embeddings_dir.parent / 'slides'
+    # Data root is always "data/" regardless of embeddings subdirectory (e.g. data/embeddings/level0)
+    _data_root: Path = Path("data")
+    slides_dir: Path = _data_root / 'slides'
 
     def resolve_slide_path(slide_id: str) -> Path | None:
         """Resolve slide file path across possible slide directories."""
-        # Common locations we may store slides
+        # Common locations we may store slides (always relative to data root)
         candidates_dirs = [
             slides_dir,
-            embeddings_dir.parent / 'tcga_full' / 'slides',
-            embeddings_dir.parent / 'ovarian_bev' / 'slides',
-            embeddings_dir.parent / 'demo' / 'slides',
+            _data_root / 'tcga_full' / 'slides',
+            _data_root / 'ovarian_bev' / 'slides',
+            _data_root / 'demo' / 'slides',
+            _data_root / 'slides',
         ]
         exts = ['.svs', '.tiff', '.tif', '.ndpi', '.mrxs', '.vms', '.scn']
         for d in candidates_dirs:
@@ -777,8 +780,9 @@ def create_app(
         # Load slide labels from labels.csv for similar case retrieval
         # Check multiple label files (primary + tcga_full)
         label_files = [
+            _data_root / "labels.csv",
+            _data_root / "tcga_full" / "labels.csv",
             embeddings_dir.parent / "labels.csv",
-            embeddings_dir.parent / "tcga_full" / "labels.csv",
         ]
         # Build a prefix->full_slide_id lookup for matching short names to full IDs
         prefix_to_slide_ids: dict[str, list[str]] = {}
@@ -903,7 +907,12 @@ def create_app(
     async def list_slides():
         """List all available slides with patient context."""
         slides = []
-        labels_path = embeddings_dir.parent / "labels.csv"
+        # Try multiple label file locations (data root preferred over embeddings parent)
+        labels_path = _data_root / "labels.csv"
+        if not labels_path.exists():
+            labels_path = _data_root / "tcga_full" / "labels.csv"
+        if not labels_path.exists():
+            labels_path = embeddings_dir.parent / "labels.csv"
         slide_data = {}
 
         if labels_path.exists():
@@ -1933,7 +1942,9 @@ def create_app(
 
     def _load_patient_context(slide_id: str) -> Optional[Dict[str, Any]]:
         """Load patient context from labels.csv for a given slide."""
-        labels_path = embeddings_dir.parent / "labels.csv"
+        labels_path = _data_root / "labels.csv"
+        if not labels_path.exists():
+            labels_path = embeddings_dir.parent / "labels.csv"
         if not labels_path.exists():
             return None
 
@@ -5224,7 +5235,9 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
 
     # Register slide metadata API
-    metadata_path = embeddings_dir.parent / "slide_metadata.json"
+    metadata_path = _data_root / "slide_metadata.json"
+    if not metadata_path.exists():
+        metadata_path = embeddings_dir.parent / "slide_metadata.json"
     metadata_manager = SlideMetadataManager(metadata_path)
 
     def get_available_slide_ids():
