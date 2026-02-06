@@ -140,11 +140,10 @@ class MedGemmaReporter:
             from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor
 
             # Determine device
-            # Force CPU to avoid CUDA compatibility issues on Blackwell GPUs (sm_121)
-            # PyTorch in the container doesn't support sm_121 arch, causing hangs.
-            # CPU inference is reliable: 4B model in bfloat16 uses ~8GB of 128GB RAM.
-            use_cpu = True  # Set to False to re-enable CUDA when PyTorch adds sm_121 support
-            if not use_cpu and torch.cuda.is_available():
+            # Blackwell GPU (sm_121) is not officially supported by PyTorch but
+            # bfloat16 matmuls work correctly via compute_90 fallback.  Enable GPU
+            # for ~10-50x faster inference vs CPU.
+            if torch.cuda.is_available():
                 self._device = torch.device("cuda")
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
                 self._device = torch.device("mps")
