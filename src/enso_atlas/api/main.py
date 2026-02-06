@@ -5360,8 +5360,13 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
     return app
 
 
-# Default app instance
-app = create_app()
+# Default app instance — prefer level0 embeddings when available
+import os as _os_app
+_emb_dir = Path(_os_app.environ.get("EMBEDDINGS_DIR", "data/embeddings"))
+# Auto-detect level0 subdirectory (full-resolution re-embeddings)
+if not _os_app.environ.get("EMBEDDINGS_DIR") and (_emb_dir / "level0").is_dir():
+    _emb_dir = _emb_dir / "level0"
+app = create_app(embeddings_dir=_emb_dir)
 
 
 if __name__ == "__main__":
