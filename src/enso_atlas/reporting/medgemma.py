@@ -64,7 +64,7 @@ class ReportingConfig:
     max_evidence_patches: int = 4  # Reduced for shorter prompts
     max_similar_cases: int = 0  # Skip similar cases to reduce prompt size
     max_input_tokens: int = 512  # Simplified prompt is much shorter
-    max_output_tokens: int = 768  # Allow enough tokens for rich JSON response
+    max_output_tokens: int = 512  # Enough for rich JSON, fits within 120s CPU budget
     max_generation_time_s: float = 120.0  # CPU inference needs more time
     temperature: float = 0.1  # Lower temp for more predictable JSON
     top_p: float = 0.9
@@ -353,16 +353,14 @@ class MedGemmaReporter:
         else:
             conf_word = "low"
 
-        prompt = f"""You are a pathology AI analyzing ovarian cancer H&E slides for bevacizumab (anti-VEGF) treatment response.
-
-Case: {case_id[:40]}
-Prediction: {label} (score={score:.2f}, {conf_word} confidence)
-Top attention regions by tissue type:
+        prompt = f"""Ovarian cancer H&E slide, bevacizumab response prediction.
+Prediction: {label} (score={score:.2f})
+High-attention tissue: {cat_str}
+Top patches:
 {patch_summary}
-Dominant tissue categories: {cat_str}
 
-Based on the tissue composition above, write a clinical pathology report as JSON:
-{{"prediction":"{label}","confidence":{score:.2f},"morphology_description":"<2-3 sentences: describe morphological features in the high-attention regions that relate to bevacizumab response, referencing the tissue types seen>","key_findings":["<finding about tumor/stromal architecture>","<finding about vascular or inflammatory patterns>","<finding about tissue composition and what it suggests for anti-VEGF therapy>"],"clinical_significance":"<1-2 sentences: how these features relate to VEGF-driven angiogenesis and predicted treatment response>","recommendation":"<next clinical step>"}}"""
+Return ONLY this JSON (fill in the <> fields with specific pathology observations):
+{{"prediction":"{label}","confidence":{score:.2f},"morphology_description":"<1-2 sentences on morphological features in {cat_str} regions relevant to anti-VEGF response>","key_findings":["<tumor/stromal architecture finding>","<vascular/inflammatory pattern finding>","<what tissue composition suggests for bevacizumab>"],"clinical_significance":"<how features relate to VEGF-driven angiogenesis>","recommendation":"Correlate with VEGF IHC and clinical staging"}}"""
 
         return prompt
 
@@ -399,8 +397,16 @@ Based on the tissue composition above, write a clinical pathology report as JSON
                 parsed = json.loads(json_str)
                 logger.info("Successfully parsed JSON from MedGemma response")
             except json.JSONDecodeError:
-                # Try to repair truncated JSON
-                for fix in ['"}', '"]', '"]}', '"}]']:
+                # Try to repair truncated JSON with increasingly aggressive fixes
+                repair_suffixes = [
+                    '"}',        # truncated string value
+                    '"]',        # truncated array
+                    '"]}',       # truncated array in object
+                    '"}]}',      # truncated string in array in object
+                    '"]}}}',     # deeply nested
+                    '..."}],"clinical_significance":"See key findings","recommendation":"Correlate with clinical context"}',
+                ]
+                for fix in repair_suffixes:
                     try:
                         parsed = json.loads(json_str + fix)
                         logger.info("Repaired truncated JSON with suffix: %s", fix)
@@ -408,7 +414,23 @@ Based on the tissue composition above, write a clinical pathology report as JSON
                     except json.JSONDecodeError:
                         continue
                 if parsed is None:
-                    logger.warning(f"Failed to parse JSON even after repair attempts")
+                    # Last resort: extract whatever fields we can with regex
+                    logger.warning("JSON repair failed, attempting field extraction")
+                    parsed = {}
+                    for field in ["prediction", "morphology_description", "clinical_significance", "recommendation"]:
+                        m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', json_str)
+                        if m:
+                            parsed[field] = m.group(1)
+                    # Extract key_findings array
+                    kf_match = re.search(r'"key_findings"\s*:\s*\[(.*)', json_str)
+                    if kf_match:
+                        findings = re.findall(r'"([^"]+)"', kf_match.group(1))
+                        if findings:
+                            parsed["key_findings"] = findings
+                    if parsed:
+                        logger.info("Extracted %d fields via regex fallback", len(parsed))
+                    else:
+                        logger.warning("Failed to parse JSON even after repair and regex attempts")
 
         # Map simplified response to full report structure
         if parsed:
