@@ -651,11 +651,19 @@ def generate_report_pdf(report: Dict[str, Any], case_id: str) -> bytes:
         pdf.ln(1)
 
     def _bullet(text: str):
-        x = pdf.get_x()
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(30, 30, 30)
+        x0 = pdf.get_x()
+        y0 = pdf.get_y()
         pdf.cell(5, 5, "-")
-        pdf.multi_cell(0, 5, text)
+        # Ensure multi_cell has enough width by setting x after bullet marker
+        w = pdf.w - pdf.r_margin - pdf.get_x()
+        if w < 20:
+            # Not enough space on this line, move to next
+            pdf.ln(5)
+            w = pdf.w - pdf.l_margin - pdf.r_margin - 5
+            pdf.set_x(pdf.l_margin + 5)
+        pdf.multi_cell(w, 5, text)
 
     # ---- Disclaimer banner ---------------------------------------------
     pdf.set_fill_color(255, 248, 225)
