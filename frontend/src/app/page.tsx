@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useRef, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import nextDynamic from "next/dynamic";
 import { Header } from "@/components/layout/Header";
@@ -131,7 +131,15 @@ function SidebarToggle({
   );
 }
 
-export default function HomePage() {
+export default function HomePageWrapper() {
+  return (
+    <Suspense fallback={<div className="h-screen flex items-center justify-center">Loading...</div>}>
+      <HomePage />
+    </Suspense>
+  );
+}
+
+function HomePage() {
   const searchParams = useSearchParams();
 
   // State
