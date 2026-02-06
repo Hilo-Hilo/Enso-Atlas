@@ -5012,6 +5012,27 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                                   for p in results["by_category"]["general_pathology"] if "error" not in p],
         }
         
+        # Add simple logical consistency warnings for survival horizons
+        warnings: List[str] = list(results.get("warnings") or [])
+        try:
+            s1 = predictions.get("survival_1y")
+            s3 = predictions.get("survival_3y")
+            s5 = predictions.get("survival_5y")
+            if s1 and s3:
+                if s1.label == s1.negative_label and s3.label == s3.positive_label:
+                    msg = "Survival predictions inconsistent: 1-year predicts deceased but 3-year predicts survived"
+                    warnings.append(msg)
+            if s3 and s5:
+                if s3.label == s3.negative_label and s5.label == s5.positive_label:
+                    msg = "Survival predictions inconsistent: 3-year predicts deceased but 5-year predicts survived"
+                    warnings.append(msg)
+            if s1 and s5:
+                if s1.label == s1.negative_label and s5.label == s5.positive_label:
+                    msg = "Survival predictions inconsistent: 1-year predicts deceased but 5-year predicts survived"
+                    warnings.append(msg)
+        except Exception:
+            pass
+
         # Log to audit trail
         log_audit_event(
             "multi_model_analysis",
@@ -5021,14 +5042,14 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 "processing_time_ms": processing_time,
             },
         )
-        
+
         return MultiModelResponse(
             slide_id=slide_id,
             predictions=predictions,
             by_category=by_category,
             n_patches=results["n_patches"],
             processing_time_ms=processing_time,
-            warnings=results.get("warnings") or [],
+            warnings=warnings,
         )
 
 
