@@ -240,7 +240,7 @@ class MultiModelInference:
         # Determine label based on threshold
         is_positive = score >= 0.5
         label = config["positive_label"] if is_positive else config["negative_label"]
-        confidence = abs(score - 0.5) * 2  # Rescale to 0-1
+        confidence = min(abs(score - 0.5) * 2, 0.99)  # Rescale to 0-1, cap at 0.99
         
         result = {
             "model_id": model_id,
@@ -291,6 +291,47 @@ class MultiModelInference:
             )
             predictions[model_id] = result
         
+        # Survival consistency check: if 1yr says deceased, 3yr/5yr cannot
+        # logically say survived. Add warnings for contradictory predictions.
+        warnings = []
+        surv_1y = predictions.get("survival_1y", {})
+        surv_3y = predictions.get("survival_3y", {})
+        surv_5y = predictions.get("survival_5y", {})
+
+        if surv_1y.get("label") and surv_3y.get("label") and surv_5y.get("label"):
+            s1_deceased = surv_1y["label"] == "Deceased"
+            s3_survived = surv_3y["label"] == "Survived"
+            s5_survived = surv_5y["label"] == "Survived"
+
+            if s1_deceased and (s3_survived or s5_survived):
+                warnings.append(
+                    "Survival predictions are contradictory: 1-year predicts Deceased "
+                    f"(score {surv_1y.get('score', 0):.3f}) while "
+                    + ("3-year" if s3_survived else "")
+                    + (" and " if s3_survived and s5_survived else "")
+                    + ("5-year" if s5_survived else "")
+                    + " predict Survived. Treat survival estimates with caution."
+                )
+                # Add per-model warning fields
+                if s3_survived:
+                    predictions["survival_3y"]["warning"] = (
+                        "Contradicts 1-year survival prediction (Deceased). Interpret with caution."
+                    )
+                if s5_survived:
+                    predictions["survival_5y"]["warning"] = (
+                        "Contradicts 1-year survival prediction (Deceased). Interpret with caution."
+                    )
+
+            # Also check: if 3yr says deceased but 5yr says survived
+            if surv_3y["label"] == "Deceased" and s5_survived:
+                warnings.append(
+                    "3-year survival predicts Deceased but 5-year predicts Survived. "
+                    "This is logically inconsistent. Treat survival estimates with caution."
+                )
+                predictions["survival_5y"]["warning"] = (
+                    "Contradicts 3-year survival prediction (Deceased). Interpret with caution."
+                )
+
         # Group by category
         ovarian_cancer = [
             predictions[k] for k in predictions 
@@ -301,7 +342,7 @@ class MultiModelInference:
             if predictions[k].get("category") == "general_pathology"
         ]
         
-        return {
+        result = {
             "predictions": predictions,
             "by_category": {
                 "ovarian_cancer": ovarian_cancer,
@@ -310,6 +351,11 @@ class MultiModelInference:
             "n_patches": len(embeddings),
             "embedding_dim": embeddings.shape[1] if len(embeddings.shape) > 1 else 0,
         }
+
+        if warnings:
+            result["warnings"] = warnings
+
+        return result
 
 
 def main():

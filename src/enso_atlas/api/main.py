@@ -457,6 +457,7 @@ class ModelPrediction(BaseModel):
     auc: float
     n_training_slides: int
     description: str
+    warning: Optional[str] = None
 
 
 class MultiModelRequest(BaseModel):
@@ -474,6 +475,7 @@ class MultiModelResponse(BaseModel):
     by_category: Dict[str, List[ModelPrediction]]
     n_patches: int
     processing_time_ms: float
+    warnings: Optional[List[str]] = None
 
 
 class PdfExportRequest(BaseModel):
@@ -1136,8 +1138,13 @@ def create_app(
 
         # Run prediction
         score, attention = classifier.predict(embeddings)
-        label = "RESPONDER" if score > 0.5 else "NON-RESPONDER"
-        confidence = abs(score - 0.5) * 2
+        threshold = classifier.threshold
+        label = "RESPONDER" if score >= threshold else "NON-RESPONDER"
+        # Confidence based on distance from threshold, normalized to [0,1]
+        if score >= threshold:
+            confidence = min((score - threshold) / (1.0 - threshold), 1.0)
+        else:
+            confidence = min((threshold - score) / threshold, 1.0)
 
         # Load coordinates if available for tissue classification
         coord_path = embeddings_dir / f"{slide_id}_coords.npy"
@@ -1167,9 +1174,39 @@ def create_app(
                 "tissue_confidence": tissue_info["confidence"],
             })
 
-        # Get similar cases using FAISS
+        # Get similar cases using slide-mean cosine similarity (same as /api/similar)
         similar_cases = []
-        if evidence_gen is not None:
+        if slide_mean_index is not None:
+            try:
+                q = np.asarray(embeddings, dtype=np.float32).mean(axis=0)
+                q = q / (np.linalg.norm(q) + 1e-12)
+                q = q.reshape(1, -1).astype(np.float32)
+
+                search_k = min(len(slide_mean_ids), max(15, 5 * 3))
+                sims, idxs = slide_mean_index.search(q, search_k)
+
+                seen_slides = set()
+                for sim, idx_val in zip(sims[0], idxs[0]):
+                    if idx_val < 0 or idx_val >= len(slide_mean_ids):
+                        continue
+                    sid = slide_mean_ids[int(idx_val)]
+                    if sid == slide_id or sid in seen_slides:
+                        continue
+                    seen_slides.add(sid)
+                    meta = slide_mean_meta.get(sid, {})
+                    case_label = meta.get("label") or slide_labels.get(sid)
+                    similar_cases.append({
+                        "slide_id": sid,
+                        "similarity_score": float(sim),
+                        "distance": float(1.0 - float(sim)),
+                        "label": case_label,
+                    })
+                    if len(similar_cases) >= 5:
+                        break
+            except Exception as e:
+                logger.warning(f"Similar case search (cosine) failed: {e}")
+        # Fallback to L2-based evidence_gen if slide_mean_index unavailable
+        if not similar_cases and evidence_gen is not None:
             try:
                 similar_results = evidence_gen.find_similar(
                     embeddings, attention, k=10, top_patches=3
@@ -1180,7 +1217,6 @@ def create_app(
                     sid = meta.get("slide_id", "unknown")
                     if sid != slide_id and sid not in seen_slides:
                         seen_slides.add(sid)
-                        # Get label from cache
                         case_label = slide_labels.get(sid)
                         similar_cases.append({
                             "slide_id": sid,
@@ -1191,16 +1227,7 @@ def create_app(
                     if len(similar_cases) >= 5:
                         break
             except Exception as e:
-                logger.warning(f"Similar case search failed: {e}")
-                # Fall back to random
-                for sid in available_slides[:5]:
-                    if sid != slide_id:
-                        case_label = slide_labels.get(sid)
-                        similar_cases.append({
-                            "slide_id": sid,
-                            "similarity_score": float(np.random.uniform(0.7, 0.95)),
-                            "label": case_label,
-                        })
+                logger.warning(f"Similar case search (L2 fallback) failed: {e}")
 
         # Save to analysis history for audit trail
         save_analysis_to_history(
@@ -4988,6 +5015,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             by_category=by_category,
             n_patches=results["n_patches"],
             processing_time_ms=processing_time,
+            warnings=results.get("warnings"),
         )
 
 

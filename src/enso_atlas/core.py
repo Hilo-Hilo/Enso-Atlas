@@ -152,8 +152,12 @@ class EnsoAtlas:
         score, attention_weights = self.classifier.predict(embeddings)
         threshold = self.classifier.threshold
         label = "responder" if score >= threshold else "non-responder"
-        confidence = abs(score - threshold) / max(threshold, 1.0 - threshold)
-        confidence = min(max(confidence, 0.0), 1.0)
+        # Confidence based on distance from threshold, normalized to [0,1]
+        if score >= threshold:
+            confidence = min((score - threshold) / (1.0 - threshold), 1.0)
+        else:
+            confidence = min((threshold - score) / threshold, 1.0)
+        confidence = max(confidence, 0.0)
         logger.info(
             "Prediction: %s (score=%.3f, threshold=%.3f)",
             label, score, threshold,
