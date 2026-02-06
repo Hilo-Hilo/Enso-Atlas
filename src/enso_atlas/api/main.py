@@ -2430,7 +2430,7 @@ should incorporate all available clinical, pathological, and molecular data."""
             
             report_task_manager.update_task(task_id,
                 progress=60,
-                message="Generating report with MedGemma (this may take up to 120s)..."
+                message="Generating report with MedGemma (up to 90s)..."
             )
             
             # Generate report
@@ -2449,7 +2449,9 @@ should incorporate all available clinical, pathological, and molecular data."""
                         max_tokens,
                     )
 
+                    gen_start = time.time()
                     stop_event = threading.Event()
+                    _hb_gen_start = gen_start  # capture for closure
                     def _progress_heartbeat():
                         """Smoothly advance progress from 60 to 92 over the timeout period."""
                         progress = 60.0
@@ -2458,7 +2460,7 @@ should incorporate all available clinical, pathological, and molecular data."""
                             tick += 1
                             # Smooth asymptotic approach: fast initially, slows near cap
                             progress = min(92, 60 + 32 * (1 - 1.0 / (1 + tick * 0.15)))
-                            elapsed = time.time() - gen_start if 'gen_start' in dir() else tick * 3
+                            elapsed = time.time() - _hb_gen_start
                             report_task_manager.update_task(
                                 task_id,
                                 progress=round(progress, 1),
@@ -2466,7 +2468,6 @@ should incorporate all available clinical, pathological, and molecular data."""
                                 message=f"MedGemma is generating the report... ({int(elapsed)}s)"
                             )
 
-                    gen_start = time.time()
                     heartbeat = threading.Thread(target=_progress_heartbeat, daemon=True)
                     heartbeat.start()
 

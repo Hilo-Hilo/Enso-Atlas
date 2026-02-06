@@ -2059,12 +2059,22 @@ export async function generateReportWithProgress(
   const taskId = asyncResponse.task_id;
   
   // Poll for completion
-  const maxWaitMs = 180000; // 3 minute max wait (MedGemma can take 120s+)
-  const pollIntervalMs = 1500; // Poll every 1.5 seconds
+  const maxWaitMs = 150000; // 2.5 minute max wait (backend timeout is 90s + processing)
+  const pollIntervalMs = 2000; // Poll every 2 seconds
   const startTime = Date.now();
+  let lastProgress = 0;
+  let progressStalledSince = 0;
   
   while (Date.now() - startTime < maxWaitMs) {
-    const status = await getReportStatus(taskId);
+    let status: ReportTaskStatus;
+    try {
+      status = await getReportStatus(taskId);
+    } catch (pollError) {
+      // Transient poll failure — wait and retry
+      console.warn('[API] Report status poll failed:', pollError);
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      continue;
+    }
     
     // Report progress
     if (onProgress) {
@@ -2083,13 +2093,22 @@ export async function generateReportWithProgress(
       });
     }
     
+    // Detect stalled progress (same value for >60s = likely stuck)
+    if (status.progress !== lastProgress) {
+      lastProgress = status.progress;
+      progressStalledSince = Date.now();
+    } else if (progressStalledSince > 0 && Date.now() - progressStalledSince > 60000) {
+      console.warn(`[API] Report progress stalled at ${status.progress}% for >60s`);
+      // Don't throw yet — backend auto-expiry should handle it
+    }
+    
     // Wait before next poll
     await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
   }
   
   throw new AtlasApiError({
     code: 'REPORT_TIMEOUT',
-    message: 'Report generation timed out after 2 minutes',
+    message: 'Report generation timed out. The backend may still be processing — please retry.',
     isTimeout: true,
   });
 }

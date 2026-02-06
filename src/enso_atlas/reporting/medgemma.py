@@ -65,7 +65,7 @@ class ReportingConfig:
     max_similar_cases: int = 0  # Skip similar cases to reduce prompt size
     max_input_tokens: int = 512  # Simplified prompt is much shorter
     max_output_tokens: int = 512  # Allow enough tokens for JSON response
-    max_generation_time_s: float = 120.0  # Faster with shorter output
+    max_generation_time_s: float = 75.0  # Must be less than thread timeout (90s) to allow graceful stop
     temperature: float = 0.1  # Lower temp for more predictable JSON
     top_p: float = 0.9
 

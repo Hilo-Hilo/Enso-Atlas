@@ -73,9 +73,52 @@ class ReportTaskManager:
         return task
     
     def get_task(self, task_id: str) -> Optional[ReportTask]:
-        """Get task by ID."""
+        """Get task by ID. Auto-expires stale tasks (>5 min running) with template fallback."""
+        stale_cutoff = time.time() - 300  # 5 minutes max
         with self.lock:
-            return self.tasks.get(task_id)
+            task = self.tasks.get(task_id)
+            if task and task.status in [ReportTaskStatus.PENDING, ReportTaskStatus.RUNNING]:
+                if task.created_at < stale_cutoff:
+                    age = time.time() - task.created_at
+                    logger.warning(f"Auto-expiring stale report task {task.task_id} (age={age:.0f}s)")
+                    # Complete with a template fallback rather than failing
+                    task.status = ReportTaskStatus.COMPLETED
+                    task.progress = 100
+                    task.stage = "complete"
+                    task.message = f"Report generated (template fallback after {age:.0f}s timeout)"
+                    task.completed_at = time.time()
+                    if task.result is None:
+                        # Produce a minimal template result so the frontend can display something
+                        task.result = self._create_stale_fallback_result(task.slide_id)
+            return task
+
+    def _create_stale_fallback_result(self, slide_id: str) -> Dict[str, Any]:
+        """Create a minimal template report for a stale/timed-out task."""
+        return {
+            "slide_id": slide_id,
+            "report_json": {
+                "case_id": slide_id,
+                "task": "Bevacizumab treatment response prediction from H&E histopathology",
+                "model_output": {
+                    "label": "unknown",
+                    "probability": 0.5,
+                    "calibration_note": "Report generation timed out. Template report generated as fallback.",
+                },
+                "evidence": [],
+                "limitations": [
+                    "Report generation timed out — MedGemma inference was unavailable",
+                    "This is a template fallback report with no AI-generated content",
+                    "Requires manual pathology review",
+                ],
+                "suggested_next_steps": [
+                    "Retry report generation when GPU resources are available",
+                    "Review analysis results and evidence patches manually",
+                    "Consult with pathology team",
+                ],
+                "safety_statement": "This is a research tool. Report generation timed out. All findings must be validated by qualified pathologists.",
+            },
+            "summary_text": f"CASE ANALYSIS SUMMARY\nCase ID: {slide_id}\n\nReport generation timed out. This is a template fallback.\nPlease retry or review analysis results manually.\n\nDISCLAIMER: This is a research tool.",
+        }
     
     def get_task_by_slide(self, slide_id: str) -> Optional[ReportTask]:
         """Get active task for a slide. Returns None if task is stale (>5 min)."""
