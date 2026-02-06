@@ -54,6 +54,11 @@ export function PredictionPanel({
   isAnalyzingUncertainty,
   onRunUncertaintyAnalysis,
 }: PredictionPanelProps) {
+  // Project-aware labels (must be before any returns per Rules of Hooks)
+  const { currentProject } = useProject();
+  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Responder";
+  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Non-Responder";
+
   // Show error state with retry
   if (error && !isLoading) {
     return (
@@ -152,11 +157,6 @@ export function PredictionPanel({
       </Card>
     );
   }
-
-  // Project-aware labels
-  const { currentProject } = useProject();
-  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Responder";
-  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Non-Responder";
 
   // Determine responder status
   const isResponder = prediction.score >= 0.5;

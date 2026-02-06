@@ -39,6 +39,7 @@ import type {
   BatchAnalysisResult,
   BatchAnalysisSummary,
 } from "@/types";
+import { useProject } from "@/contexts/ProjectContext";
 
 interface BatchAnalysisPanelProps {
   onSlideSelect?: (slideId: string) => void;
@@ -53,6 +54,11 @@ export function BatchAnalysisPanel({
   onSlideSelect,
   className,
 }: BatchAnalysisPanelProps) {
+  // Project-aware labels
+  const { currentProject } = useProject();
+  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Responder";
+  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Non-Responder";
+
   // Slide selection state
   const [slides, setSlides] = useState<SlideInfo[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -494,13 +500,13 @@ export function BatchAnalysisPanel({
               />
               <SummaryCard
                 icon={CheckCircle}
-                label="Responders"
+                label={positiveLabel}
                 value={summary.responders}
                 color="green"
               />
               <SummaryCard
                 icon={XCircle}
-                label="Non-Resp"
+                label={negativeLabel}
                 value={summary.nonResponders}
                 color="red"
               />
@@ -540,8 +546,8 @@ export function BatchAnalysisPanel({
               {[
                 { key: "all", label: "All", count: results.length },
                 { key: "uncertain", label: "Uncertain", count: summary.uncertain },
-                { key: "responders", label: "Responders", count: summary.responders },
-                { key: "non-responders", label: "Non-Resp", count: summary.nonResponders },
+                { key: "responders", label: positiveLabel, count: summary.responders },
+                { key: "non-responders", label: negativeLabel, count: summary.nonResponders },
                 { key: "errors", label: "Errors", count: summary.failed },
               ].map(({ key, label, count }) => (
                 <button

@@ -18,6 +18,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { useProject } from "@/contexts/ProjectContext";
 
 export interface AnalysisStats {
   totalAnalyzed: number;
@@ -208,6 +209,11 @@ export function QuickStatsPanel({ onRefresh }: QuickStatsPanelProps) {
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
+  // Project-aware labels
+  const { currentProject } = useProject();
+  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Responder";
+  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Non-Responder";
+
   const responderRate =
     stats.totalAnalyzed > 0
       ? (stats.responderCount / stats.totalAnalyzed) * 100
@@ -257,19 +263,19 @@ export function QuickStatsPanel({ onRefresh }: QuickStatsPanelProps) {
             color={stats.avgConfidence >= 0.7 ? "green" : stats.avgConfidence >= 0.4 ? "amber" : "red"}
           />
 
-          {/* Responders */}
+          {/* Positive Class */}
           <StatCard
             icon={<CheckCircle className="h-4 w-4" />}
-            label="Responders"
+            label={`${positiveLabel}s`}
             value={stats.responderCount}
             sublabel={`${responderRate.toFixed(0)}% rate`}
             color="green"
           />
 
-          {/* Non-Responders */}
+          {/* Negative Class */}
           <StatCard
             icon={<XCircle className="h-4 w-4" />}
-            label="Non-Responders"
+            label={`${negativeLabel}s`}
             value={stats.nonResponderCount}
             sublabel={`${(100 - responderRate).toFixed(0)}% rate`}
             color="red"
@@ -300,11 +306,11 @@ export function QuickStatsPanel({ onRefresh }: QuickStatsPanelProps) {
             <div className="flex justify-between text-2xs text-gray-500">
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-green-500" />
-                Responder
+                {positiveLabel}
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-red-400" />
-                Non-Responder
+                {negativeLabel}
               </span>
             </div>
           </div>

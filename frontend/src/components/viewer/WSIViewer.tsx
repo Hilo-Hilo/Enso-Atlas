@@ -39,7 +39,8 @@ import type { PatchCoordinates, HeatmapData } from "@/types";
 // Heatmap model options
 const HEATMAP_MODELS = [
   { id: null, name: "Legacy Model" },
-  { id: "platinum_sensitivity", name: "Platinum Sensitivity" },
+  { id: "bevacizumab_response", name: "Treatment Response" },
+  { id: "platinum_sensitivity", name: "Chemo Sensitivity" },
   { id: "tumor_grade", name: "Tumor Grade" },
   { id: "survival_5y", name: "5-Year Survival" },
   { id: "survival_3y", name: "3-Year Survival" },

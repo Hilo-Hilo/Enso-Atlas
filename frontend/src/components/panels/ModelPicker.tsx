@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 
 import { Badge } from "@/components/ui/Badge";
 import { ChevronDown, ChevronUp, FlaskConical, Activity, Layers } from "lucide-react";
+import { useProject } from "@/contexts/ProjectContext";
 
 export interface ModelConfig {
   id: string;
@@ -74,6 +75,8 @@ export function ModelPicker({
   className,
 }: ModelPickerProps) {
   const [isExpanded, setIsExpanded] = React.useState(false);
+  const { currentProject } = useProject();
+  const cancerTypeLabel = currentProject.cancer_type || "Ovarian Cancer";
 
   const toggleModel = (modelId: string) => {
     if (disabled) return;
@@ -224,7 +227,7 @@ export function ModelPicker({
               disabled={disabled}
               className="text-xs px-2 py-1 rounded bg-pink-100 hover:bg-pink-200 text-pink-700 transition-colors"
             >
-              Ovarian Cancer
+              {cancerTypeLabel}
             </button>
             <button
               onClick={selectGeneral}
@@ -236,12 +239,12 @@ export function ModelPicker({
           </div>
 
           <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1">
-            {/* Ovarian Cancer Models */}
+            {/* Cancer-Specific Models */}
             <div>
               <div className="flex items-center gap-1.5 mb-2">
                 <Activity className="h-3 w-3 text-pink-500" />
                 <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                  Ovarian Cancer
+                  {cancerTypeLabel}
                 </span>
               </div>
               <div className="space-y-1.5">

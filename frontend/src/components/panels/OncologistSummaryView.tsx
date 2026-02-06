@@ -20,6 +20,7 @@ import {
   Circle,
 } from "lucide-react";
 import type { AnalysisResponse, StructuredReport, EvidencePatch } from "@/types";
+import { useProject } from "@/contexts/ProjectContext";
 
 interface OncologistSummaryViewProps {
   analysisResult: AnalysisResponse | null;
@@ -58,6 +59,11 @@ export function OncologistSummaryView({
   onPatchZoom,
   onSwitchToFullView,
 }: OncologistSummaryViewProps) {
+  // Project-aware labels (must be before any returns per Rules of Hooks)
+  const { currentProject } = useProject();
+  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Responder";
+  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Non-Responder";
+
   if (!analysisResult) {
     return (
       <div className="h-full flex items-center justify-center bg-gray-50 rounded-lg">
@@ -167,19 +173,19 @@ export function OncologistSummaryView({
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded-full bg-green-500" />
                 <span className="text-sm font-medium">
-                  {responderCount} Responder{responderCount !== 1 ? "s" : ""}
+                  {responderCount} {positiveLabel}{responderCount !== 1 ? "s" : ""}
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded-full bg-red-500" />
                 <span className="text-sm font-medium">
-                  {nonResponderCount} Non-Responder{nonResponderCount !== 1 ? "s" : ""}
+                  {nonResponderCount} {negativeLabel}{nonResponderCount !== 1 ? "s" : ""}
                 </span>
               </div>
             </div>
             {responderCount > 0 && nonResponderCount > 0 && (
               <p className="text-xs text-gray-600 mt-3">
-                This case shares morphological features with both responder and non-responder cases.
+                This case shares morphological features with both {positiveLabel.toLowerCase()} and {negativeLabel.toLowerCase()} cases.
                 Clinical context is essential for interpretation.
               </p>
             )}

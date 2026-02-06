@@ -343,6 +343,10 @@ export function MultiModelPredictionPanel({
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
+  // Project context for dynamic labels (must be before any returns per Rules of Hooks)
+  const { currentProject } = useProject();
+  const cancerTypeLabel = currentProject.cancer_type || "Cancer";
+
   // Update elapsed time during embedding
   useEffect(() => {
     if (!embeddingProgress?.startTime) {
@@ -507,10 +511,6 @@ export function MultiModelPredictionPanel({
       </Card>
     );
   }
-
-  // Project context for dynamic labels
-  const { currentProject } = useProject();
-  const cancerTypeLabel = currentProject.cancer_type || "Cancer";
 
   // Empty state - no results yet (enhanced)
   if (!multiModelResult) {
