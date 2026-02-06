@@ -64,8 +64,8 @@ class ReportingConfig:
     max_evidence_patches: int = 4  # Reduced for shorter prompts
     max_similar_cases: int = 0  # Skip similar cases to reduce prompt size
     max_input_tokens: int = 512  # Simplified prompt is much shorter
-    max_output_tokens: int = 512  # Enough for rich JSON, fits within 120s CPU budget
-    max_generation_time_s: float = 120.0  # CPU inference needs more time
+    max_output_tokens: int = 256  # Small enough to finish within CPU time limit
+    max_generation_time_s: float = 90.0  # Leave headroom for decode + parse after generation
     temperature: float = 0.1  # Lower temp for more predictable JSON
     top_p: float = 0.9
 
@@ -328,39 +328,18 @@ class MedGemmaReporter:
         case_id: str = "unknown",
         patient_context: Optional[Dict] = None,
     ) -> str:
-        """Build a clinically informative prompt that feeds real patch evidence to MedGemma."""
+        """Build a compact prompt that forces JSON-first output from MedGemma."""
 
-        # Summarize top evidence patches into a compact string
-        patch_lines = []
-        for p in evidence_patches[:self.config.max_evidence_patches]:
+        # Collect tissue categories from evidence patches
+        categories = []
+        for p in evidence_patches[:3]:
             cat = self._classify_patch(p)
             attn = p.get("attention_weight", 0.0)
-            patch_lines.append(f"  - {cat} (attn={attn:.3f})")
-        patch_summary = "\n".join(patch_lines) if patch_lines else "  (no patches)"
-
-        # Collect unique tissue categories for the prompt
-        categories = list(dict.fromkeys(
-            self._classify_patch(p) for p in evidence_patches[:self.config.max_evidence_patches]
-        ))
+            categories.append(f"{cat}({attn:.2f})")
         cat_str = ", ".join(categories) if categories else "mixed"
 
-        # Confidence descriptor
-        conf = abs(score - 0.5) * 2
-        if conf > 0.7:
-            conf_word = "high"
-        elif conf > 0.4:
-            conf_word = "moderate"
-        else:
-            conf_word = "low"
-
-        prompt = f"""Ovarian cancer H&E slide, bevacizumab response prediction.
-Prediction: {label} (score={score:.2f})
-High-attention tissue: {cat_str}
-Top patches:
-{patch_summary}
-
-Return ONLY this JSON (fill in the <> fields with specific pathology observations):
-{{"prediction":"{label}","confidence":{score:.2f},"morphology_description":"<1-2 sentences on morphological features in {cat_str} regions relevant to anti-VEGF response>","key_findings":["<tumor/stromal architecture finding>","<vascular/inflammatory pattern finding>","<what tissue composition suggests for bevacizumab>"],"clinical_significance":"<how features relate to VEGF-driven angiogenesis>","recommendation":"Correlate with VEGF IHC and clinical staging"}}"""
+        prompt = f"""Ovarian H&E. Prediction: {label} ({score:.2f}). Tissue: {cat_str}.
+{{"prediction":"{label}","confidence":{score:.2f},"morphology":""""
 
         return prompt
 
@@ -742,10 +721,15 @@ Return ONLY this JSON (fill in the <> fields with specific pathology observation
                 )
                 if not response.strip():
                     logger.warning("MedGemma decode produced empty response")
+                else:
+                    logger.info("MedGemma raw output (first 500 chars): %s", response[:500])
 
                 # Parse JSON
                 logger.info("MedGemma parsing JSON response")
-                report = self._parse_json_response(response, case_id=case_id, score=score, label=label)
+                # The prompt ends mid-JSON, so prepend the JSON start to the response
+                prompt_json_prefix = f'{{"prediction":"{label}","confidence":{score:.2f},"morphology":"'
+                full_json_attempt = prompt_json_prefix + response
+                report = self._parse_json_response(full_json_attempt, case_id=case_id, score=score, label=label)
 
                 # Validate
                 logger.info("MedGemma validating report")
