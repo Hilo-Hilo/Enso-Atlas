@@ -12,7 +12,23 @@ const nextConfig = {
         port: "8000",
         pathname: "/api/**",
       },
+      {
+        protocol: "http",
+        hostname: "127.0.0.1",
+        port: "8000",
+        pathname: "/api/**",
+      },
     ],
+  },
+  
+  // Proxy API requests to the backend server
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://127.0.0.1:8003/api/:path*', // Proxy to backend running on port 8003
+      },
+    ]
   },
   
   // Suppress hydration warnings for OpenSeadragon
