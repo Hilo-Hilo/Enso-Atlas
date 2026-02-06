@@ -23,6 +23,8 @@ services:
       # Offline mode - set to 1 after models are downloaded
       TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-0}"
       HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
+      # PostgreSQL connection
+      DATABASE_URL: "postgresql://enso:enso_atlas_2024@atlas-db:5432/enso_atlas"
     volumes:
       # Bind mount local data directory with full TCGA embeddings
       - /home/hansonwen/med-gemma-hackathon/data:/app/data
@@ -37,6 +39,9 @@ services:
       - "7862:7860"
       - "8003:8000"
     restart: unless-stopped
+    depends_on:
+      atlas-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -44,10 +49,31 @@ services:
       retries: 3
       start_period: 120s
 
+  atlas-db:
+    image: postgres:16
+    container_name: atlas-db
+    environment:
+      POSTGRES_DB: enso_atlas
+      POSTGRES_USER: enso
+      POSTGRES_PASSWORD: enso_atlas_2024
+    volumes:
+      - atlas-pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # Expose on 5433 to avoid conflicts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U enso -d enso_atlas"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
 volumes:
   atlas-outputs:
     driver: local
   atlas-cache:
     driver: local
   atlas-models:
+    driver: local
+  atlas-pgdata:
     driver: local

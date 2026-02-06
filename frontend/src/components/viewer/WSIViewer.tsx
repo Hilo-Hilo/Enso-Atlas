@@ -74,7 +74,7 @@ export function WSIViewer({
 }: WSIViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
-  const heatmapOverlayRef = useRef<HTMLDivElement | null>(null);
+  const heatmapOverlayRef = useRef<HTMLElement | null>(null);
   
   // Store callbacks in refs so they don't trigger viewer recreation
   const onRegionClickRef = useRef(onRegionClick);
@@ -260,27 +260,15 @@ export function WSIViewer({
       }
     }
 
-    // Create overlay container
-    const overlayDiv = document.createElement("div");
-    overlayDiv.style.position = "relative";
-    overlayDiv.style.width = "100%";
-    overlayDiv.style.height = "100%";
-    overlayDiv.style.pointerEvents = "none";
-    overlayDiv.className = "heatmap-overlay-container";
-
-    // Create image inside container
+    // Use <img> directly as OSD overlay element (no wrapper div).
+    // Wrapper divs with CSS position/percentages cause sub-pixel rounding
+    // errors that accumulate at higher zoom levels, causing drift.
     const img = document.createElement("img");
-    // Set styles first
-    img.style.position = "absolute";
-    img.style.top = "0";
-    img.style.left = "0";
-    img.style.width = "100%";
-    img.style.height = "100%";
-    img.style.objectFit = "fill";
     img.style.opacity = "0";
     img.style.transition = "opacity 0.3s ease";
     img.style.pointerEvents = "none";
-    img.style.imageRendering = "pixelated"; 
+    img.style.imageRendering = "pixelated";
+    img.className = "heatmap-overlay-img";
     
     img.onload = () => {
       console.log("Heatmap image loaded:", heatmapImageUrl);
@@ -294,29 +282,24 @@ export function WSIViewer({
       setHeatmapLoaded(false);
     };
 
-    // Set src LAST to ensure handlers catch the event
     img.src = heatmapImageUrl;
+    heatmapOverlayRef.current = img;
 
-    overlayDiv.appendChild(img);
-    heatmapOverlayRef.current = overlayDiv;
-
-    // Add overlay to cover the full slide image using its actual bounds
-    // This ensures the heatmap aligns correctly regardless of slide aspect ratio
-    // IMPORTANT: use getBounds(false) = target/intended bounds (not animated/current)
-    // and checkResize: false to prevent OSD from resizing during zoom/pan
+    // Add the img directly as an OSD overlay covering the full slide bounds.
+    // OSD manages all positioning/scaling — no CSS width/height needed on img.
     const tiledImage = viewer.world.getItemAt(0);
     if (tiledImage) {
       const bounds = tiledImage.getBounds(false);
       
       viewer.addOverlay({
-        element: overlayDiv,
+        element: img,
         location: bounds,
         checkResize: false,
       });
     } else {
       console.warn("No tiled image found, using default 1x1 bounds");
       viewer.addOverlay({
-        element: overlayDiv,
+        element: img,
         location: new OpenSeadragon.Rect(0, 0, 1, 1),
         checkResize: false,
       });
@@ -336,10 +319,9 @@ export function WSIViewer({
   // Update heatmap opacity separately (doesn't recreate overlay)
   useEffect(() => {
     if (heatmapOverlayRef.current && heatmapLoaded) {
-      const img = heatmapOverlayRef.current.querySelector("img");
-      if (img) {
-        img.style.opacity = showHeatmap ? String(heatmapOpacity) : "0";
-      }
+      // heatmapOverlayRef is now the img element directly (no wrapper div)
+      const el = heatmapOverlayRef.current;
+      el.style.opacity = showHeatmap ? String(heatmapOpacity) : "0";
     }
   }, [showHeatmap, heatmapOpacity, heatmapLoaded]);
 
