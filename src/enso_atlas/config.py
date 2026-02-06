@@ -72,8 +72,8 @@ class ReportingConfig:
     max_evidence_patches: int = 8
     max_similar_cases: int = 5
     max_input_tokens: int = 3072
-    max_output_tokens: int = 512
-    max_generation_time_s: float = 120.0
+    max_output_tokens: int = 384
+    max_generation_time_s: float = 300.0
     temperature: float = 0.3
     top_p: float = 0.9
 

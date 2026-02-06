@@ -64,8 +64,8 @@ class ReportingConfig:
     max_evidence_patches: int = 4  # Reduced for shorter prompts
     max_similar_cases: int = 0  # Skip similar cases to reduce prompt size
     max_input_tokens: int = 512  # Simplified prompt is much shorter
-    max_output_tokens: int = 256  # Small enough to finish within CPU time limit
-    max_generation_time_s: float = 90.0  # Leave headroom for decode + parse after generation
+    max_output_tokens: int = 384  # Balanced: short enough for CPU, long enough for useful reports
+    max_generation_time_s: float = 300.0  # CPU inference on Blackwell (no CUDA sm_121) needs ~120-180s
     temperature: float = 0.1  # Lower temp for more predictable JSON
     top_p: float = 0.9
 
