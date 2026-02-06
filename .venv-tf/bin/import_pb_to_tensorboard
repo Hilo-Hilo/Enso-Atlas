@@ -1,6 +1,0 @@
-#!/Users/hansonwen/clawd/med-gemma-hackathon/.venv-tf/bin/python3.11
-import sys
-from tensorflow.python.tools.import_pb_to_tensorboard import main
-if __name__ == '__main__':
-    sys.argv[0] = sys.argv[0].removesuffix('.exe')
-    sys.exit(main())

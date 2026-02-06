@@ -22,9 +22,14 @@ wheels/
 
 # Virtual environments
 .venv/
+.venv-tf/
 venv/
 ENV/
 env/
+
+# Legacy outputs (training artifacts)
+outputs/
+results/
 
 # Node.js
 node_modules/
