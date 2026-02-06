@@ -936,9 +936,51 @@ def create_app(
 
     @app.get("/api/slides", response_model=List[SlideInfo])
     async def list_slides():
-        """List all available slides with patient context."""
+        """List all available slides with patient context.
+
+        Uses PostgreSQL when available (< 100ms), falls back to flat-file
+        scan (30-60s) if DB is not connected.
+        """
+        # ---- Fast path: PostgreSQL ----
+        if db_available:
+            try:
+                t0 = time.time()
+                rows = await db.get_all_slides()
+                slides = []
+                for r in rows:
+                    patient_ctx = None
+                    if any(r.get(k) for k in ("age", "sex", "stage", "grade", "prior_lines", "histology")):
+                        patient_ctx = PatientContext(
+                            age=r.get("age"),
+                            sex=r.get("sex"),
+                            stage=r.get("stage"),
+                            grade=r.get("grade"),
+                            prior_lines=r.get("prior_lines"),
+                            histology=r.get("histology"),
+                        )
+                    slides.append(SlideInfo(
+                        slide_id=r["slide_id"],
+                        patient_id=r.get("patient_id"),
+                        has_embeddings=r.get("has_embeddings", False),
+                        has_level0_embeddings=r.get("has_level0_embeddings", False),
+                        label=r.get("label"),
+                        num_patches=r.get("num_patches"),
+                        patient=patient_ctx,
+                        dimensions=SlideDimensions(
+                            width=r.get("width") or 0,
+                            height=r.get("height") or 0,
+                        ),
+                        mpp=r.get("mpp"),
+                        magnification=r.get("magnification") or "40x",
+                    ))
+                elapsed_ms = (time.time() - t0) * 1000
+                logger.info(f"/api/slides returned {len(slides)} slides from DB in {elapsed_ms:.0f}ms")
+                return slides
+            except Exception as e:
+                logger.warning(f"DB query failed, falling back to flat-file scan: {e}")
+
+        # ---- Slow fallback: flat-file scan (original implementation) ----
         slides = []
-        # Try multiple label file locations (data root preferred over embeddings parent)
         labels_path = _data_root / "labels.csv"
         if not labels_path.exists():
             labels_path = _data_root / "tcga_full" / "labels.csv"
@@ -951,20 +993,16 @@ def create_app(
             with open(labels_path) as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    # Handle different CSV formats
                     if "slide_id" in row:
                         sid = row["slide_id"]
                         label = row.get("label", "")
                     else:
-                        # Alternative format: slide_file contains filename with .svs
                         slide_file = row.get("slide_file", "")
                         sid = slide_file.replace(".svs", "").replace(".SVS", "")
-                        # Derive label from treatment_response
                         response = row.get("treatment_response", "")
                         label = "1" if response == "responder" else "0" if response == "non-responder" else ""
 
                     if sid:
-                        # Parse patient context from CSV
                         patient_ctx = None
                         if any(k in row for k in ["age", "sex", "stage", "grade", "prior_treatments", "histology"]):
                             try:
@@ -987,7 +1025,6 @@ def create_app(
                         }
 
         for slide_id in available_slides:
-            # Get patch count
             emb_path = embeddings_dir / f"{slide_id}.npy"
             num_patches = None
             if emb_path.exists():
@@ -998,7 +1035,6 @@ def create_app(
                     pass
 
             data = slide_data.get(slide_id, {})
-            # Try to get slide dimensions from actual slide file
             dims = SlideDimensions()
             mpp = None
             slide_path = resolve_slide_path(slide_id)
@@ -1010,17 +1046,13 @@ def create_app(
                             width=slide.dimensions[0],
                             height=slide.dimensions[1]
                         )
-                        # Try to get MPP from slide properties
                         mpp_x = slide.properties.get(openslide.PROPERTY_NAME_MPP_X)
                         if mpp_x:
                             mpp = float(mpp_x)
                 except Exception as e:
                     logger.warning(f"Could not read slide {slide_id}: {e}")
-            
-            # Check if level 0 embeddings exist
-            # embeddings_dir may already BE the level0 dir (auto-detected at startup)
+
             has_level0 = False
-            # Check if current embeddings_dir is level0 (path ends with /level0)
             if embeddings_dir.name == "level0":
                 emb_check = embeddings_dir / f"{slide_id}.npy"
                 has_level0 = emb_check.exists()
@@ -1028,7 +1060,7 @@ def create_app(
                 level0_dir = embeddings_dir / "level0"
                 if level0_dir.exists():
                     has_level0 = (level0_dir / f"{slide_id}.npy").exists()
-            
+
             slides.append(SlideInfo(
                 slide_id=slide_id,
                 has_embeddings=True,
@@ -1124,6 +1156,51 @@ def create_app(
             "per_page": per_page,
             "filters": {"label": label, "search": search}
         }
+
+    @app.post("/api/db/repopulate")
+    async def repopulate_database():
+        """Force re-population of the PostgreSQL database from flat files.
+
+        This re-reads all CSV, .npy, and SVS files and updates the database.
+        Useful after adding new slides or re-embedding.
+        """
+        if not db_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        try:
+            t0 = time.time()
+            await db.populate_from_flat_files(
+                data_root=_data_root,
+                embeddings_dir=embeddings_dir,
+            )
+            elapsed = time.time() - t0
+            return {
+                "status": "ok",
+                "message": f"Database repopulated in {elapsed:.1f}s",
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/db/status")
+    async def database_status():
+        """Check database connection and population status."""
+        if not db_available:
+            return {"status": "unavailable", "message": "PostgreSQL not connected"}
+        try:
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                slide_count = await conn.fetchval("SELECT COUNT(*) FROM slides")
+                patient_count = await conn.fetchval("SELECT COUNT(*) FROM patients")
+                meta_count = await conn.fetchval("SELECT COUNT(*) FROM slide_metadata")
+                dims_count = await conn.fetchval("SELECT COUNT(*) FROM slides WHERE width > 0")
+            return {
+                "status": "connected",
+                "slides": slide_count,
+                "patients": patient_count,
+                "metadata_entries": meta_count,
+                "slides_with_dimensions": dims_count,
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     # Tissue type constants for classification
     TISSUE_TYPES = ["tumor", "stroma", "necrosis", "inflammatory", "normal", "artifact"]
