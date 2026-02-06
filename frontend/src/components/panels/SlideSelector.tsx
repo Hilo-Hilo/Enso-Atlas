@@ -172,25 +172,8 @@ export function SlideSelector({
     try {
       const response = await getSlides();
       setSlides(response.slides);
-
-      // Fetch QC metrics for all slides in parallel
-      const qcPromises = response.slides.map(async (slide) => {
-        try {
-          const qc = await getSlideQC(slide.id);
-          return { id: slide.id, qc };
-        } catch {
-          return null;
-        }
-      });
-
-      const qcResults = await Promise.all(qcPromises);
-      const qcMap: Record<string, SlideQCMetrics> = {};
-      qcResults.forEach((result) => {
-        if (result) {
-          qcMap[result.id] = result.qc;
-        }
-      });
-      setQcMetrics(qcMap);
+      // QC metrics are fetched lazily when a slide is selected (not all 208 at once).
+      // This avoids 208 parallel requests that block the sidebar from loading.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load slides");
     } finally {
