@@ -56,7 +56,8 @@ RUN pip install --no-cache-dir \
     gradio \
     fastapi \
     uvicorn[standard] \
-    pydantic
+    pydantic \
+    fpdf2
 
 # Fix OpenCV compatibility issue (cv2.dnn.DictValue AttributeError)
 # The NVIDIA base image has a newer OpenCV that breaks cv2.typing imports
