@@ -302,21 +302,23 @@ export function WSIViewer({
 
     // Add overlay to cover the full slide image using its actual bounds
     // This ensures the heatmap aligns correctly regardless of slide aspect ratio
+    // IMPORTANT: use getBounds(false) = target/intended bounds (not animated/current)
+    // and checkResize: false to prevent OSD from resizing during zoom/pan
     const tiledImage = viewer.world.getItemAt(0);
     if (tiledImage) {
-      // Get the bounds of the tiled image in viewport coordinates
-      const bounds = tiledImage.getBounds(true);
+      const bounds = tiledImage.getBounds(false);
       
       viewer.addOverlay({
         element: overlayDiv,
         location: bounds,
+        checkResize: false,
       });
     } else {
-      // Fallback to 1x1 rect if no tiled image (should not happen when isReady is true)
       console.warn("No tiled image found, using default 1x1 bounds");
       viewer.addOverlay({
         element: overlayDiv,
         location: new OpenSeadragon.Rect(0, 0, 1, 1),
+        checkResize: false,
       });
     }
 
