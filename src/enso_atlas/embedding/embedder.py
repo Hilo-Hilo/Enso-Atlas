@@ -42,10 +42,15 @@ class PathFoundationEmbedder:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _load_model(self) -> None:
-        """Load the Path Foundation model."""
+        """Load the Path Foundation model.
+        
+        Uses local_files_only=True when the model is already cached locally,
+        preventing any network access to HuggingFace Hub.
+        """
         if self._model is not None:
             return
 
+        import os
         import torch
         from transformers import AutoModel, AutoImageProcessor
 
@@ -63,8 +68,25 @@ class PathFoundationEmbedder:
         # Note: Path Foundation is available at google/path-foundation on HuggingFace
         model_id = "google/path-foundation"
 
-        self._processor = AutoImageProcessor.from_pretrained(model_id)
-        self._model = AutoModel.from_pretrained(model_id)
+        # Detect whether model is already cached locally.
+        # Check HF_HOME / TRANSFORMERS_CACHE / default cache for the model directory.
+        local_files_only = False
+        hf_home = os.environ.get("HF_HOME", os.environ.get(
+            "TRANSFORMERS_CACHE",
+            os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+        ))
+        model_cache_dir = os.path.join(hf_home, "hub", f"models--{model_id.replace('/', '--')}")
+        if os.path.isdir(model_cache_dir):
+            local_files_only = True
+            logger.info(f"Path Foundation model cache found at {model_cache_dir}; loading with local_files_only=True (no network)")
+
+        # Also respect explicit offline env vars
+        if os.environ.get("TRANSFORMERS_OFFLINE", "0") == "1" or os.environ.get("HF_HUB_OFFLINE", "0") == "1":
+            local_files_only = True
+            logger.info("Offline mode enabled via environment variable; loading with local_files_only=True")
+
+        self._processor = AutoImageProcessor.from_pretrained(model_id, local_files_only=local_files_only)
+        self._model = AutoModel.from_pretrained(model_id, local_files_only=local_files_only)
 
         # Move to device and set precision
         self._model = self._model.to(self._device)
@@ -239,10 +261,14 @@ class MedSigLIPEmbedder:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _load_model(self) -> None:
-        """Load the SigLIP/MedSigLIP model."""
+        """Load the SigLIP/MedSigLIP model.
+        
+        Uses local_files_only=True when the model is already cached locally.
+        """
         if self._model is not None:
             return
 
+        import os
         import torch
         from transformers import AutoModel, AutoProcessor
 
@@ -257,8 +283,22 @@ class MedSigLIPEmbedder:
         logger.info(f"Loading MedSigLIP model on {self._device}")
 
         model_id = self.config.model_id
-        self._processor = AutoProcessor.from_pretrained(model_id)
-        self._model = AutoModel.from_pretrained(model_id)
+
+        # Check if model is cached locally
+        local_files_only = False
+        hf_home = os.environ.get("HF_HOME", os.environ.get(
+            "TRANSFORMERS_CACHE",
+            os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+        ))
+        model_cache_dir = os.path.join(hf_home, "hub", f"models--{model_id.replace('/', '--')}")
+        if os.path.isdir(model_cache_dir):
+            local_files_only = True
+            logger.info(f"MedSigLIP model cache found at {model_cache_dir}; loading with local_files_only=True")
+        if os.environ.get("TRANSFORMERS_OFFLINE", "0") == "1" or os.environ.get("HF_HUB_OFFLINE", "0") == "1":
+            local_files_only = True
+
+        self._processor = AutoProcessor.from_pretrained(model_id, local_files_only=local_files_only)
+        self._model = AutoModel.from_pretrained(model_id, local_files_only=local_files_only)
 
         # Move to device and set precision
         self._model = self._model.to(self._device)

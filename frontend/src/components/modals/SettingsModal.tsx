@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useCallback, useState } from "react";
+import React, { useEffect, useCallback, useState, useRef } from "react";
 import { Button } from "@/components/ui/Button";
 import { Toggle } from "@/components/ui/Toggle";
 import {
@@ -12,8 +12,20 @@ import {
   Server,
   Eye,
   RefreshCw,
+  Cpu,
+  Play,
+  Square,
+  CheckCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  startBatchEmbed,
+  getBatchEmbedStatus,
+  cancelBatchEmbed,
+  getActiveBatchEmbed,
+  type BatchEmbedProgress,
+} from "@/lib/api";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -47,11 +59,18 @@ const DEFAULT_API_SETTINGS: ApiSettings = {
 };
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const [activeTab, setActiveTab] = useState<"appearance" | "display" | "api">("appearance");
+  const [activeTab, setActiveTab] = useState<"appearance" | "display" | "api" | "embedding">("appearance");
   const [theme, setTheme] = useState<ThemeMode>("system");
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(DEFAULT_DISPLAY_SETTINGS);
   const [apiSettings, setApiSettings] = useState<ApiSettings>(DEFAULT_API_SETTINGS);
   const [isDirty, setIsDirty] = useState(false);
+
+  // Batch re-embed state
+  const [batchEmbedStatus, setBatchEmbedStatus] = useState<BatchEmbedProgress | null>(null);
+  const [batchEmbedTaskId, setBatchEmbedTaskId] = useState<string | null>(null);
+  const [batchEmbedError, setBatchEmbedError] = useState<string | null>(null);
+  const [isStartingBatchEmbed, setIsStartingBatchEmbed] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -149,6 +168,65 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   };
 
+  // Check for active batch embed on open
+  useEffect(() => {
+    if (!isOpen) return;
+    getActiveBatchEmbed().then((result) => {
+      if ("task_id" in result && (result as BatchEmbedProgress).task_id) {
+        const progress = result as BatchEmbedProgress;
+        setBatchEmbedTaskId(progress.task_id);
+        setBatchEmbedStatus(progress);
+      }
+    }).catch(() => {});
+  }, [isOpen]);
+
+  // Poll batch embed progress
+  useEffect(() => {
+    if (!batchEmbedTaskId) return;
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    const poll = async () => {
+      try {
+        const status = await getBatchEmbedStatus(batchEmbedTaskId);
+        setBatchEmbedStatus(status);
+        if (status.status === "completed" || status.status === "failed" || status.status === "cancelled") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    poll();
+    pollRef.current = setInterval(poll, 3000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [batchEmbedTaskId]);
+
+  const handleStartBatchEmbed = async () => {
+    setIsStartingBatchEmbed(true);
+    setBatchEmbedError(null);
+    try {
+      const result = await startBatchEmbed({ level: 0, force: true, concurrency: 1 });
+      setBatchEmbedTaskId(result.batch_task_id);
+    } catch (err) {
+      setBatchEmbedError(err instanceof Error ? err.message : "Failed to start batch embedding");
+    } finally {
+      setIsStartingBatchEmbed(false);
+    }
+  };
+
+  const handleCancelBatchEmbed = async () => {
+    if (!batchEmbedTaskId) return;
+    try {
+      await cancelBatchEmbed(batchEmbedTaskId);
+    } catch {
+      // ignore
+    }
+  };
+
   const handleReset = () => {
     setTheme("system");
     setDisplaySettings(DEFAULT_DISPLAY_SETTINGS);
@@ -168,6 +246,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     { id: "appearance" as const, label: "Appearance", icon: Sun },
     { id: "display" as const, label: "Display", icon: Eye },
     { id: "api" as const, label: "API", icon: Server },
+    { id: "embedding" as const, label: "Embedding", icon: Cpu },
   ];
 
   return (
@@ -328,6 +407,126 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <p className="mt-1 text-xs text-gray-500">
                   Maximum time to wait for API responses (5000-120000ms)
                 </p>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "embedding" && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-2">Force Re-Embed All Slides</h3>
+                <p className="text-xs text-gray-500 mb-4">
+                  Re-generate Path Foundation embeddings for all slides at Level 0 (full resolution).
+                  This uses the locally-cached model and does <strong>not</strong> download from HuggingFace.
+                  Suitable for overnight batch runs (~5-20 min per slide).
+                </p>
+
+                {/* Progress display */}
+                {batchEmbedStatus && batchEmbedStatus.status !== "idle" && (
+                  <div className="mb-4 p-4 rounded-lg border bg-gray-50">
+                    {/* Status header */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        {batchEmbedStatus.status === "running" && (
+                          <Cpu className="h-4 w-4 text-violet-600 animate-pulse" />
+                        )}
+                        {batchEmbedStatus.status === "completed" && (
+                          <CheckCircle className="h-4 w-4 text-green-600" />
+                        )}
+                        {(batchEmbedStatus.status === "failed" || batchEmbedStatus.status === "cancelled") && (
+                          <AlertTriangle className="h-4 w-4 text-amber-600" />
+                        )}
+                        <span className="text-sm font-medium text-gray-800 capitalize">
+                          {batchEmbedStatus.status}
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        {batchEmbedStatus.completed_slides}/{batchEmbedStatus.total_slides} slides
+                      </span>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden mb-2">
+                      <div
+                        className={cn(
+                          "h-full transition-all duration-500 rounded-full",
+                          batchEmbedStatus.status === "completed" ? "bg-green-500" :
+                          batchEmbedStatus.status === "failed" ? "bg-red-500" :
+                          batchEmbedStatus.status === "cancelled" ? "bg-amber-500" :
+                          "bg-violet-600"
+                        )}
+                        style={{ width: `${Math.max(batchEmbedStatus.progress, 1)}%` }}
+                      />
+                    </div>
+
+                    {/* Status message */}
+                    <p className="text-xs text-gray-600">{batchEmbedStatus.message}</p>
+
+                    {/* Elapsed time */}
+                    {batchEmbedStatus.elapsed_seconds > 0 && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        Elapsed: {Math.floor(batchEmbedStatus.elapsed_seconds / 60)}m {Math.floor(batchEmbedStatus.elapsed_seconds % 60)}s
+                      </p>
+                    )}
+
+                    {/* Summary when completed */}
+                    {batchEmbedStatus.status === "completed" && batchEmbedStatus.summary && (
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                        <div className="text-center p-2 bg-green-50 rounded">
+                          <div className="font-semibold text-green-700">{batchEmbedStatus.summary.succeeded}</div>
+                          <div className="text-green-600">Succeeded</div>
+                        </div>
+                        <div className="text-center p-2 bg-red-50 rounded">
+                          <div className="font-semibold text-red-700">{batchEmbedStatus.summary.failed}</div>
+                          <div className="text-red-600">Failed</div>
+                        </div>
+                        <div className="text-center p-2 bg-blue-50 rounded">
+                          <div className="font-semibold text-blue-700">{batchEmbedStatus.summary.total_patches?.toLocaleString()}</div>
+                          <div className="text-blue-600">Patches</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Error display */}
+                    {batchEmbedStatus.error && (
+                      <p className="text-xs text-red-600 mt-2">{batchEmbedStatus.error}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Error from starting */}
+                {batchEmbedError && (
+                  <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-xs text-red-700">{batchEmbedError}</p>
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div className="flex gap-2">
+                  {(!batchEmbedStatus || batchEmbedStatus.status === "completed" || batchEmbedStatus.status === "failed" || batchEmbedStatus.status === "cancelled") ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleStartBatchEmbed}
+                      disabled={isStartingBatchEmbed}
+                      isLoading={isStartingBatchEmbed}
+                      className="flex items-center gap-2"
+                    >
+                      <Play className="h-4 w-4" />
+                      Force Re-Embed All Slides
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleCancelBatchEmbed}
+                      className="flex items-center gap-2 text-red-600 hover:text-red-700"
+                    >
+                      <Square className="h-4 w-4" />
+                      Cancel
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           )}

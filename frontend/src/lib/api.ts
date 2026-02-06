@@ -2464,3 +2464,143 @@ export async function getVisualSearchStatus(): Promise<import("@/types").VisualS
     embeddingDim: backend.embedding_dim,
   };
 }
+
+// ====== Batch Re-Embed API ======
+
+export interface BatchEmbedProgress {
+  task_id: string;
+  status: "pending" | "running" | "completed" | "cancelled" | "failed";
+  level: number;
+  force: boolean;
+  concurrency: number;
+  progress: number;
+  current_slide_index: number;
+  current_slide_id: string;
+  total_slides: number;
+  completed_slides: number;
+  message: string;
+  error?: string;
+  elapsed_seconds: number;
+  cancel_requested: boolean;
+  // Present when completed
+  results?: Array<{
+    slide_id: string;
+    status: string;
+    num_patches: number;
+    processing_time_seconds: number;
+    error?: string;
+  }>;
+  summary?: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    skipped: number;
+    total_patches: number;
+    elapsed_seconds: number;
+  };
+}
+
+/**
+ * Start batch re-embedding of all (or specific) slides.
+ * Returns a batch_task_id to poll for progress.
+ */
+export async function startBatchEmbed(params: {
+  level?: number;
+  force?: boolean;
+  slideIds?: string[];
+  concurrency?: number;
+} = {}): Promise<{
+  batch_task_id: string;
+  status: string;
+  total: number;
+  message: string;
+}> {
+  return fetchApi<{
+    batch_task_id: string;
+    status: string;
+    total: number;
+    message: string;
+  }>(
+    "/api/embed-slides/batch",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        level: params.level ?? 0,
+        force: params.force ?? true,
+        slide_ids: params.slideIds ?? null,
+        concurrency: params.concurrency ?? 1,
+      }),
+    },
+    { timeoutMs: 30000 }
+  );
+}
+
+/**
+ * Get progress of a batch embedding task.
+ */
+export async function getBatchEmbedStatus(batchTaskId: string): Promise<BatchEmbedProgress> {
+  return fetchApi<BatchEmbedProgress>(
+    `/api/embed-slides/batch/status/${encodeURIComponent(batchTaskId)}`,
+    {},
+    { timeoutMs: 10000, skipRetry: true }
+  );
+}
+
+/**
+ * Cancel a running batch embedding task.
+ */
+export async function cancelBatchEmbed(batchTaskId: string): Promise<{ success: boolean; message: string }> {
+  return fetchApi<{ success: boolean; message: string }>(
+    `/api/embed-slides/batch/cancel/${encodeURIComponent(batchTaskId)}`,
+    { method: "POST" }
+  );
+}
+
+/**
+ * Get currently active batch embed task (if any).
+ */
+export async function getActiveBatchEmbed(): Promise<BatchEmbedProgress | { status: "idle"; message: string }> {
+  return fetchApi<BatchEmbedProgress | { status: "idle"; message: string }>(
+    "/api/embed-slides/batch/active",
+    {},
+    { timeoutMs: 10000, skipRetry: true }
+  );
+}
+
+/**
+ * Poll batch embedding until done. Calls onProgress for each update.
+ */
+export async function pollBatchEmbed(
+  batchTaskId: string,
+  onProgress?: (status: BatchEmbedProgress) => void,
+  pollIntervalMs: number = 3000,
+  maxWaitMs: number = 86400000 // 24 hours for overnight runs
+): Promise<BatchEmbedProgress> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const status = await getBatchEmbedStatus(batchTaskId);
+      if (onProgress) onProgress(status);
+
+      if (
+        status.status === "completed" ||
+        status.status === "failed" ||
+        status.status === "cancelled"
+      ) {
+        return status;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    } catch (error) {
+      console.warn("Batch embed polling error, retrying...", error);
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs * 2));
+    }
+  }
+
+  throw new AtlasApiError({
+    code: "TIMEOUT",
+    message: `Batch embedding did not complete within ${maxWaitMs / 3600000} hours`,
+    isTimeout: true,
+  });
+}

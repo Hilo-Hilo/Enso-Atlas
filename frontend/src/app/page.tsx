@@ -26,7 +26,7 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
-import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, fetchSimilarCases } from "@/lib/api";
+import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch } from "@/lib/api";
 import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
 import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse, VisualSearchResponse, SimilarCase, StructuredReport } from "@/types";
 import { cn } from "@/lib/utils";
@@ -198,11 +198,6 @@ export default function HomePage() {
   const [visualSearchError, setVisualSearchError] = useState<string | null>(null);
   const [visualSearchQuery, setVisualSearchQuery] = useState<{ slideId: string; patchIndex: number } | null>(null);
 
-  // Similar cases (FAISS slide-level search) state
-  const [similarCases, setSimilarCases] = useState<SimilarCase[]>([]);
-  const [isLoadingSimilarCases, setIsLoadingSimilarCases] = useState(false);
-  const [similarCasesError, setSimilarCasesError] = useState<string | null>(null);
-
   // Slide QC metrics state
   const [slideQCMetrics, setSlideQCMetrics] = useState<SlideQCMetrics | null>(null);
   const [selectedModels, setSelectedModels] = useState<string[]>(["platinum_sensitivity", "tumor_grade"]);
@@ -270,7 +265,49 @@ export default function HomePage() {
   const [agentReport, setAgentReport] = useState<StructuredReport | null>(null);
   const report = agentReport ?? generatedReport;
 
-
+  // Normalize agent workflow report (snake_case) to StructuredReport (camelCase)
+  const normalizeAgentReport = useCallback((raw: Record<string, unknown>): StructuredReport | null => {
+    if (!raw || typeof raw !== 'object') return null;
+    
+    // Extract predictions from snake_case format
+    const predictions = raw.predictions as Record<string, { model_name?: string; label?: string; score?: number; confidence?: number }> | undefined;
+    const primaryKey = predictions ? Object.keys(predictions)[0] : null;
+    const primary = primaryKey && predictions ? predictions[primaryKey] : null;
+    
+    // Extract evidence from snake_case format
+    const rawEvidence = raw.evidence as Array<{ patch_index?: number; attention_weight?: number; coordinates?: [number, number] }> | undefined;
+    const evidence = (rawEvidence || []).map((e, i) => ({
+      patchId: `patch-${e.patch_index ?? i}`,
+      coordsLevel0: (e.coordinates || [0, 0]) as [number, number],
+      morphologyDescription: `Patch ${e.patch_index ?? i} with attention ${((e.attention_weight || 0) * 100).toFixed(1)}%`,
+      whyThisPatchMatters: `High attention region (${((e.attention_weight || 0) * 100).toFixed(1)}% weight)`,
+    }));
+    
+    // Extract similar cases from snake_case format
+    const rawSimilar = raw.similar_cases as Array<{ slide_id?: string; similarity_score?: number; label?: string | null }> | undefined;
+    const similarExamples = (rawSimilar || []).map((s, i) => ({
+      exampleId: s.slide_id || `case-${i}`,
+      label: s.label || 'Unknown',
+      distance: 1 - (s.similarity_score || 0),
+    }));
+    
+    return {
+      caseId: (raw.case_id as string) || 'Unknown',
+      task: (raw.task as string) || 'Multi-model slide analysis',
+      generatedAt: (raw.generated_at as string) || new Date().toISOString(),
+      modelOutput: {
+        label: primary?.label || 'Unknown',
+        score: primary?.score || 0,
+        confidence: primary?.confidence || 0,
+      },
+      evidence,
+      similarExamples,
+      limitations: (raw.limitations as string[]) || ['Research model - not for clinical use'],
+      suggestedNextSteps: [],
+      safetyStatement: (raw.safety_statement as string) || 'This analysis is for research and decision support only.',
+      summary: (raw.reasoning_summary as string) || 'Analysis complete.',
+    };
+  }, []);
 
   // Toast notifications for user feedback
   const toast = useToast();
@@ -487,9 +524,6 @@ export default function HomePage() {
       // Clear multi-model results
       setMultiModelResult(null);
       setMultiModelError(null);
-      // Clear similar cases
-      setSimilarCases([]);
-      setSimilarCasesError(null);
 
       // Fetch QC metrics for the selected slide
       try {
@@ -801,22 +835,6 @@ export default function HomePage() {
       setEmbeddingProgress(null);
     }
   }, [selectedSlide, selectedModels, resolutionLevel, forceReembed, toast]);
-
-  // Fetch similar cases from the dedicated FAISS endpoint
-  const handleFetchSimilarCases = useCallback(async (slideId: string) => {
-    setIsLoadingSimilarCases(true);
-    setSimilarCasesError(null);
-    try {
-      const cases = await fetchSimilarCases(slideId, 5);
-      setSimilarCases(cases);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to fetch similar cases";
-      setSimilarCasesError(msg);
-    } finally {
-      setIsLoadingSimilarCases(false);
-    }
-  }, []);
-
   // Handle analyze button
   const handleAnalyze = useCallback(async () => {
     if (!selectedSlide) return;
@@ -825,9 +843,6 @@ export default function HomePage() {
     setMobilePanelTab("results");
     
     toast.info("Starting Analysis", "Running TransMIL prediction...");
-
-    // Fetch similar cases in parallel (fast, uses dedicated FAISS endpoint)
-    handleFetchSimilarCases(selectedSlide.id);
 
     const startTime = Date.now();
     const result = await analyze({
@@ -853,7 +868,7 @@ export default function HomePage() {
 
     // Also run multi-model analysis
     handleMultiModelAnalyze();
-  }, [selectedSlide, analyze, toast, handleMultiModelAnalyze, handleFetchSimilarCases]);
+  }, [selectedSlide, analyze, toast, handleMultiModelAnalyze]);
 
   // Retry multi-model analysis
   const handleRetryMultiModel = useCallback(() => {
@@ -1360,17 +1375,17 @@ export default function HomePage() {
         selectedPatchId={selectedPatchId}
       />
 
-      {/* Similar Cases - shows visual search results when available, then FAISS similar cases, then analysis results */}
+      {/* Similar Cases - shows visual search results when available, otherwise analysis results */}
       <div data-demo="similar-cases">
         <SimilarCasesPanel
-          cases={visualSearchResults.length > 0 ? visualSearchResults : (similarCases.length > 0 ? similarCases : (analysisResult?.similarCases ?? []))}
-          isLoading={isLoadingSimilarCases || isSearchingVisual}
+          cases={visualSearchResults.length > 0 ? visualSearchResults : (analysisResult?.similarCases ?? [])}
+          isLoading={isAnalyzing || isSearchingVisual}
           onCaseClick={handleCaseClick}
-          error={visualSearchError || similarCasesError || (!isAnalyzing && error && !analysisResult ? error : null)}
+          error={visualSearchError || (!isAnalyzing && error && !analysisResult ? error : null)}
           onRetry={visualSearchResults.length > 0 ? () => {
             setVisualSearchResults([]);
             setVisualSearchError(null);
-          } : similarCasesError && selectedSlide ? () => handleFetchSimilarCases(selectedSlide.id) : retryAnalysis}
+          } : retryAnalysis}
         />
         {visualSearchResults.length > 0 && (
           <div className="mt-2 flex items-center justify-between px-2">
@@ -1411,12 +1426,12 @@ export default function HomePage() {
         <AIAssistantPanel
           slideId={selectedSlide?.id ?? null}
           clinicalContext=""
-          onAnalysisComplete={(normalizedReport) => {
-            // AIAssistantPanel already normalizes the report, just store it
-            setAgentReport(normalizedReport);
-          }}
-          onHighlightRegion={(x, y, _weight) => {
-            setTargetCoordinates({ x, y, level: 0, width: 224, height: 224 });
+          onAnalysisComplete={(rawAgentReport) => {
+            // Normalize and hydrate the main Clinical Report panel with the agent-generated report
+            const normalized = normalizeAgentReport(rawAgentReport);
+            if (normalized) {
+              setAgentReport(normalized);
+            }
           }}
         />
       </div>

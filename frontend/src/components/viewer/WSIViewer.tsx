@@ -74,7 +74,7 @@ export function WSIViewer({
 }: WSIViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
-  const heatmapOverlayRef = useRef<HTMLImageElement | null>(null);
+  const heatmapOverlayRef = useRef<HTMLDivElement | null>(null);
   
   // Store callbacks in refs so they don't trigger viewer recreation
   const onRegionClickRef = useRef(onRegionClick);
@@ -94,12 +94,6 @@ export function WSIViewer({
   const [heatmapLoaded, setHeatmapLoaded] = useState(false);
   const [heatmapError, setHeatmapError] = useState(false);
   const heatmapImageUrl = heatmap?.imageUrl;
-  
-  // Store state in refs for use in overlay callbacks (avoids stale closures)
-  const showHeatmapRef = useRef(showHeatmap);
-  useEffect(() => { showHeatmapRef.current = showHeatmap; }, [showHeatmap]);
-  const heatmapOpacityRef = useRef(heatmapOpacity);
-  useEffect(() => { heatmapOpacityRef.current = heatmapOpacity; }, [heatmapOpacity]);
   
   // Store activeTool in ref for click handler
   const activeToolRef = useRef(activeTool);
@@ -257,10 +251,6 @@ export function WSIViewer({
     const viewer = viewerRef.current;
     if (!viewer || !isReady || !heatmapImageUrl) return;
 
-    // Reset heatmap loaded state when URL changes
-    setHeatmapLoaded(false);
-    setHeatmapError(false);
-
     // Remove existing overlay if present
     if (heatmapOverlayRef.current) {
       try {
@@ -270,35 +260,45 @@ export function WSIViewer({
       }
     }
 
-    // Create image element directly as the overlay (no container div)
-    // This allows OpenSeadragon to properly size it to match the location Rect
+    // Create overlay container
+    const overlayDiv = document.createElement("div");
+    overlayDiv.style.position = "relative";
+    overlayDiv.style.width = "100%";
+    overlayDiv.style.height = "100%";
+    overlayDiv.style.pointerEvents = "none";
+    overlayDiv.className = "heatmap-overlay-container";
+
+    // Create image inside container
     const img = document.createElement("img");
-    img.src = heatmapImageUrl;
+    // Set styles first
+    img.style.position = "absolute";
+    img.style.top = "0";
+    img.style.left = "0";
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.objectFit = "fill";
-    img.style.pointerEvents = "none";
+    img.style.opacity = "0";
     img.style.transition = "opacity 0.3s ease";
-    img.style.imageRendering = "pixelated"; // Sharp square tiles
-    img.className = "heatmap-overlay-image";
-
-    // Set initial opacity based on current state (use refs to avoid stale closures)
-    img.style.opacity = showHeatmapRef.current ? String(heatmapOpacityRef.current) : "0";
-
+    img.style.pointerEvents = "none";
+    img.style.imageRendering = "pixelated"; 
+    
     img.onload = () => {
+      console.log("Heatmap image loaded:", heatmapImageUrl);
       setHeatmapLoaded(true);
       setHeatmapError(false);
-      // Update opacity immediately on load using refs for current values
-      img.style.opacity = showHeatmapRef.current ? String(heatmapOpacityRef.current) : "0";
     };
-
-    img.onerror = () => {
+    
+    img.onerror = (e) => {
+      console.error("Failed to load heatmap image:", heatmapImageUrl, e);
       setHeatmapError(true);
       setHeatmapLoaded(false);
-      console.error("Failed to load heatmap image:", heatmapImageUrl);
     };
 
-    heatmapOverlayRef.current = img;
+    // Set src LAST to ensure handlers catch the event
+    img.src = heatmapImageUrl;
+
+    overlayDiv.appendChild(img);
+    heatmapOverlayRef.current = overlayDiv;
 
     // Add overlay to cover the full slide image using its actual bounds
     // This ensures the heatmap aligns correctly regardless of slide aspect ratio
@@ -306,16 +306,16 @@ export function WSIViewer({
     if (tiledImage) {
       // Get the bounds of the tiled image in viewport coordinates
       const bounds = tiledImage.getBounds(true);
-
+      
       viewer.addOverlay({
-        element: img,
+        element: overlayDiv,
         location: bounds,
       });
     } else {
       // Fallback to 1x1 rect if no tiled image (should not happen when isReady is true)
       console.warn("No tiled image found, using default 1x1 bounds");
       viewer.addOverlay({
-        element: img,
+        element: overlayDiv,
         location: new OpenSeadragon.Rect(0, 0, 1, 1),
       });
     }
@@ -329,14 +329,15 @@ export function WSIViewer({
         }
       }
     };
-  }, [heatmapImageUrl, isReady]); // Only recreate overlay on URL/readiness change; opacity handled separately
+  }, [heatmapImageUrl, isReady]); // Only recreate on imageUrl change
 
   // Update heatmap opacity separately (doesn't recreate overlay)
   useEffect(() => {
     if (heatmapOverlayRef.current && heatmapLoaded) {
-      // heatmapOverlayRef.current is now the img element directly
-      const img = heatmapOverlayRef.current as HTMLImageElement;
-      img.style.opacity = showHeatmap ? String(heatmapOpacity) : "0";
+      const img = heatmapOverlayRef.current.querySelector("img");
+      if (img) {
+        img.style.opacity = showHeatmap ? String(heatmapOpacity) : "0";
+      }
     }
   }, [showHeatmap, heatmapOpacity, heatmapLoaded]);
 

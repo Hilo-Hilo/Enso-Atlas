@@ -4159,6 +4159,45 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         
         # For level 1 without async, run inline (original behavior)
         return _run_embedding_inline(slide_id, level, slide_path, emb_path, coord_path)
+
+    def _resolve_pathfoundation_local() -> Optional[str]:
+        """Resolve Path Foundation TF saved-model path from local cache only.
+        
+        Searches HF_HOME / TRANSFORMERS_CACHE / default cache for the
+        model directory. Returns the snapshot path or None if not found.
+        NEVER downloads anything.
+        """
+        import os, glob
+        hf_home = os.environ.get("HF_HOME", os.environ.get(
+            "TRANSFORMERS_CACHE",
+            os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+        ))
+        model_base = os.path.join(hf_home, "hub", "models--google--path-foundation", "snapshots")
+        # Also check /root/.cache (Docker) and the mounted cache volume
+        candidates = [
+            model_base,
+            "/root/.cache/huggingface/hub/models--google--path-foundation/snapshots",
+            "/app/cache/huggingface/hub/models--google--path-foundation/snapshots",
+        ]
+        for base in candidates:
+            if os.path.isdir(base):
+                # Find the first (or latest) snapshot directory
+                snaps = sorted(glob.glob(os.path.join(base, "*")))
+                for snap in reversed(snaps):
+                    if os.path.isdir(snap) and os.path.exists(os.path.join(snap, "saved_model.pb")):
+                        logger.info(f"Path Foundation TF model found at: {snap}")
+                        return snap
+                    # Also accept if the dir itself has model files
+                    if os.path.isdir(snap):
+                        logger.info(f"Path Foundation snapshot dir found at: {snap}")
+                        return snap
+        # Legacy hardcoded path as last resort
+        legacy = os.path.expanduser(
+            "~/.cache/huggingface/hub/models--google--path-foundation/snapshots/b50f2be6f055ea6ea8719f467ab44b38f37e2142"
+        )
+        if os.path.exists(legacy):
+            return legacy
+        return None
     
     def _run_embedding_task(
         task_id: str,
@@ -4260,20 +4299,19 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 message=f"Extracted {len(patches)} patches. Loading Path Foundation model..."
             )
             
-            # Generate embeddings
+            # Generate embeddings using locally-cached Path Foundation model.
+            # NEVER downloads from HuggingFace – uses only local files.
             import os
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
             import tensorflow as tf
             
-            saved_model_path = os.path.expanduser(
-                "~/.cache/huggingface/hub/models--google--path-foundation/snapshots/b50f2be6f055ea6ea8719f467ab44b38f37e2142"
-            )
+            saved_model_path = _resolve_pathfoundation_local()
             
-            if not os.path.exists(saved_model_path):
+            if not saved_model_path or not os.path.exists(saved_model_path):
                 task_manager.update_task(task_id,
                     status=TaskStatus.FAILED,
-                    error="Path Foundation model not found"
+                    error="Path Foundation model not found locally. Pre-download it before running embedding."
                 )
                 return
             
@@ -4389,9 +4427,9 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
             import tensorflow as tf
             
-            saved_model_path = os.path.expanduser(
-                "~/.cache/huggingface/hub/models--google--path-foundation/snapshots/b50f2be6f055ea6ea8719f467ab44b38f37e2142"
-            )
+            saved_model_path = _resolve_pathfoundation_local()
+            if not saved_model_path:
+                raise HTTPException(status_code=500, detail="Path Foundation model not found locally. Pre-download it before running embedding.")
             
             model = tf.saved_model.load(saved_model_path)
             infer = model.signatures["serving_default"]
@@ -4467,6 +4505,287 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             "tasks": sorted(tasks, key=lambda t: t.get("elapsed_seconds", 0), reverse=True),
             "total": len(tasks)
         }
+
+    # ====== Batch Re-Embed Endpoints ======
+
+    from .batch_embed_tasks import batch_embed_manager, BatchEmbedStatus, BatchEmbedSlideResult
+
+    class BatchEmbedRequest(BaseModel):
+        """Request for batch re-embedding of multiple slides."""
+        level: int = Field(default=0, ge=0, le=1, description="Resolution level (0=full res, 1=downsampled)")
+        force: bool = Field(default=True, description="Force re-embedding even if cached")
+        slide_ids: Optional[List[str]] = Field(default=None, description="Specific slide IDs (None = all slides)")
+        concurrency: int = Field(default=1, ge=1, le=4, description="Concurrent embedding workers (1-4)")
+
+    @app.post("/api/embed-slides/batch")
+    async def start_batch_embed(request: BatchEmbedRequest, background_tasks: BackgroundTasks):
+        """
+        Start batch re-embedding of slides.
+
+        If slide_ids is omitted, all available slides are re-embedded.
+        Returns a batch_task_id for progress polling.
+
+        Designed for:
+        - "Force Re-Embed" button in the frontend (all slides)
+        - Overnight batch runs on DGX (level 0, sequential)
+        """
+        # Check if there's already an active batch embed task
+        active = batch_embed_manager.get_active_task()
+        if active:
+            return {
+                "batch_task_id": active.task_id,
+                "status": active.status.value,
+                "message": f"Batch embedding already in progress ({active.completed_slides}/{active.total_slides} done)",
+                "total": active.total_slides,
+            }
+
+        # Determine slide list
+        target_slides = request.slide_ids
+        if target_slides is None:
+            target_slides = list(available_slides)  # All slides with existing embeddings
+
+        if not target_slides:
+            raise HTTPException(status_code=400, detail="No slides to embed")
+
+        task = batch_embed_manager.create_task(
+            slide_ids=target_slides,
+            level=request.level,
+            force=request.force,
+            concurrency=request.concurrency,
+        )
+
+        def run_batch_embed():
+            _run_batch_embed_background(task.task_id)
+
+        background_tasks.add_task(run_batch_embed)
+
+        return {
+            "batch_task_id": task.task_id,
+            "status": "started",
+            "total": len(target_slides),
+            "message": f"Batch embedding started for {len(target_slides)} slides at level {request.level}.",
+        }
+
+    def _run_batch_embed_background(task_id: str):
+        """Background worker: sequentially re-embed each slide."""
+        import time as _time
+
+        task = batch_embed_manager.get_task(task_id)
+        if not task:
+            return
+
+        batch_embed_manager.update_task(task_id,
+            status=BatchEmbedStatus.RUNNING,
+            started_at=_time.time(),
+            message="Starting batch embedding...",
+        )
+
+        total = task.total_slides
+        for idx, slide_id in enumerate(task.slide_ids):
+            # Check cancellation
+            if batch_embed_manager.is_cancelled(task_id):
+                batch_embed_manager.update_task(task_id,
+                    status=BatchEmbedStatus.CANCELLED,
+                    message=f"Cancelled after {idx}/{total} slides",
+                    completed_at=_time.time(),
+                )
+                return
+
+            batch_embed_manager.update_task(task_id,
+                current_slide_index=idx + 1,
+                current_slide_id=slide_id,
+                progress=(idx / total) * 100,
+                message=f"Embedding slide {idx+1}/{total}: {slide_id[:25]}...",
+            )
+
+            # Setup paths
+            level = task.level
+            level_dir = embeddings_dir / f"level{level}"
+            level_dir.mkdir(parents=True, exist_ok=True)
+            emb_path = level_dir / f"{slide_id}.npy"
+            coord_path = level_dir / f"{slide_id}_coords.npy"
+
+            # Skip if exists and not forcing
+            if emb_path.exists() and coord_path.exists() and not task.force:
+                try:
+                    emb = np.load(emb_path)
+                    batch_embed_manager.add_result(task_id, BatchEmbedSlideResult(
+                        slide_id=slide_id,
+                        status="skipped",
+                        num_patches=len(emb),
+                    ))
+                except Exception:
+                    batch_embed_manager.add_result(task_id, BatchEmbedSlideResult(
+                        slide_id=slide_id, status="skipped",
+                    ))
+                continue
+
+            # Resolve slide file
+            slide_path = resolve_slide_path(slide_id)
+            if not slide_path:
+                batch_embed_manager.add_result(task_id, BatchEmbedSlideResult(
+                    slide_id=slide_id,
+                    status="failed",
+                    error=f"Slide file not found for {slide_id}",
+                ))
+                continue
+
+            # Run embedding for this slide
+            slide_start = _time.time()
+            try:
+                import openslide
+
+                slide = openslide.OpenSlide(str(slide_path))
+                actual_level = min(level, slide.level_count - 1)
+                level_dims = slide.level_dimensions[actual_level]
+                downsample = slide.level_downsamples[actual_level]
+
+                width, height = level_dims
+                patch_size = 224
+                stride = 224
+                max_patches = 50000 if level == 0 else 20000
+
+                patches = []
+                coords = []
+
+                for y in range(0, height - patch_size, stride):
+                    for x in range(0, width - patch_size, stride):
+                        x0 = int(x * downsample)
+                        y0 = int(y * downsample)
+
+                        patch = slide.read_region((x0, y0), actual_level, (patch_size, patch_size))
+                        patch = patch.convert("RGB")
+
+                        patch_array = np.array(patch)
+                        mean_val = patch_array.mean()
+                        std_val = patch_array.std()
+
+                        if mean_val < 245 and std_val > 10:
+                            patches.append(patch_array)
+                            coords.append([x0, y0])
+
+                        if len(patches) >= max_patches:
+                            break
+                    if len(patches) >= max_patches:
+                        break
+
+                slide.close()
+
+                if len(patches) == 0:
+                    batch_embed_manager.add_result(task_id, BatchEmbedSlideResult(
+                        slide_id=slide_id,
+                        status="failed",
+                        error="No tissue patches found",
+                    ))
+                    continue
+
+                # Load TF model (reuse across slides via closure)
+                import os
+                os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+                import tensorflow as tf
+
+                saved_model_path = _resolve_pathfoundation_local()
+                if not saved_model_path:
+                    batch_embed_manager.add_result(task_id, BatchEmbedSlideResult(
+                        slide_id=slide_id,
+                        status="failed",
+                        error="Path Foundation model not found locally",
+                    ))
+                    continue
+
+                model = tf.saved_model.load(saved_model_path)
+                infer = model.signatures["serving_default"]
+
+                batch_size = 64
+                all_embeddings = []
+
+                for i in range(0, len(patches), batch_size):
+                    batch = patches[i:i + batch_size]
+                    batch_array = np.array(batch, dtype=np.float32) / 255.0
+                    batch_tensor = tf.constant(batch_array)
+                    result = infer(inputs=batch_tensor)
+                    embs = result["output_0"].numpy()
+                    all_embeddings.append(embs)
+
+                    # Check cancellation mid-slide
+                    if batch_embed_manager.is_cancelled(task_id):
+                        batch_embed_manager.update_task(task_id,
+                            status=BatchEmbedStatus.CANCELLED,
+                            message=f"Cancelled during slide {slide_id}",
+                            completed_at=_time.time(),
+                        )
+                        return
+
+                embeddings = np.vstack(all_embeddings).astype(np.float32)
+                coords_array = np.array(coords)
+
+                np.save(emb_path, embeddings)
+                np.save(coord_path, coords_array)
+
+                elapsed = _time.time() - slide_start
+                batch_embed_manager.add_result(task_id, BatchEmbedSlideResult(
+                    slide_id=slide_id,
+                    status="completed",
+                    num_patches=len(patches),
+                    processing_time_seconds=elapsed,
+                ))
+
+                logger.info(f"Batch embed: {slide_id} level {level} -> {len(patches)} patches in {elapsed:.1f}s")
+
+            except Exception as e:
+                logger.error(f"Batch embed failed for {slide_id}: {e}")
+                batch_embed_manager.add_result(task_id, BatchEmbedSlideResult(
+                    slide_id=slide_id,
+                    status="failed",
+                    error=str(e),
+                    processing_time_seconds=_time.time() - slide_start,
+                ))
+
+        # Complete
+        batch_embed_manager.update_task(task_id,
+            status=BatchEmbedStatus.COMPLETED,
+            progress=100,
+            message=f"Completed batch embedding of {total} slides",
+            completed_at=_time.time(),
+        )
+        logger.info(f"Batch embed {task_id} completed: {total} slides")
+
+    @app.get("/api/embed-slides/batch/status/{batch_task_id}")
+    async def get_batch_embed_status(batch_task_id: str):
+        """
+        Get progress of a batch embedding task.
+
+        Returns:
+        - completed/total/current slide
+        - progress percentage
+        - Per-slide results (when completed)
+        """
+        task = batch_embed_manager.get_task(batch_task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Batch embed task {batch_task_id} not found")
+
+        if task.status in (BatchEmbedStatus.COMPLETED, BatchEmbedStatus.CANCELLED, BatchEmbedStatus.FAILED):
+            return task.to_full_dict()
+        return task.to_dict()
+
+    @app.post("/api/embed-slides/batch/cancel/{batch_task_id}")
+    async def cancel_batch_embed(batch_task_id: str):
+        """Cancel a running batch embedding task."""
+        task = batch_embed_manager.get_task(batch_task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Batch embed task {batch_task_id} not found")
+        if task.status != BatchEmbedStatus.RUNNING:
+            raise HTTPException(status_code=400, detail=f"Cannot cancel task with status {task.status.value}")
+        batch_embed_manager.request_cancel(batch_task_id)
+        return {"success": True, "message": "Cancellation requested"}
+
+    @app.get("/api/embed-slides/batch/active")
+    async def get_active_batch_embed():
+        """Get the currently active batch embed task, if any."""
+        active = batch_embed_manager.get_active_task()
+        if active:
+            return active.to_dict()
+        return {"status": "idle", "message": "No batch embedding in progress"}
 
     @app.post("/api/analyze-multi", response_model=MultiModelResponse)
     async def analyze_slide_multi(request: MultiModelRequest):

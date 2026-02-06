@@ -112,7 +112,7 @@ class EvidenceGenerator:
 
         # Apply Gaussian blur for smooth interpolation (reduces blocky patch appearance)
         if smooth:
-            # Ensure kernel size is odd
+            # Ensure kernel size is odd (kept for API compatibility)
             blur_kernel = blur_kernel if blur_kernel % 2 == 1 else blur_kernel + 1
             # Approximate OpenCV kernel-size blur with a Gaussian sigma.
             sigma = blur_kernel / 4.0
