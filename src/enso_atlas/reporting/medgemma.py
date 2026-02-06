@@ -64,8 +64,8 @@ class ReportingConfig:
     max_evidence_patches: int = 4  # Reduced for shorter prompts
     max_similar_cases: int = 0  # Skip similar cases to reduce prompt size
     max_input_tokens: int = 512  # Simplified prompt is much shorter
-    max_output_tokens: int = 512  # Allow enough tokens for JSON response
-    max_generation_time_s: float = 75.0  # Must be less than thread timeout (90s) to allow graceful stop
+    max_output_tokens: int = 768  # Allow enough tokens for rich JSON response
+    max_generation_time_s: float = 120.0  # CPU inference needs more time
     temperature: float = 0.1  # Lower temp for more predictable JSON
     top_p: float = 0.9
 
@@ -140,8 +140,10 @@ class MedGemmaReporter:
             from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor
 
             # Determine device
-            # Force CPU to avoid CUDA driver issues on Blackwell GPUs
-            use_cpu = False  # Set to False to re-enable CUDA when driver is updated
+            # Force CPU to avoid CUDA compatibility issues on Blackwell GPUs (sm_121)
+            # PyTorch in the container doesn't support sm_121 arch, causing hangs.
+            # CPU inference is reliable: 4B model in bfloat16 uses ~8GB of 128GB RAM.
+            use_cpu = True  # Set to False to re-enable CUDA when PyTorch adds sm_121 support
             if not use_cpu and torch.cuda.is_available():
                 self._device = torch.device("cuda")
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -166,9 +168,25 @@ class MedGemmaReporter:
                 self._processor = None
 
             # Load model with appropriate precision
+            # Use bfloat16 on CPU (supported on modern ARM CPUs) for ~8GB memory usage
+            # Fall back to float32 if bfloat16 fails (e.g., older ARM without BF16 support)
+            if self._device.type == "cuda":
+                dtype = torch.bfloat16
+                device_map = "auto"
+            else:
+                # Try bfloat16 on CPU first (works on modern ARM and x86 with AVX-512)
+                try:
+                    _test = torch.tensor([1.0], dtype=torch.bfloat16)
+                    dtype = torch.bfloat16
+                    logger.info("CPU supports bfloat16, using bfloat16 for model (~8GB)")
+                except Exception:
+                    dtype = torch.float32
+                    logger.info("CPU does not support bfloat16, falling back to float32 (~16GB)")
+                device_map = None
+
             model_kwargs = {
-                "torch_dtype": torch.bfloat16 if self._device.type == "cuda" else torch.float32,
-                "device_map": "auto" if self._device.type == "cuda" else None,
+                "torch_dtype": dtype,
+                "device_map": device_map,
                 "low_cpu_mem_usage": True,
             }
             try:
@@ -176,7 +194,9 @@ class MedGemmaReporter:
                     model_id,
                     **model_kwargs,
                 )
-            except TypeError:
+            except (TypeError, RuntimeError) as load_err:
+                logger.warning(f"Model load with bfloat16 failed ({load_err}), retrying with float32")
+                model_kwargs["torch_dtype"] = torch.float32
                 model_kwargs.pop("low_cpu_mem_usage", None)
                 self._model = AutoModelForCausalLM.from_pretrained(
                     model_id,

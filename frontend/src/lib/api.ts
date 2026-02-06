@@ -581,7 +581,7 @@ export async function generateReport(
       method: "POST",
       body: JSON.stringify({ slide_id: request.slideId }),
     },
-    { timeoutMs: 90000 } // 90 second timeout for report generation
+    { timeoutMs: 210000 } // 210 second timeout for CPU-based report generation
   );
 
   // Transform backend response to frontend StructuredReport format
@@ -2059,7 +2059,7 @@ export async function generateReportWithProgress(
   const taskId = asyncResponse.task_id;
   
   // Poll for completion
-  const maxWaitMs = 150000; // 2.5 minute max wait (backend timeout is 90s + processing)
+  const maxWaitMs = 210000; // 3.5 minute max wait (CPU inference can take 120s+)
   const pollIntervalMs = 2000; // Poll every 2 seconds
   const startTime = Date.now();
   let lastProgress = 0;

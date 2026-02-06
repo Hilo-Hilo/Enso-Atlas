@@ -651,11 +651,11 @@ def create_app(
         # This runs a test inference to ensure CUDA kernels are loaded
         if reporter is not None:
             try:
-                logger.info("Starting MedGemma warmup (this may take ~30s on first load)...")
+                logger.info("Starting MedGemma warmup (this may take ~60-90s on CPU)...")
                 warmup_start = time.time()
                 await asyncio.wait_for(
                     asyncio.to_thread(reporter._warmup_inference),
-                    timeout=30.0,
+                    timeout=90.0,
                 )
                 warmup_duration = time.time() - warmup_start
                 logger.info(f"MedGemma reporter warmed up successfully in {warmup_duration:.1f}s")
@@ -2472,8 +2472,7 @@ should incorporate all available clinical, pathological, and molecular data."""
                     heartbeat.start()
 
                     # Use a thread with timeout to prevent indefinite blocking
-                    # Cap at 90s — if MedGemma hasn't finished by then, it's likely hung
-                    gen_timeout = min(90.0, float(max_time) + 10.0) if max_time else 90.0
+                    gen_timeout = float(max_time) + 60.0 if max_time else 180.0
                     gen_result = [None]
                     gen_error = [None]
 
