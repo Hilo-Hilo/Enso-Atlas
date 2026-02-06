@@ -56,8 +56,8 @@ export function PredictionPanel({
 }: PredictionPanelProps) {
   // Project-aware labels (must be before any returns per Rules of Hooks)
   const { currentProject } = useProject();
-  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Responder";
-  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Non-Responder";
+  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Positive";
+  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Negative";
 
   // Show error state with retry
   if (error && !isLoading) {
@@ -259,8 +259,8 @@ export function PredictionPanel({
               </div>
               <p className="text-xs text-gray-600 leading-relaxed">
                 {isResponder
-                  ? "Model predicts likely response to bevacizumab treatment based on histopathological features."
-                  : "Model predicts unlikely response to bevacizumab treatment. Consider alternative therapies."}
+                  ? `Model predicts ${positiveLabel.toLowerCase()} for ${currentProject.prediction_target || "treatment response"} based on histopathological features.`
+                  : `Model predicts ${negativeLabel.toLowerCase()} for ${currentProject.prediction_target || "treatment response"}. Consider alternative therapies.`}
               </p>
             </div>
           </div>

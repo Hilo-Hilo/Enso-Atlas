@@ -56,8 +56,8 @@ export function BatchAnalysisPanel({
 }: BatchAnalysisPanelProps) {
   // Project-aware labels
   const { currentProject } = useProject();
-  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Responder";
-  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Non-Responder";
+  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Positive";
+  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Negative";
 
   // Slide selection state
   const [slides, setSlides] = useState<SlideInfo[]>([]);
@@ -255,10 +255,16 @@ export function BatchAnalysisPanel({
         filtered = filtered.filter((r) => r.requiresReview);
         break;
       case "responders":
-        filtered = filtered.filter((r) => r.prediction === "RESPONDER");
+        filtered = filtered.filter((r) => 
+          r.prediction === "RESPONDER" || 
+          r.prediction.toUpperCase() === positiveLabel.toUpperCase()
+        );
         break;
       case "non-responders":
-        filtered = filtered.filter((r) => r.prediction === "NON-RESPONDER");
+        filtered = filtered.filter((r) => 
+          r.prediction === "NON-RESPONDER" || 
+          r.prediction.toUpperCase() === negativeLabel.toUpperCase()
+        );
         break;
       case "errors":
         filtered = filtered.filter((r) => r.error);
@@ -606,6 +612,7 @@ export function BatchAnalysisPanel({
                       key={result.slideId}
                       result={result}
                       onClick={() => onSlideSelect?.(result.slideId)}
+                      positiveClass={currentProject.positive_class}
                     />
                   ))}
                 </tbody>
@@ -694,10 +701,14 @@ function SortableHeader({
 function ResultRow({
   result,
   onClick,
+  positiveClass,
 }: {
   result: BatchAnalysisResult;
   onClick: () => void;
+  positiveClass?: string;
 }) {
+  const isPositive = result.prediction === "RESPONDER" || 
+    (positiveClass && result.prediction.toUpperCase() === positiveClass.toUpperCase());
   const getUncertaintyBadge = () => {
     switch (result.uncertaintyLevel) {
       case "high":
@@ -760,10 +771,10 @@ function ResultRow({
       </td>
       <td className="px-2 py-2">
         <Badge
-          variant={result.prediction === "RESPONDER" ? "success" : "danger"}
+          variant={isPositive ? "success" : "danger"}
           size="sm"
         >
-          {result.prediction === "RESPONDER" ? "R" : "NR"}
+          {isPositive ? "+" : "−"}
         </Badge>
       </td>
       <td className="px-2 py-2">

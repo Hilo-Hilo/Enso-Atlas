@@ -476,9 +476,9 @@ export function ReportPanel({
                         {example.label && (
                           <Badge
                             variant={
-                              example.label.toLowerCase().includes("responder")
+                              example.label.toLowerCase().includes("responder") || example.label.toLowerCase() === "sensitive"
                                 ? "success"
-                                : example.label.toLowerCase().includes("non")
+                                : example.label.toLowerCase().includes("non") || example.label.toLowerCase() === "resistant"
                                 ? "danger"
                                 : "default"
                             }

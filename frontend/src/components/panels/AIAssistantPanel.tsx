@@ -314,19 +314,21 @@ function WorkflowStep({
           {/* Predictions */}
           {predictions ? (
             <div className="grid grid-cols-2 gap-2">
-              {Object.entries(predictions).map(([id, pred]) => (
-                <div key={id} className="bg-white rounded p-2 border">
-                  <div className="font-medium text-xs truncate">{pred.model_name}</div>
-                  <div className={cn(
-                    "text-sm font-semibold",
-                    pred.label === "responder" || pred.label === "positive" 
-                      ? "text-green-600" 
-                      : "text-orange-600"
-                  )}>
-                    {pred.label} ({(pred.score * 100).toFixed(0)}%)
+              {Object.entries(predictions).map(([id, pred]) => {
+                const isPos = pred.label === "responder" || pred.label === "positive" ||
+                  pred.label === "sensitive" || pred.label.toLowerCase().includes("sensitive");
+                return (
+                  <div key={id} className="bg-white rounded p-2 border">
+                    <div className="font-medium text-xs truncate">{pred.model_name}</div>
+                    <div className={cn(
+                      "text-sm font-semibold",
+                      isPos ? "text-green-600" : "text-orange-600"
+                    )}>
+                      {pred.label} ({(pred.score * 100).toFixed(0)}%)
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : null}
           
@@ -335,12 +337,15 @@ function WorkflowStep({
             <div>
               <div className="text-xs font-medium text-gray-500 mb-1">Similar Cases:</div>
               <div className="space-y-1">
-                {similarCases.slice(0, 3).map((c, i) => (
+                {similarCases.slice(0, 3).map((c, i) => {
+                  const caseIsPos = c.label === "responder" || c.label === "sensitive" || 
+                    c.label === "positive" || (c.label && c.label.toLowerCase().includes("sensitive"));
+                  return (
                   <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
                     <span className="truncate font-mono">{c.slide_id}</span>
                     <span className={cn(
                       "px-1.5 py-0.5 rounded text-xs",
-                      c.label === "responder" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
+                      caseIsPos ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
                     )}>
                       {c.label || "unknown"}
                     </span>
@@ -348,7 +353,8 @@ function WorkflowStep({
                       {(c.similarity_score * 100).toFixed(0)}% match
                     </span>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : null}

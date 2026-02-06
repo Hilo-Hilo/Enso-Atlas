@@ -66,8 +66,8 @@ export function SimilarCasesPanel({
 
   // Project-aware labels
   const { currentProject } = useProject();
-  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Responder";
-  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Non-Responder";
+  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Positive";
+  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Negative";
 
   // Group cases by outcome
   const groupedCases = useMemo<GroupedCases>(() => {

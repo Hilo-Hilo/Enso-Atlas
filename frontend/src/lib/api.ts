@@ -642,7 +642,7 @@ export async function generateReport(
 
   return {
     caseId: reportJson.case_id || backend.slide_id,
-    task: reportJson.task || "Bevacizumab treatment response prediction",
+    task: reportJson.task || "Treatment response prediction",
     generatedAt: new Date().toISOString(),
     patientContext: reportJson.patient_context as PatientContext | undefined,
     modelOutput: {
@@ -1142,8 +1142,8 @@ export function exportBatchResultsToCsv(
     ["Total Slides", summary.total.toString()],
     ["Completed", summary.completed.toString()],
     ["Failed", summary.failed.toString()],
-    ["Responders", summary.responders.toString()],
-    ["Non-Responders", summary.nonResponders.toString()],
+    ["Positive Class", summary.responders.toString()],
+    ["Negative Class", summary.nonResponders.toString()],
     ["Uncertain Cases", summary.uncertain.toString()],
     ["Avg Confidence", summary.avgConfidence.toFixed(3)],
     ["Requires Review", summary.requiresReviewCount.toString()],
@@ -2217,7 +2217,7 @@ function transformBackendReport(backend: {
 
   return {
     caseId: reportJson.case_id || backend.slide_id,
-    task: reportJson.task || 'Bevacizumab treatment response prediction',
+    task: reportJson.task || 'Treatment response prediction',
     generatedAt: new Date().toISOString(),
     patientContext: reportJson.patient_context,
     modelOutput: {

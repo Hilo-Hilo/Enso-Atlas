@@ -128,7 +128,7 @@ export async function generatePdfReport(options: PdfExportOptions): Promise<Blob
   doc.setFont("helvetica", "bold");
   doc.text("Task:", margin + 90, yPos + 6);
   doc.setFont("helvetica", "normal");
-  doc.text(report.task || "Treatment Response Prediction", margin + 105, yPos + 6);
+  doc.text(report.task || "Platinum Sensitivity Prediction", margin + 105, yPos + 6);
 
   yPos += 28;
 
@@ -169,7 +169,10 @@ export async function generatePdfReport(options: PdfExportOptions): Promise<Blob
   doc.setFont("helvetica", "bold");
 
   // Color based on prediction
-  if (prediction.label.toLowerCase().includes("responder") && !prediction.label.toLowerCase().includes("non")) {
+  const isPositiveLabel = (prediction.label.toLowerCase().includes("responder") && !prediction.label.toLowerCase().includes("non")) ||
+    prediction.label.toLowerCase() === "sensitive" ||
+    prediction.label.toLowerCase().includes("sensitive");
+  if (isPositiveLabel) {
     doc.setTextColor(34, 139, 34);
   } else {
     doc.setTextColor(178, 34, 34);

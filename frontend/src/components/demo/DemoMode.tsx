@@ -236,8 +236,8 @@ const tourSteps: Step[] = [
       <div className="space-y-2">
         <p>
           View the AI&apos;s prediction with confidence scores. The model classifies patients 
-          as <span className="text-green-600 font-semibold">Responders</span> or{" "}
-          <span className="text-red-600 font-semibold">Non-Responders</span> to immunotherapy.
+          as <span className="text-green-600 font-semibold">Sensitive</span> or{" "}
+          <span className="text-red-600 font-semibold">Resistant</span> to platinum-based chemotherapy.
         </p>
         <p className="text-sm text-gray-500">
           Includes quality metrics and uncertainty quantification.

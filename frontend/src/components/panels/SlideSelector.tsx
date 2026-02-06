@@ -415,9 +415,9 @@ export function SlideSelector({
                 <div className="col-span-2">
                   <Badge
                     variant={
-                      selectedSlide.label.toLowerCase().includes("responder")
+                      selectedSlide.label === "1" || selectedSlide.label.toLowerCase() === "sensitive" || selectedSlide.label.toLowerCase().includes("responder")
                         ? "success"
-                        : selectedSlide.label.toLowerCase().includes("non")
+                        : selectedSlide.label === "0" || selectedSlide.label.toLowerCase() === "resistant" || selectedSlide.label.toLowerCase().includes("non")
                         ? "danger"
                         : "default"
                     }

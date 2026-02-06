@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import type { UncertaintyResult } from "@/types";
 import { analyzeWithUncertainty } from "@/lib/api";
+import { useProject } from "@/contexts/ProjectContext";
 
 interface UncertaintyPanelProps {
   slideId: string | null;
@@ -30,6 +31,11 @@ export function UncertaintyPanel({
   slideId,
   onUncertaintyResult,
 }: UncertaintyPanelProps) {
+  // Project-aware labels (must be before any returns per Rules of Hooks)
+  const { currentProject } = useProject();
+  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Positive";
+  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Negative";
+
   const [result, setResult] = useState<UncertaintyResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,7 +179,8 @@ export function UncertaintyPanel({
   }
 
   // Results display
-  const isResponder = result.prediction === "RESPONDER";
+  const isResponder = result.prediction === "RESPONDER" || 
+    result.prediction.toUpperCase() === positiveLabel.toUpperCase();
   const probabilityPercent = Math.round(result.probability * 100);
   const uncertaintyPercent = Math.round(result.uncertainty * 100);
   const ciLower = Math.round(result.confidenceInterval[0] * 100);
@@ -312,9 +319,9 @@ export function UncertaintyPanel({
 
           {/* Scale Labels */}
           <div className="flex justify-between text-xs">
-            <span className="text-red-600 font-medium">0% (Non-R)</span>
+            <span className="text-red-600 font-medium">0% ({negativeLabel})</span>
             <span className="text-gray-400">50%</span>
-            <span className="text-green-600 font-medium">100% (Resp)</span>
+            <span className="text-green-600 font-medium">100% ({positiveLabel})</span>
           </div>
         </div>
 

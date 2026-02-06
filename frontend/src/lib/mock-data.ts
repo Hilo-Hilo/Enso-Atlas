@@ -44,7 +44,7 @@ export const mockSlides: SlideInfo[] = [
 
 // Mock prediction result
 export const mockPrediction: PredictionResult = {
-  label: "Bevacizumab Responder",
+  label: "SENSITIVE",
   score: 0.78,
   confidence: 0.85,
   calibrationNote:
@@ -111,7 +111,7 @@ export const mockSimilarCases: SimilarCase[] = [
     patchId: "ref-patch-001",
     similarity: 0.88,
     distance: 0.12,
-    label: "Responder",
+    label: "Sensitive",
     thumbnailUrl: "/api/placeholder/patch",
     coordinates: { x: 14200, y: 9100, level: 0, width: 224, height: 224 },
   },
@@ -121,7 +121,7 @@ export const mockSimilarCases: SimilarCase[] = [
     patchId: "ref-patch-002",
     similarity: 0.82,
     distance: 0.18,
-    label: "Responder",
+    label: "Sensitive",
     thumbnailUrl: "/api/placeholder/patch",
     coordinates: { x: 11800, y: 7400, level: 0, width: 224, height: 224 },
   },
@@ -131,7 +131,7 @@ export const mockSimilarCases: SimilarCase[] = [
     patchId: "ref-patch-003",
     similarity: 0.76,
     distance: 0.24,
-    label: "Non-Responder",
+    label: "Resistant",
     thumbnailUrl: "/api/placeholder/patch",
     coordinates: { x: 19500, y: 13200, level: 0, width: 224, height: 224 },
   },
@@ -141,7 +141,7 @@ export const mockSimilarCases: SimilarCase[] = [
     patchId: "ref-patch-004",
     similarity: 0.69,
     distance: 0.31,
-    label: "Responder",
+    label: "Sensitive",
     thumbnailUrl: "/api/placeholder/patch",
     coordinates: { x: 16700, y: 10800, level: 0, width: 224, height: 224 },
   },
@@ -151,7 +151,7 @@ export const mockSimilarCases: SimilarCase[] = [
     patchId: "ref-patch-005",
     similarity: 0.62,
     distance: 0.38,
-    label: "Non-Responder",
+    label: "Resistant",
     thumbnailUrl: "/api/placeholder/patch",
     coordinates: { x: 22100, y: 15600, level: 0, width: 224, height: 224 },
   },
@@ -167,7 +167,7 @@ export const mockHeatmap: HeatmapData = {
 // Mock structured report
 export const mockReport: StructuredReport = {
   caseId: "slide-001",
-  task: "Bevacizumab Response Prediction",
+  task: "Platinum Sensitivity Prediction",
   generatedAt: new Date().toISOString(),
   modelOutput: mockPrediction,
   evidence: [
@@ -185,7 +185,7 @@ export const mockReport: StructuredReport = {
       morphologyDescription:
         "Dense lymphocytic infiltrate observed at the tumor-stroma interface, suggesting active immune response.",
       whyThisPatchMatters:
-        "Tumor-infiltrating lymphocytes are a positive prognostic factor associated with anti-angiogenic therapy response.",
+        "Tumor-infiltrating lymphocytes are a positive prognostic factor associated with platinum-based chemotherapy sensitivity.",
     },
     {
       patchId: "patch-003",
@@ -193,13 +193,13 @@ export const mockReport: StructuredReport = {
       morphologyDescription:
         "Region shows necrotic debris with surrounding viable tumor cells and inflammatory infiltrate.",
       whyThisPatchMatters:
-        "The pattern of necrosis distribution may indicate tumor vasculature characteristics relevant to anti-VEGF therapy.",
+        "The pattern of necrosis distribution may indicate tumor microenvironment characteristics relevant to platinum sensitivity.",
     },
   ],
   similarExamples: [
-    { exampleId: "case-ref-001", label: "Responder", distance: 0.12 },
-    { exampleId: "case-ref-002", label: "Responder", distance: 0.18 },
-    { exampleId: "case-ref-003", label: "Non-Responder", distance: 0.24 },
+    { exampleId: "case-ref-001", label: "Sensitive", distance: 0.12 },
+    { exampleId: "case-ref-002", label: "Sensitive", distance: 0.18 },
+    { exampleId: "case-ref-003", label: "Resistant", distance: 0.24 },
   ],
   limitations: [
     "This prediction is based on a model trained on a limited cohort (n=78 patients, 288 WSIs) and may not generalize to all populations.",
@@ -222,23 +222,23 @@ export const mockReport: StructuredReport = {
 
 Case ID: slide-001
 Analysis Date: ${new Date().toLocaleDateString()}
-Task: Bevacizumab Response Prediction
+Task: Platinum Sensitivity Prediction
 
 PREDICTION:
-The model predicts this case as "Bevacizumab Responder" with high confidence (probability: 78%).
+The model predicts this case as "Platinum Sensitive" with high confidence (probability: 78%).
 
 KEY FINDINGS:
-The analysis identified several morphological features associated with treatment response:
+The analysis identified several morphological features associated with platinum sensitivity:
 
 1. Prominent papillary architecture with high-grade nuclear features in the primary tumor regions
 2. Significant tumor-infiltrating lymphocyte presence at the tumor-stromal interface
-3. Characteristic necrosis pattern that may indicate tumor vasculature susceptibility to anti-angiogenic therapy
+3. Characteristic necrosis pattern that may indicate tumor microenvironment susceptibility to platinum-based chemotherapy
 
 SUPPORTING EVIDENCE:
-The model identified 6 high-attention regions that contributed most to this prediction. The top 3 evidence patches showed morphological patterns including papillary carcinoma architecture, immune infiltration, and necrosis distribution that align with responder cases in the reference cohort.
+The model identified 6 high-attention regions that contributed most to this prediction. The top 3 evidence patches showed morphological patterns including papillary carcinoma architecture, immune infiltration, and necrosis distribution that align with sensitive cases in the reference cohort.
 
 SIMILAR CASES:
-Comparison with the reference cohort identified 3 similar cases with matching morphological patterns. Two of three similar cases were confirmed responders in the training data.
+Comparison with the reference cohort identified 3 similar cases with matching morphological patterns. Two of three similar cases were confirmed sensitive in the training data.
 
 This report was generated by Enso Atlas using Path Foundation embeddings and MedGemma-powered structured reporting. Please review the limitations section carefully before using this information in clinical decision-making.`,
 };

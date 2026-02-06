@@ -61,8 +61,8 @@ export function OncologistSummaryView({
 }: OncologistSummaryViewProps) {
   // Project-aware labels (must be before any returns per Rules of Hooks)
   const { currentProject } = useProject();
-  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Responder";
-  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Non-Responder";
+  const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Positive";
+  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Negative";
 
   if (!analysisResult) {
     return (

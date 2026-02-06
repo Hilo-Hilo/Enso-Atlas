@@ -6,12 +6,12 @@ import type { Project } from "@/types";
 // Default fallback project when API is not available
 const DEFAULT_PROJECT: Project = {
   id: "default",
-  name: "Ovarian Cancer – Bevacizumab Response",
+  name: "Ovarian Cancer - Platinum Sensitivity",
   cancer_type: "Ovarian Cancer",
-  prediction_target: "Bevacizumab Response",
-  classes: ["Non-Responder", "Responder"],
-  positive_class: "Responder",
-  description: "Predict bevacizumab treatment response from H&E whole-slide images of high-grade serous ovarian carcinoma.",
+  prediction_target: "platinum_sensitivity",
+  classes: ["resistant", "sensitive"],
+  positive_class: "sensitive",
+  description: "Predicts platinum-based chemotherapy sensitivity in high-grade serous ovarian carcinoma",
   models: {
     embedder: "PathFoundation (DINOv2-L)",
     mil_architecture: "TransMIL",

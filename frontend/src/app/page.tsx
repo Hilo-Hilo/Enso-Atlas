@@ -42,8 +42,7 @@ const WSIViewer = nextDynamic(
 
 // Available models for attention overlay
 const HEATMAP_MODELS = [
-  { id: "bevacizumab_response", name: "Treatment Response" },
-  { id: "platinum_sensitivity", name: "Chemo Sensitivity" },
+  { id: "platinum_sensitivity", name: "Platinum Sensitivity" },
   { id: "tumor_grade", name: "Tumor Grade" },
   { id: "survival_5y", name: "5-Year Survival" },
   { id: "survival_3y", name: "3-Year Survival" },
@@ -212,7 +211,7 @@ function HomePage() {
 
   // Slide QC metrics state
   const [slideQCMetrics, setSlideQCMetrics] = useState<SlideQCMetrics | null>(null);
-  const [selectedModels, setSelectedModels] = useState<string[]>(["bevacizumab_response", "platinum_sensitivity", "tumor_grade"]);
+  const [selectedModels, setSelectedModels] = useState<string[]>(["platinum_sensitivity", "tumor_grade"]);
   const [resolutionLevel, setResolutionLevel] = useState<number>(1); // 0 = full res, 1 = downsampled
   const [forceReembed, setForceReembed] = useState(false);
   const [heatmapModel, setHeatmapModel] = useState<string | null>(null); // null = legacy model heatmap
