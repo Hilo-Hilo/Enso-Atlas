@@ -50,9 +50,24 @@ TCGA Ovarian Cancer cohort: 208 whole-slide images with platinum sensitivity lab
 
 ### TransMIL Training
 - Input: Path Foundation embeddings (384-dim, level 0 patches)
-- Architecture: TransMIL with pyramid position encoding
-- Training: AdamW optimizer, lr=2e-4, 100 epochs, early stopping (patience=15)
-- Results: [AUC/accuracy from training run]
+- Architecture: TransMIL with pyramid position encoding (512-dim, 8 heads, 2 layers)
+- Training: AdamW optimizer, lr=2e-4, weight decay=0.01, 100 epochs, early stopping (patience=15)
+- Focal loss with class weighting for severe imbalance (91.4% positive, 8.6% negative)
+- 5-fold stratified cross-validation
+
+| Fold | AUC-ROC | Best Epoch |
+|------|---------|------------|
+| 1    | 0.810   | 11         |
+| 2    | 0.667   | 1          |
+| 3    | 0.661   | 2          |
+| 4    | 0.536   | 8          |
+| 5    | 0.864   | 4          |
+
+- **Mean AUC: 0.707 +/- 0.117** (5-fold CV)
+- **Best model AUC: 0.879** (full dataset evaluation)
+- Optimal threshold via Youden's J: 0.917 (sensitivity=83.5%, specificity=84.6%)
+
+Note: High variance across folds due to small negative class (only 2-3 negatives per fold). Performance expected to improve with more negative samples from additional datasets.
 
 ### Embedding Quality
 - Level 0 (full resolution): ~6,000-30,000 patches per slide

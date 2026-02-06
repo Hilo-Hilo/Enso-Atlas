@@ -1,0 +1,93 @@
+{
+  "threshold_config": {
+    "model_checkpoint": "results/transmil_training/best_model.pt",
+    "architecture": "transmil",
+    "auc_roc": 0.8788,
+    "n_slides": 152,
+    "n_positive": 139,
+    "n_negative": 13,
+    "optimal_threshold_youden": 0.9169,
+    "optimal_threshold_f1": 0.8909,
+    "recommended_threshold": 0.9169,
+    "metrics_at_recommended": {
+      "sensitivity": 0.8345,
+      "specificity": 0.8462,
+      "precision": 0.9831,
+      "f1": 0.9027,
+      "accuracy": 0.8355,
+      "youden_j": 0.6807
+    },
+    "metrics_at_f1_optimal": {
+      "threshold": 0.8909,
+      "sensitivity": 1.0,
+      "specificity": 0.3846,
+      "f1": 0.972
+    },
+    "metrics_at_default_0_5": {
+      "sensitivity": 1.0,
+      "specificity": 0.0,
+      "f1": 0.9553
+    }
+  },
+  "model_config": {
+    "input_dim": 384,
+    "hidden_dim": 512,
+    "num_heads": 8,
+    "num_layers": 2,
+    "dropout": 0.25,
+    "learning_rate": 0.0002,
+    "weight_decay": 0.01,
+    "epochs": 100,
+    "patience": 15,
+    "n_folds": 5,
+    "seed": 42
+  },
+  "youden_optimal": {
+    "threshold": 0.9169169169169169,
+    "sensitivity": 0.8345323741007195,
+    "specificity": 0.8461538461538461,
+    "precision": 0.9830508474576272,
+    "f1": 0.9027237354085603,
+    "accuracy": 0.8355263157894737,
+    "youden_j": 0.6806862202545656,
+    "tp": 116,
+    "tn": 11,
+    "fp": 2,
+    "fn": 23
+  },
+  "f1_optimal": {
+    "threshold": 0.8908908908908909,
+    "sensitivity": 1.0,
+    "specificity": 0.38461538461538464,
+    "precision": 0.9455782312925171,
+    "f1": 0.9720279720279721,
+    "accuracy": 0.9473684210526315,
+    "youden_j": 0.3846153846153846,
+    "tp": 139,
+    "tn": 5,
+    "fp": 8,
+    "fn": 0
+  },
+  "default_0_5": {
+    "threshold": 0.5,
+    "sensitivity": 1.0,
+    "specificity": 0.0,
+    "precision": 0.9144736842105263,
+    "f1": 0.9553264604810997,
+    "accuracy": 0.9144736842105263,
+    "youden_j": 0.0,
+    "tp": 139,
+    "tn": 0,
+    "fp": 13,
+    "fn": 0
+  },
+  "score_statistics": {
+    "mean": 0.928,
+    "std": 0.0176,
+    "min": 0.8439,
+    "max": 0.9596,
+    "median": 0.9307,
+    "positive_mean": 0.9308,
+    "negative_mean": 0.8976
+  }
+}

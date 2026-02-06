@@ -1,0 +1,55 @@
+{
+  "checkpoint": "results/transmil_training/best_model.pt",
+  "n_slides": 152,
+  "threshold": 0.5,
+  "auc_roc": 0.8788046485888212,
+  "accuracy": 0.9144736842105263,
+  "sensitivity": 1.0,
+  "specificity": 0.0,
+  "confusion_matrix": {
+    "tp": 139,
+    "tn": 0,
+    "fp": 13,
+    "fn": 0
+  },
+  "classification_report": {
+    "Non-Responder": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 13.0
+    },
+    "Responder": {
+      "precision": 0.9144736842105263,
+      "recall": 1.0,
+      "f1-score": 0.9553264604810997,
+      "support": 139.0
+    },
+    "accuracy": 0.9144736842105263,
+    "macro avg": {
+      "precision": 0.45723684210526316,
+      "recall": 0.5,
+      "f1-score": 0.47766323024054985,
+      "support": 152.0
+    },
+    "weighted avg": {
+      "precision": 0.8362621191135734,
+      "recall": 0.9144736842105263,
+      "f1-score": 0.873620907939953,
+      "support": 152.0
+    }
+  },
+  "model_config": {
+    "input_dim": 384,
+    "hidden_dim": 512,
+    "num_heads": 8,
+    "num_layers": 2,
+    "dropout": 0.25,
+    "learning_rate": 0.0002,
+    "weight_decay": 0.01,
+    "epochs": 100,
+    "patience": 15,
+    "n_folds": 5,
+    "seed": 42
+  }
+}
