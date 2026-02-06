@@ -75,6 +75,7 @@ export function WSIViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
   const heatmapOverlayRef = useRef<HTMLElement | null>(null);
+  const heatmapTiledImageRef = useRef<any>(null);
   
   // Store callbacks in refs so they don't trigger viewer recreation
   const onRegionClickRef = useRef(onRegionClick);
@@ -246,82 +247,73 @@ export function WSIViewer({
     viewer.viewport.zoomTo(clampedZoom, viewportPoint, false);
   }, [targetCoordinates, isReady]);
 
-  // Handle heatmap overlay with OpenSeadragon
+  // Handle heatmap overlay using OSD's SimpleImage layer (not HTML overlay).
+  // HTML overlays drift at high zoom due to sub-pixel CSS rounding.
+  // addSimpleImage renders the heatmap in the same canvas/WebGL pipeline
+  // as the slide tiles, so it's pixel-perfect at every zoom level.
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !isReady || !heatmapImageUrl) return;
 
-    // Remove existing overlay if present
-    if (heatmapOverlayRef.current) {
+    // Remove existing heatmap tiled image if present
+    if (heatmapTiledImageRef.current) {
       try {
-        viewer.removeOverlay(heatmapOverlayRef.current);
+        viewer.world.removeItem(heatmapTiledImageRef.current);
       } catch {
-        // Overlay might already be removed
+        // Ignore
       }
+      heatmapTiledImageRef.current = null;
     }
 
-    // Use <img> directly as OSD overlay element (no wrapper div).
-    // Wrapper divs with CSS position/percentages cause sub-pixel rounding
-    // errors that accumulate at higher zoom levels, causing drift.
-    const img = document.createElement("img");
-    img.style.opacity = "0";
-    img.style.transition = "opacity 0.3s ease";
-    img.style.pointerEvents = "none";
-    img.style.imageRendering = "pixelated";
-    img.className = "heatmap-overlay-img";
-    
-    img.onload = () => {
-      console.log("Heatmap image loaded:", heatmapImageUrl);
-      setHeatmapLoaded(true);
-      setHeatmapError(false);
-    };
-    
-    img.onerror = (e) => {
-      console.error("Failed to load heatmap image:", heatmapImageUrl, e);
-      setHeatmapError(true);
-      setHeatmapLoaded(false);
-    };
-
-    img.src = heatmapImageUrl;
-    heatmapOverlayRef.current = img;
-
-    // Add the img directly as an OSD overlay covering the full slide bounds.
-    // OSD manages all positioning/scaling — no CSS width/height needed on img.
-    const tiledImage = viewer.world.getItemAt(0);
-    if (tiledImage) {
-      const bounds = tiledImage.getBounds(false);
-      
-      viewer.addOverlay({
-        element: img,
-        location: bounds,
-        checkResize: false,
-      });
-    } else {
-      console.warn("No tiled image found, using default 1x1 bounds");
-      viewer.addOverlay({
-        element: img,
-        location: new OpenSeadragon.Rect(0, 0, 1, 1),
-        checkResize: false,
-      });
+    // Get the slide's bounds so the heatmap aligns exactly
+    const slideImage = viewer.world.getItemAt(0);
+    if (!slideImage) {
+      console.warn("No slide image found for heatmap overlay");
+      return;
     }
+    const bounds = slideImage.getBounds(false);
+
+    // Add heatmap as a simple image layer (rendered in OSD's tile pipeline)
+    viewer.addSimpleImage({
+      url: heatmapImageUrl,
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      opacity: 0, // Start hidden, update via showHeatmap effect
+      success: (event: any) => {
+        heatmapTiledImageRef.current = event.item;
+        // Apply pixelated rendering for the heatmap
+        if (event.item?._drawer?.canvas) {
+          event.item._drawer.canvas.style.imageRendering = "pixelated";
+        }
+        setHeatmapLoaded(true);
+        setHeatmapError(false);
+        console.log("Heatmap added as tiled image layer");
+      },
+      error: () => {
+        setHeatmapError(true);
+        setHeatmapLoaded(false);
+        console.error("Failed to load heatmap image:", heatmapImageUrl);
+      },
+    });
 
     return () => {
-      if (heatmapOverlayRef.current && viewerRef.current) {
+      if (heatmapTiledImageRef.current && viewerRef.current) {
         try {
-          viewerRef.current.removeOverlay(heatmapOverlayRef.current);
+          viewerRef.current.world.removeItem(heatmapTiledImageRef.current);
         } catch {
-          // Ignore removal errors during cleanup
+          // Ignore
         }
+        heatmapTiledImageRef.current = null;
       }
     };
-  }, [heatmapImageUrl, isReady]); // Only recreate on imageUrl change
+  }, [heatmapImageUrl, isReady]);
 
-  // Update heatmap opacity separately (doesn't recreate overlay)
+  // Update heatmap opacity via the tiled image layer
   useEffect(() => {
-    if (heatmapOverlayRef.current && heatmapLoaded) {
-      // heatmapOverlayRef is now the img element directly (no wrapper div)
-      const el = heatmapOverlayRef.current;
-      el.style.opacity = showHeatmap ? String(heatmapOpacity) : "0";
+    if (heatmapTiledImageRef.current && heatmapLoaded) {
+      const targetOpacity = showHeatmap ? heatmapOpacity : 0;
+      heatmapTiledImageRef.current.setOpacity(targetOpacity);
     }
   }, [showHeatmap, heatmapOpacity, heatmapLoaded]);
 

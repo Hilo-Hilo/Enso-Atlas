@@ -22,6 +22,7 @@ from datetime import datetime
 from .embedding_tasks import task_manager, TaskStatus, EmbeddingTask
 from .report_tasks import report_task_manager, ReportTaskStatus, ReportTask
 from .batch_tasks import batch_task_manager, BatchTaskStatus, BatchTask, BatchSlideResult
+from . import database as db
 from collections import deque
 
 import numpy as np
@@ -536,6 +537,7 @@ def create_app(
     slide_siglip_embeddings = {}  # Cache for MedSigLIP embeddings per slide
     available_slides = []
     slide_labels = {}  # Cache for slide labels (slide_id -> label string)
+    db_available = False  # Whether PostgreSQL is connected and populated
     # Slide-level mean-embedding FAISS index (cosine similarity)
     slide_mean_index = None  # faiss.IndexFlatIP over L2-normalized mean embeddings
     slide_mean_ids: list[str] = []
@@ -846,6 +848,26 @@ def create_app(
             logger.warning(f'Failed to attach labels to slide-mean metadata: {e}')
 
 
+        # Initialize PostgreSQL database (creates tables, populates from flat files on first run)
+        nonlocal db_available
+        try:
+            logger.info("Initializing PostgreSQL database...")
+            await db.init_schema()
+            already_populated = await db.is_populated()
+            if not already_populated:
+                logger.info("Database is empty, populating from flat files (this may take a few minutes on first run)...")
+                await db.populate_from_flat_files(
+                    data_root=_data_root,
+                    embeddings_dir=embeddings_dir,
+                )
+            else:
+                logger.info("Database already populated, skipping flat-file import")
+            db_available = True
+            logger.info("PostgreSQL database ready")
+        except Exception as e:
+            logger.warning(f"PostgreSQL not available, falling back to flat-file mode: {e}")
+            db_available = False
+
         # Initialize agent workflow now that models and indexes are ready
         if AGENT_AVAILABLE:
             try:
@@ -865,6 +887,14 @@ def create_app(
             except Exception as e:
                 logger.warning(f"Failed to initialize agent workflow: {e}")
 
+    @app.on_event("shutdown")
+    async def shutdown():
+        """Clean up resources on shutdown."""
+        try:
+            await db.close_pool()
+        except Exception:
+            pass
+
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
@@ -874,6 +904,7 @@ def create_app(
             "model_loaded": classifier is not None,
             "cuda_available": _check_cuda(),
             "slides_available": len(available_slides),
+            "db_available": db_available,
             "uptime": time.time() - _STARTUP_TIME,
         }
 
