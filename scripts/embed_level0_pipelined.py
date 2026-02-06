@@ -23,7 +23,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('/workspace/embed_pipelined.log')
+        logging.FileHandler(os.environ.get('EMBED_LOG', '/tmp/embed_pipelined.log'))
     ]
 )
 logger = logging.getLogger(__name__)
