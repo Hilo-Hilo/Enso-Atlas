@@ -172,15 +172,8 @@ function ProjectSwitcher() {
   }, [isOpen]);
 
   if (projects.length <= 1) {
-    // Single project — show label only, no dropdown
-    return (
-      <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-navy-800/50 rounded-lg border border-navy-700/30">
-        <Layers className="h-4 w-4 text-clinical-400" />
-        <span className="text-sm text-gray-300 font-medium truncate max-w-[160px]">
-          {currentProject.cancer_type}
-        </span>
-      </div>
-    );
+    // Single project — hide the switcher entirely since there is nothing to switch
+    return null;
   }
 
   return (
