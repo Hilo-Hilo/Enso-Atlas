@@ -68,8 +68,6 @@ RUN pip install numpy==1.26.4 opencv-python-headless==4.8.1.78 --force-reinstall
 COPY src/ ./src/
 COPY config/ ./config/
 COPY scripts/ ./scripts/
-COPY transmil.py ./
-
 # Create directories for data and outputs
 RUN mkdir -p /app/data /app/outputs /app/cache /app/models
 
