@@ -472,7 +472,7 @@ export function EvidencePanel({
             <span className="font-medium">Attention Weight</span>
             <span>Click to navigate</span>
           </div>
-          <div className="heatmap-legend" />
+          <div className="heatmap-legend h-2 rounded-full" />
           <div className="flex justify-between text-2xs text-gray-400 mt-1">
             <span>Low</span>
             <span>High</span>
