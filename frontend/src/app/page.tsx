@@ -66,14 +66,14 @@ function MobilePanelTabs({
   hasResults: boolean;
 }) {
   return (
-    <div className="flex items-center bg-white border-b border-gray-200 lg:hidden">
+    <div className="flex items-center bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 lg:hidden">
       <button
         onClick={() => onTabChange("slides")}
         className={cn(
           "flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2",
           activeTab === "slides"
-            ? "text-clinical-600 border-clinical-500 bg-clinical-50/50"
-            : "text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-50"
+            ? "text-clinical-600 border-clinical-500 bg-clinical-50/50 dark:bg-clinical-900/30"
+            : "text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700"
         )}
       >
         <Layers className="h-4 w-4" />
@@ -84,8 +84,8 @@ function MobilePanelTabs({
         className={cn(
           "flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 relative",
           activeTab === "results"
-            ? "text-clinical-600 border-clinical-500 bg-clinical-50/50"
-            : "text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-50"
+            ? "text-clinical-600 border-clinical-500 bg-clinical-50/50 dark:bg-clinical-900/30"
+            : "text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700"
         )}
       >
         <BarChart3 className="h-4 w-4" />
@@ -121,7 +121,7 @@ function SidebarToggle({
     <button
       onClick={onClick}
       className={cn(
-        "hidden lg:flex absolute top-1/2 -translate-y-1/2 z-10 w-6 h-12 items-center justify-center bg-white border border-gray-200 shadow-sm hover:bg-gray-50 transition-colors",
+        "hidden lg:flex absolute top-1/2 -translate-y-1/2 z-10 w-6 h-12 items-center justify-center bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 shadow-sm hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors",
         positionClasses
       )}
       title={isOpen ? "Collapse panel" : "Expand panel"}
@@ -1424,7 +1424,7 @@ function HomePage() {
 
       {/* Error Display */}
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
           <div className="flex items-start gap-2">
             <svg
               className="h-4 w-4 text-red-500 mt-0.5 shrink-0"
@@ -1626,7 +1626,7 @@ function HomePage() {
       <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Batch Mode - Full Width Panel */}
         {userViewMode === "batch" ? (
-          <div className="flex-1 p-3 sm:p-4 lg:p-6 bg-gray-50 overflow-auto">
+          <div className="flex-1 p-3 sm:p-4 lg:p-6 bg-gray-50 dark:bg-slate-900 overflow-auto">
             <div className="max-w-6xl mx-auto h-full">
               <BatchAnalysisPanel
                 onSlideSelect={(slideId) => {
@@ -1648,7 +1648,7 @@ function HomePage() {
           ref={slideSelectorRef as React.RefObject<HTMLElement>}
           tabIndex={-1}
           className={cn(
-            "bg-white border-b lg:border-b-0 lg:border-r border-surface-border overflow-y-auto shrink-0 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative transition-all duration-300",
+            "bg-white dark:bg-slate-800 border-b lg:border-b-0 lg:border-r border-surface-border dark:border-slate-700 overflow-y-auto shrink-0 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative transition-all duration-300",
             // Mobile: Full width, show/hide based on tab
             "lg:hidden",
             mobilePanelTab === "slides" ? "flex-1 p-3 sm:p-4" : "hidden"
@@ -1681,7 +1681,7 @@ function HomePage() {
           ref={slideSelectorRef as React.RefObject<HTMLElement>}
           tabIndex={-1}
           className={cn(
-            "h-full bg-white border-r border-surface-border space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative",
+            "h-full bg-white dark:bg-slate-800 border-r border-surface-border dark:border-slate-700 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative",
             leftSidebarOpen ? "p-4 overflow-y-auto" : "overflow-hidden"
           )}
           data-demo="slide-selector"
@@ -1700,8 +1700,8 @@ function HomePage() {
           />
         </aside>
         </Panel>
-        <PanelResizeHandle className="w-1.5 bg-gray-100 hover:bg-clinical-200 active:bg-clinical-300 transition-colors cursor-col-resize flex items-center justify-center group">
-          <div className="w-0.5 h-8 bg-gray-300 group-hover:bg-clinical-400 rounded-full transition-colors" />
+        <PanelResizeHandle className="w-1.5 bg-gray-100 dark:bg-slate-700 hover:bg-clinical-200 dark:hover:bg-clinical-800 active:bg-clinical-300 dark:active:bg-clinical-700 transition-colors cursor-col-resize flex items-center justify-center group">
+          <div className="w-0.5 h-8 bg-gray-300 dark:bg-slate-500 group-hover:bg-clinical-400 rounded-full transition-colors" />
         </PanelResizeHandle>
 
         {/* Center - WSI Viewer or Oncologist Summary */}
@@ -1713,15 +1713,15 @@ function HomePage() {
         >
           {/* View Mode Toggle - Only show in oncologist mode */}
           {userViewMode === "oncologist" && selectedSlide && analysisResult && (
-            <div className="flex items-center justify-center gap-2 p-2 bg-white border-b border-gray-200">
-              <span className="text-xs text-gray-500 mr-2 hidden sm:inline">View Mode:</span>
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
+            <div className="flex items-center justify-center gap-2 p-2 bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700">
+              <span className="text-xs text-gray-500 dark:text-gray-400 mr-2 hidden sm:inline">View Mode:</span>
+              <div className="flex items-center bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
                 <button
                   onClick={() => setViewMode("wsi")}
                   className={`px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
                     viewMode === "wsi"
-                      ? "bg-white text-clinical-700 shadow-sm"
-                      : "text-gray-600 hover:text-gray-900"
+                      ? "bg-white dark:bg-slate-600 text-clinical-700 dark:text-clinical-300 shadow-sm"
+                      : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
                   }`}
                 >
                   WSI Viewer
@@ -1730,8 +1730,8 @@ function HomePage() {
                   onClick={() => setViewMode("summary")}
                   className={`px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
                     viewMode === "summary"
-                      ? "bg-white text-clinical-700 shadow-sm"
-                      : "text-gray-600 hover:text-gray-900"
+                      ? "bg-white dark:bg-slate-600 text-clinical-700 dark:text-clinical-300 shadow-sm"
+                      : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
                   }`}
                 >
                   Summary
@@ -1778,7 +1778,7 @@ function HomePage() {
                 onControlsReady={(controls) => { viewerControlsRef.current = controls; }}
               />
             ) : (
-              <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 p-4">
+              <div className="h-full flex items-center justify-center bg-gray-100 dark:bg-slate-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-slate-600 p-4">
                 <div className="text-center max-w-sm">
                   <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
                     <svg
@@ -1795,10 +1795,10 @@ function HomePage() {
                       />
                     </svg>
                   </div>
-                  <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1">
+                  <h3 className="text-base sm:text-lg font-medium text-gray-900 dark:text-gray-100 mb-1">
                     No Slide Selected
                   </h3>
-                  <p className="text-xs sm:text-sm text-gray-500">
+                  <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                     Select a whole-slide image from the{" "}
                     <button
                       onClick={() => setMobilePanelTab("slides")}
@@ -1814,8 +1814,8 @@ function HomePage() {
           </div>
         </section>
         </Panel>
-        <PanelResizeHandle className="w-1.5 bg-gray-100 hover:bg-clinical-200 active:bg-clinical-300 transition-colors cursor-col-resize flex items-center justify-center group">
-          <div className="w-0.5 h-8 bg-gray-300 group-hover:bg-clinical-400 rounded-full transition-colors" />
+        <PanelResizeHandle className="w-1.5 bg-gray-100 dark:bg-slate-700 hover:bg-clinical-200 dark:hover:bg-clinical-800 active:bg-clinical-300 dark:active:bg-clinical-700 transition-colors cursor-col-resize flex items-center justify-center group">
+          <div className="w-0.5 h-8 bg-gray-300 dark:bg-slate-500 group-hover:bg-clinical-400 rounded-full transition-colors" />
         </PanelResizeHandle>
 
         {/* Right Sidebar - Desktop (Resizable) */}
@@ -1833,7 +1833,7 @@ function HomePage() {
         >
         <aside
           className={cn(
-            "h-full bg-white p-4 overflow-y-auto space-y-4 relative",
+            "h-full bg-white dark:bg-slate-800 p-4 overflow-y-auto space-y-4 relative",
             !rightSidebarOpen && "overflow-hidden"
           )}
         >
@@ -1873,7 +1873,7 @@ function HomePage() {
         {/* Right Sidebar - Mobile Version */}
         <aside
           className={cn(
-            "lg:hidden bg-white overflow-y-auto space-y-4",
+            "lg:hidden bg-white dark:bg-slate-800 overflow-y-auto space-y-4",
             mobilePanelTab === "results" ? "flex-1 p-3 sm:p-4" : "hidden"
           )}
         >

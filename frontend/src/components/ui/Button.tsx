@@ -33,9 +33,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       primary:
         "bg-gradient-to-r from-clinical-600 to-clinical-500 text-white hover:from-clinical-700 hover:to-clinical-600 focus:ring-clinical-500 shadow-md hover:shadow-lg hover:shadow-clinical-600/25",
       secondary:
-        "bg-white text-clinical-700 border border-clinical-200 hover:border-clinical-400 hover:bg-clinical-50 focus:ring-clinical-500 shadow-sm hover:shadow",
+        "bg-white dark:bg-slate-800 text-clinical-700 dark:text-clinical-300 border border-clinical-200 dark:border-slate-600 hover:border-clinical-400 dark:hover:border-clinical-500 hover:bg-clinical-50 dark:hover:bg-slate-700 focus:ring-clinical-500 shadow-sm hover:shadow",
       ghost:
-        "bg-transparent text-clinical-600 hover:bg-clinical-50 focus:ring-clinical-500",
+        "bg-transparent text-clinical-600 dark:text-clinical-400 hover:bg-clinical-50 dark:hover:bg-slate-700 focus:ring-clinical-500",
       danger:
         "bg-gradient-to-r from-red-600 to-red-500 text-white hover:from-red-700 hover:to-red-600 focus:ring-red-500 shadow-md hover:shadow-lg hover:shadow-red-600/25",
     };
