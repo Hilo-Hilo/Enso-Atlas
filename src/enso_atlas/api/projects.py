@@ -200,6 +200,106 @@ class ProjectRegistry:
     def default_project_id(self) -> Optional[str]:
         return self._default_project_id
 
+    def save(self):
+        """Write current project configurations back to the YAML config file."""
+        projects_raw = {}
+        for pid, proj in self._projects.items():
+            d = proj.to_dict()
+            # Remove 'id' since it is the key in the YAML mapping
+            d.pop("id", None)
+            projects_raw[pid] = d
+
+        data = {"projects": projects_raw}
+        self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._config_path, "w") as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        logger.info(f"Saved {len(self._projects)} project(s) to {self._config_path}")
+
+    def add_project(self, project_id: str, config: Dict[str, Any]) -> ProjectConfig:
+        """Add a new project to the registry and persist to YAML.
+
+        Args:
+            project_id: Unique identifier for the project.
+            config: Dictionary of project configuration values.
+
+        Returns:
+            The newly created ProjectConfig.
+
+        Raises:
+            ValueError: If a project with the given ID already exists.
+        """
+        if project_id in self._projects:
+            raise ValueError(f"Project '{project_id}' already exists")
+
+        project = ProjectConfig.from_dict(project_id, config)
+        self._projects[project_id] = project
+
+        # If this is the first project, make it the default
+        if self._default_project_id is None:
+            self._default_project_id = project_id
+
+        self.save()
+        return project
+
+    def update_project(self, project_id: str, updates: Dict[str, Any]) -> ProjectConfig:
+        """Update an existing project with partial data and persist to YAML.
+
+        Args:
+            project_id: ID of the project to update.
+            updates: Dictionary of fields to update (partial).
+
+        Returns:
+            The updated ProjectConfig.
+
+        Raises:
+            KeyError: If the project does not exist.
+        """
+        if project_id not in self._projects:
+            raise KeyError(f"Project '{project_id}' not found")
+
+        existing = self._projects[project_id].to_dict()
+        existing.pop("id", None)
+
+        # Merge top-level keys; nested dicts (dataset, models) are merged one level deep
+        for key, value in updates.items():
+            if key == "id":
+                continue
+            if key in ("dataset", "models") and isinstance(value, dict):
+                existing.setdefault(key, {}).update(value)
+            else:
+                existing[key] = value
+
+        project = ProjectConfig.from_dict(project_id, existing)
+        self._projects[project_id] = project
+        self.save()
+        return project
+
+    def remove_project(self, project_id: str) -> None:
+        """Remove a project from the registry and persist to YAML.
+
+        Does NOT delete any data files on disk.
+
+        Args:
+            project_id: ID of the project to remove.
+
+        Raises:
+            KeyError: If the project does not exist.
+        """
+        if project_id not in self._projects:
+            raise KeyError(f"Project '{project_id}' not found")
+
+        del self._projects[project_id]
+
+        # Update default if we just removed it
+        if self._default_project_id == project_id:
+            if self._projects:
+                self._default_project_id = next(iter(self._projects))
+            else:
+                self._default_project_id = None
+
+        self.save()
+        logger.info(f"Removed project '{project_id}' from registry")
+
     def reload(self):
         """Reload projects from the config file."""
         self._projects.clear()

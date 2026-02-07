@@ -1,23 +1,30 @@
 """
 Project-aware API routes for Enso Atlas.
 
-Provides endpoints to list, inspect, and query projects. These are additive —
-all existing routes continue to work unchanged using the default project.
+Provides endpoints to list, inspect, create, update, delete, and query
+projects. Existing read-only routes continue to work unchanged.
 
 Routes:
-    GET  /api/projects                        — list all projects
-    GET  /api/projects/{project_id}           — get project details
-    GET  /api/projects/{project_id}/slides    — slides for this project
-    GET  /api/projects/{project_id}/status    — project readiness status
+    GET    /api/projects                           -- list all projects
+    POST   /api/projects                           -- create a new project
+    GET    /api/projects/{project_id}              -- get project details
+    PUT    /api/projects/{project_id}              -- update project config
+    DELETE /api/projects/{project_id}              -- delete project (keeps data)
+    GET    /api/projects/{project_id}/slides       -- slides for this project
+    GET    /api/projects/{project_id}/status       -- project readiness status
+    POST   /api/projects/{project_id}/upload       -- upload a slide file
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
+from pydantic import BaseModel, Field
 
 from .projects import ProjectConfig, ProjectRegistry
 
@@ -41,6 +48,40 @@ def get_registry() -> ProjectRegistry:
             detail="Project registry not initialized yet. Server is starting up.",
         )
     return _registry
+
+
+# ---------------------------------------------------------------------------
+# Request / Response models
+# ---------------------------------------------------------------------------
+
+ALLOWED_SLIDE_EXTENSIONS = {".svs", ".tiff", ".tif", ".ndpi"}
+
+
+class CreateProjectRequest(BaseModel):
+    """Body for POST /api/projects."""
+    id: str = Field(..., min_length=1, max_length=128)
+    name: str = Field(..., min_length=1, max_length=256)
+    cancer_type: str = Field(..., min_length=1)
+    prediction_target: str = Field(..., min_length=1)
+    classes: List[str] = Field(default_factory=lambda: ["resistant", "sensitive"])
+    positive_class: str = "sensitive"
+    description: str = ""
+
+
+class UpdateProjectRequest(BaseModel):
+    """Body for PUT /api/projects/{project_id}.
+
+    All fields are optional -- only provided fields are updated.
+    """
+    name: Optional[str] = None
+    cancer_type: Optional[str] = None
+    prediction_target: Optional[str] = None
+    classes: Optional[List[str]] = None
+    positive_class: Optional[str] = None
+    description: Optional[str] = None
+    dataset: Optional[Dict[str, Any]] = None
+    models: Optional[Dict[str, Any]] = None
+    threshold: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +119,56 @@ async def list_projects():
     }
 
 
+@router.post("", status_code=201)
+async def create_project(body: CreateProjectRequest):
+    """
+    Create a new project.
+
+    Adds the project to projects.yaml and creates its data directories
+    (slides_dir, embeddings_dir). Returns the created project config.
+    """
+    reg = get_registry()
+
+    # Build config dict from the request body
+    config = {
+        "name": body.name,
+        "cancer_type": body.cancer_type,
+        "prediction_target": body.prediction_target,
+        "classes": body.classes,
+        "positive_class": body.positive_class,
+        "description": body.description,
+        "dataset": {
+            "slides_dir": f"data/{body.id}/slides",
+            "embeddings_dir": f"data/{body.id}/embeddings/level0",
+            "labels_file": f"data/{body.id}/labels.csv",
+            "label_column": body.prediction_target,
+        },
+    }
+
+    try:
+        project = reg.add_project(body.id, config)
+    except ValueError:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Project '{body.id}' already exists",
+        )
+
+    # Create data directories on disk
+    os.makedirs(project.dataset.slides_dir, exist_ok=True)
+    os.makedirs(project.dataset.embeddings_dir, exist_ok=True)
+    logger.info(
+        "Created project '%s' with directories: %s, %s",
+        body.id,
+        project.dataset.slides_dir,
+        project.dataset.embeddings_dir,
+    )
+
+    return {
+        "project": project.to_dict(),
+        "is_default": body.id == reg.default_project_id,
+    }
+
+
 @router.get("/{project_id}")
 async def get_project(project_id: str):
     """
@@ -92,6 +183,160 @@ async def get_project(project_id: str):
     return {
         "project": proj.to_dict(),
         "is_default": project_id == reg.default_project_id,
+    }
+
+
+@router.put("/{project_id}")
+async def update_project(project_id: str, body: UpdateProjectRequest):
+    """
+    Update an existing project configuration.
+
+    Only the fields included in the request body are modified; everything else
+    is preserved. Writes the updated config back to projects.yaml.
+    """
+    reg = get_registry()
+
+    updates = body.dict(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields provided for update")
+
+    try:
+        project = reg.update_project(project_id, updates)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_id}' not found",
+        )
+
+    return {
+        "project": project.to_dict(),
+        "is_default": project_id == reg.default_project_id,
+    }
+
+
+@router.delete("/{project_id}")
+async def delete_project(project_id: str):
+    """
+    Delete a project from the registry.
+
+    Removes the entry from projects.yaml but does NOT delete data files on
+    disk. Returns a confirmation message.
+    """
+    reg = get_registry()
+
+    try:
+        reg.remove_project(project_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_id}' not found",
+        )
+
+    return {
+        "detail": f"Project '{project_id}' deleted",
+        "remaining_projects": len(reg.list_projects()),
+    }
+
+
+@router.post("/{project_id}/upload", status_code=201)
+async def upload_slide(project_id: str, file: UploadFile = File(...)):
+    """
+    Upload a whole-slide image file to a project.
+
+    Accepts WSI files (.svs, .tiff, .tif, .ndpi). The file is saved into the
+    project's slides_dir. If the database is available, the slide is also
+    registered in the slides table.
+    """
+    reg = get_registry()
+    proj = reg.get_project(project_id)
+    if proj is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_id}' not found",
+        )
+
+    # Validate file extension
+    filename = file.filename or ""
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_SLIDE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid file extension '{ext}'. "
+                f"Allowed: {', '.join(sorted(ALLOWED_SLIDE_EXTENSIONS))}"
+            ),
+        )
+
+    # Ensure slides directory exists
+    slides_dir = Path(proj.dataset.slides_dir)
+    os.makedirs(slides_dir, exist_ok=True)
+
+    dest_path = slides_dir / filename
+    file_size = 0
+
+    # Stream-write to disk to handle large WSI files
+    try:
+        with open(dest_path, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)  # 1 MB chunks
+                if not chunk:
+                    break
+                out.write(chunk)
+                file_size += len(chunk)
+    except Exception as exc:
+        # Clean up partial file on failure
+        if dest_path.exists():
+            dest_path.unlink()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save uploaded file: {exc}",
+        )
+
+    slide_id = Path(filename).stem
+
+    # Try to register in PostgreSQL if the database is available
+    db_registered = False
+    try:
+        from . import database as db
+
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO slides (slide_id, filename, file_path, file_size_bytes, project_id)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (slide_id) DO UPDATE
+                SET filename = EXCLUDED.filename,
+                    file_path = EXCLUDED.file_path,
+                    file_size_bytes = EXCLUDED.file_size_bytes,
+                    project_id = EXCLUDED.project_id,
+                    updated_at = now()
+                """,
+                slide_id,
+                filename,
+                str(dest_path),
+                file_size,
+                project_id,
+            )
+        db_registered = True
+    except Exception as exc:
+        logger.warning("Could not register slide in database: %s", exc)
+
+    logger.info(
+        "Uploaded slide '%s' (%d bytes) to project '%s' [db_registered=%s]",
+        filename,
+        file_size,
+        project_id,
+        db_registered,
+    )
+
+    return {
+        "slide_id": slide_id,
+        "filename": filename,
+        "project_id": project_id,
+        "file_size_bytes": file_size,
+        "path": str(dest_path),
+        "db_registered": db_registered,
     }
 
 
