@@ -227,9 +227,42 @@ export function WSIViewer({
       }
     });
 
+    // Add ResizeObserver to handle container resizing
+    const resizeObserver = new ResizeObserver(() => {
+      if (viewer && viewer.viewport) {
+        // Force OSD to re-measure container and update
+        // We use a small timeout to ensure the layout has settled
+        setTimeout(() => {
+            // There is no explicit "resize" method on viewer instance that is public API in types,
+            // but forceRedraw triggers a repaint. However, we need to update the container size.
+            // OpenSeadragon listens to window resize, but not element resize by default.
+            // The container size change propagates to canvas if it's 100%.
+            // But we might need to tell OSD that the container size changed.
+            // Actually, OSD has an internal handler. Let's just force redraw.
+            if (typeof viewer.forceRedraw === 'function') {
+                viewer.forceRedraw();
+            }
+            // Some OSD versions expose a resize method or handle it internally if canvas resizes
+            // But checking types, forceRedraw is standard.
+            // Also, if the viewer container size changes, we might need to call viewer.viewport.resize()
+            // if it exists (it exists in source but maybe not in type definitions we have)
+            // @ts-ignore
+            if (typeof viewer.viewport.resize === 'function') {
+                // @ts-ignore
+                viewer.viewport.resize();
+            }
+        }, 10);
+      }
+    });
+    
+    if (containerRef.current) {
+        resizeObserver.observe(containerRef.current);
+    }
+
     viewerRef.current = viewer;
 
     return () => {
+      resizeObserver.disconnect();
       viewer.destroy();
       viewerRef.current = null;
       setIsReady(false);
