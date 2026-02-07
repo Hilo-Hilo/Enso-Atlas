@@ -220,7 +220,7 @@ function HomePage() {
   const [selectedModels, setSelectedModels] = useState<string[]>(["platinum_sensitivity", "tumor_grade"]);
   const [resolutionLevel, setResolutionLevel] = useState<number>(1); // 0 = full res, 1 = downsampled
   const [forceReembed, setForceReembed] = useState(false);
-  const [heatmapModel, setHeatmapModel] = useState<string | null>(null); // null = legacy model heatmap
+  const [heatmapModel, setHeatmapModel] = useState<string | null>("platinum_sensitivity");
   const [heatmapLevel, setHeatmapLevel] = useState<number>(2); // 0-4, default 2 (512px)
 
   // Multi-model analysis state
@@ -1396,7 +1396,7 @@ function HomePage() {
   
   // Build heatmap data with selected model
   const heatmapData = selectedSlide ? {
-    imageUrl: getHeatmapUrl(selectedSlide.id, heatmapModel || undefined, heatmapLevel),
+    imageUrl: getHeatmapUrl(selectedSlide.id, heatmapModel || "platinum_sensitivity", heatmapLevel),
     minValue: 0,
     maxValue: 1,
     colorScale: "viridis" as const,

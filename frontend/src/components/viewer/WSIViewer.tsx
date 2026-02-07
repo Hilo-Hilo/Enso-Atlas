@@ -38,7 +38,6 @@ import type { PatchCoordinates, HeatmapData } from "@/types";
 
 // Heatmap model options
 const HEATMAP_MODELS = [
-  { id: null, name: "Legacy Model" },
   { id: "platinum_sensitivity", name: "Platinum Sensitivity" },
   { id: "tumor_grade", name: "Tumor Grade" },
   { id: "survival_5y", name: "5-Year Survival" },
@@ -384,15 +383,14 @@ export function WSIViewer({
     <div className="mb-3">
       <label className="text-xs text-gray-500 mb-1.5 block">Model</label>
       <select
-        value={heatmapModel ?? ""}
+        value={heatmapModel ?? "platinum_sensitivity"}
         onChange={(e) => {
-          const value = e.target.value;
-          onHeatmapModelChange?.(value === "" ? null : value);
+          onHeatmapModelChange?.(e.target.value);
         }}
         className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-md text-gray-700 focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:border-transparent"
       >
         {HEATMAP_MODELS.map((model) => (
-          <option key={model.id ?? "legacy"} value={model.id ?? ""}>
+          <option key={model.id} value={model.id}>
             {model.name}
           </option>
         ))}
