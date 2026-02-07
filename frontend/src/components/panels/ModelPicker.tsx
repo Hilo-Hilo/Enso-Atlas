@@ -1,11 +1,12 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 import { Badge } from "@/components/ui/Badge";
 import { ChevronDown, ChevronUp, FlaskConical, Activity, Layers, CheckCircle, Circle } from "lucide-react";
 import { useProject } from "@/contexts/ProjectContext";
+import { getProjectModels as getProjectModelsApi } from "@/lib/api";
 
 export interface ModelConfig {
   id: string;
@@ -54,19 +55,8 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
   },
 ];
 
-// Build a project-aware model list. The primary prediction target is always
-// included first, followed by the standard TransMIL variants.
-function getProjectModels(predictionTarget: string | undefined): ModelConfig[] {
-  // All TransMIL variants are always available since they share embeddings.
-  // Just reorder so the project's primary target comes first.
-  if (!predictionTarget) return AVAILABLE_MODELS;
-
-  const primary = AVAILABLE_MODELS.find((m) => m.id === predictionTarget);
-  if (!primary) return AVAILABLE_MODELS;
-
-  const rest = AVAILABLE_MODELS.filter((m) => m.id !== predictionTarget);
-  return [primary, ...rest];
-}
+// getProjectModels is no longer used as a local helper -- model filtering
+// now happens via the API and the apiModels state inside ModelPicker.
 
 interface EmbeddingStatus {
   hasLevel0: boolean;
@@ -100,11 +90,32 @@ export function ModelPicker({
   const { currentProject } = useProject();
   const cancerTypeLabel = currentProject.cancer_type || "Ovarian Cancer";
 
-  // Use project-filtered model list
-  const models = React.useMemo(
-    () => getProjectModels(currentProject.prediction_target),
-    [currentProject.prediction_target]
-  );
+  // Fetch project-scoped model IDs from the API
+  const [apiModels, setApiModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const modelIds = await getProjectModelsApi(currentProject.id);
+        setApiModels(modelIds);
+      } catch {
+        // Fallback to all models if API fails
+        setApiModels(AVAILABLE_MODELS.map((m) => m.id));
+      }
+    };
+    fetchModels();
+  }, [currentProject.id]);
+
+  // Filter AVAILABLE_MODELS to only those assigned to the project, with
+  // the primary prediction target first.
+  const models = React.useMemo(() => {
+    if (apiModels.length === 0) return AVAILABLE_MODELS;
+    const filtered = AVAILABLE_MODELS.filter((m) => apiModels.includes(m.id));
+    // Reorder: primary target first
+    const primary = filtered.find((m) => m.id === currentProject.prediction_target);
+    if (!primary) return filtered;
+    return [primary, ...filtered.filter((m) => m.id !== primary.id)];
+  }, [apiModels, currentProject.prediction_target]);
 
   const toggleModel = (modelId: string) => {
     if (disabled) return;

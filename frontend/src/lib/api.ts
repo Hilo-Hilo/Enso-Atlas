@@ -286,10 +286,11 @@ interface BackendSlidesListResponse {
 /**
  * Fetch list of available slides
  */
-export async function getSlides(params: { page?: number; perPage?: number } = {}): Promise<SlidesListResponse> {
+export async function getSlides(params: { page?: number; perPage?: number; projectId?: string } = {}): Promise<SlidesListResponse> {
   const query = new URLSearchParams();
   if (params.page !== undefined) query.set("page", String(params.page));
   if (params.perPage !== undefined) query.set("per_page", String(params.perPage));
+  if (params.projectId) query.set("project_id", params.projectId);
   const endpoint = query.toString() ? `/api/slides?${query.toString()}` : "/api/slides";
 
   // Backend may return either an array or a paginated object.
@@ -2666,4 +2667,67 @@ export async function pollBatchEmbed(
     message: `Batch embedding did not complete within ${maxWaitMs / 3600000} hours`,
     isTimeout: true,
   });
+}
+
+// ====== Project-Scoped Resources API ======
+
+/**
+ * Get model IDs assigned to a project
+ */
+export async function getProjectModels(projectId: string): Promise<string[]> {
+  return fetchApi<string[]>(
+    `/api/projects/${encodeURIComponent(projectId)}/models`
+  );
+}
+
+/**
+ * Assign slides to a project
+ */
+export async function assignSlidesToProject(projectId: string, slideIds: string[]): Promise<unknown> {
+  return fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/slides`,
+    {
+      method: "POST",
+      body: JSON.stringify({ slide_ids: slideIds }),
+    }
+  );
+}
+
+/**
+ * Unassign slides from a project
+ */
+export async function unassignSlidesFromProject(projectId: string, slideIds: string[]): Promise<unknown> {
+  return fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/slides`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ slide_ids: slideIds }),
+    }
+  );
+}
+
+/**
+ * Assign models to a project
+ */
+export async function assignModelsToProject(projectId: string, modelIds: string[]): Promise<unknown> {
+  return fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/models`,
+    {
+      method: "POST",
+      body: JSON.stringify({ model_ids: modelIds }),
+    }
+  );
+}
+
+/**
+ * Unassign models from a project
+ */
+export async function unassignModelsFromProject(projectId: string, modelIds: string[]): Promise<unknown> {
+  return fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/models`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ model_ids: modelIds }),
+    }
+  );
 }

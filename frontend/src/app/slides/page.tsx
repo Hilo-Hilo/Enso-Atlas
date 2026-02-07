@@ -44,6 +44,7 @@ import {
   Home,
   Layers,
 } from "lucide-react";
+import { useProject } from "@/contexts/ProjectContext";
 
 // Pagination component
 function Pagination({
@@ -124,6 +125,7 @@ function Pagination({
 export default function SlidesPage() {
   const router = useRouter();
   const { showToast } = useToast();
+  const { currentProject } = useProject();
 
   // Connection state
   const [isConnected, setIsConnected] = useState(false);
@@ -218,6 +220,7 @@ export default function SlidesPage() {
         const result = await getSlides({
           page: filters.page,
           perPage: filters.perPage,
+          projectId: currentProject.id,
         });
         setSlides(result.slides);
         setTotalSlides(result.total);
@@ -231,7 +234,7 @@ export default function SlidesPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [filters, showToast]);
+  }, [filters, showToast, currentProject.id]);
 
   useEffect(() => {
     fetchSlides();

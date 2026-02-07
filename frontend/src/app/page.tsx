@@ -28,6 +28,7 @@ import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
 import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults } from "@/lib/api";
+import { useProject } from "@/contexts/ProjectContext";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
@@ -145,6 +146,7 @@ export default function HomePageWrapper() {
 
 function HomePage() {
   const searchParams = useSearchParams();
+  const { currentProject } = useProject();
 
   // State
   const [selectedSlide, setSelectedSlide] = useState<SlideInfo | null>(null);
@@ -406,14 +408,14 @@ function HomePage() {
   useEffect(() => {
     const loadSlideList = async () => {
       try {
-        const response = await getSlides();
+        const response = await getSlides({ projectId: currentProject.id });
         setSlideList(response.slides);
       } catch (err) {
         console.error("Failed to load slide list:", err);
       }
     };
     loadSlideList();
-  }, []);
+  }, [currentProject.id]);
 
   // Auto-select slide from URL query params (e.g. /?slide=TCGA-... from Slide Manager)
   useEffect(() => {
@@ -796,7 +798,7 @@ function HomePage() {
       );
       
       // Refresh slide list to update hasLevel0Embeddings status
-      const response = await getSlides();
+      const response = await getSlides({ projectId: currentProject.id });
       setSlideList(response.slides);
       
       // Update selected slide with new embedding status
@@ -815,7 +817,7 @@ function HomePage() {
       setIsGeneratingEmbeddings(false);
       setEmbeddingProgress(null);
     }
-  }, [selectedSlide, resolutionLevel, forceReembed, toast]);
+  }, [selectedSlide, resolutionLevel, forceReembed, toast, currentProject.id]);
 
   // Handle multi-model analysis with improved error handling and progress
   const handleMultiModelAnalyze = useCallback(async (forceRefresh: boolean = false) => {
