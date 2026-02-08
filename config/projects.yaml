@@ -82,7 +82,7 @@ classification_models:
 projects:
   ovarian-platinum:
     name: "Ovarian Cancer - Platinum Sensitivity"
-    cancer_type: ovarian
+    cancer_type: Ovarian Cancer
     prediction_target: platinum_sensitivity
     classes: ["resistant", "sensitive"]
     positive_class: sensitive

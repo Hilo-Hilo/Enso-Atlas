@@ -5236,7 +5236,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                             "negative_label": cfg.get("negative_label", "Negative"),
                             "confidence": min(row["confidence"], 0.99) if row["confidence"] else 0,
                             "auc": cfg.get("auc", 0.0),
-                            "n_training_slides": cfg.get("n_training_slides", 0),
+                            "n_training_slides": cfg.get("n_training_slides", cfg.get("n_slides", 0)),
                             "description": cfg.get("description", ""),
                         }
                         mp = ModelPrediction(**pred_dict)
