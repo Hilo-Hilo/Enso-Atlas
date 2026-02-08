@@ -220,7 +220,7 @@ export function PredictionPanel({
                 Re-analyze
               </button>
             )}
-            {processingTime && !isCached && (
+            {processingTime != null && processingTime > 0 && !isCached && (
               <div className="flex items-center gap-1 text-xs text-gray-500">
                 <Clock className="h-3 w-3" />
                 {processingTime < 1000

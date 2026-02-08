@@ -1539,7 +1539,7 @@ function HomePage() {
             confidence: multiModelResult.predictions[currentProject.prediction_target].confidence,
           } : null)}
           isLoading={isAnalyzing}
-          processingTime={analysisResult?.processingTimeMs ?? multiModelResult?.processingTimeMs}
+          processingTime={analysisResult?.processingTimeMs}
           analysisStep={analysisStep}
           error={!isAnalyzing && !analysisResult && !multiModelResult ? error : null}
           onRetry={retryAnalysis}
