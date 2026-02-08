@@ -2756,10 +2756,20 @@ export interface AvailableModelDetail {
 export async function getProjectAvailableModels(
   projectId: string
 ): Promise<AvailableModelDetail[]> {
-  const resp = await fetchApi<{ models: AvailableModelDetail[] }>(
-    `/api/projects/${encodeURIComponent(projectId)}/available-models`
+  const resp = await fetchApi<{ models: BackendAvailableModel[] }>(
+    `/api/models${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`
   );
-  if (resp && typeof resp === "object" && "models" in resp) return resp.models;
+  if (resp && typeof resp === "object" && "models" in resp) {
+    return resp.models.map((m) => ({
+      id: m.id,
+      displayName: m.name,
+      description: m.description,
+      auc: m.auc,
+      category: m.category,
+      positiveLabel: m.positive_label,
+      negativeLabel: m.negative_label,
+    }));
+  }
   return [];
 }
 

@@ -4429,7 +4429,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         if project_id:
             try:
                 allowed_ids = set(await db.get_project_models(project_id))
-                models = [m for m in models if m.get("model_id") in allowed_ids]
+                models = [m for m in models if m.get("id", m.get("model_id")) in allowed_ids]
             except Exception as e:
                 logger.warning(f"Failed to filter models by project {project_id}: {e}")
 
