@@ -36,6 +36,7 @@ import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, 
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui";
 import { ChevronLeft, ChevronRight, Layers, BarChart3, X } from "lucide-react";
+import { AVAILABLE_MODELS } from "@/components/panels/ModelPicker";
 
 // ResizableLayout removed - using react-resizable-panels directly
 
@@ -45,8 +46,8 @@ const WSIViewer = nextDynamic(
   { ssr: false, loading: () => <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg">Loading viewer...</div> }
 );
 
-// Available models for attention overlay
-const HEATMAP_MODELS = [
+// Fallback heatmap models -- overridden dynamically from AVAILABLE_MODELS
+const DEFAULT_HEATMAP_MODELS = [
   { id: "platinum_sensitivity", name: "Platinum Sensitivity" },
   { id: "tumor_grade", name: "Tumor Grade" },
   { id: "survival_5y", name: "5-Year Survival" },
@@ -219,10 +220,16 @@ function HomePage() {
 
   // Slide QC metrics state
   const [slideQCMetrics, setSlideQCMetrics] = useState<SlideQCMetrics | null>(null);
-  const [selectedModels, setSelectedModels] = useState<string[]>(["platinum_sensitivity", "tumor_grade"]);
+  const [selectedModels, setSelectedModels] = useState<string[]>(() => 
+    AVAILABLE_MODELS.length >= 2 
+      ? AVAILABLE_MODELS.slice(0, 2).map(m => m.id)
+      : ["platinum_sensitivity", "tumor_grade"]
+  );
   const [resolutionLevel, setResolutionLevel] = useState<number>(1); // 0 = full res, 1 = downsampled
   const [forceReembed, setForceReembed] = useState(false);
-  const [heatmapModel, setHeatmapModel] = useState<string | null>("platinum_sensitivity");
+  const [heatmapModel, setHeatmapModel] = useState<string | null>(() => 
+    AVAILABLE_MODELS.length > 0 ? AVAILABLE_MODELS[0].id : "platinum_sensitivity"
+  );
   const [heatmapLevel, setHeatmapLevel] = useState<number>(2); // 0-4, default 2 (512px)
 
   // Multi-model analysis state
@@ -1807,7 +1814,7 @@ function HomePage() {
                 heatmapLevel={heatmapLevel}
                 onHeatmapLevelChange={setHeatmapLevel}
                 onHeatmapModelChange={setHeatmapModel}
-                availableModels={HEATMAP_MODELS}
+                availableModels={AVAILABLE_MODELS.length > 0 ? AVAILABLE_MODELS.map(m => ({ id: m.id, name: m.displayName })) : DEFAULT_HEATMAP_MODELS}
                 onControlsReady={(controls) => { viewerControlsRef.current = controls; }}
               />
             ) : (

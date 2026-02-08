@@ -801,15 +801,17 @@ export function AIAssistantPanel({
     if (analyzeStep?.data?.predictions) {
       const preds = analyzeStep.data.predictions as Record<string, AgentPrediction>;
       
-      if (preds.platinum_sensitivity) {
-        questions.push("Why was this platinum response predicted?");
-        if (preds.platinum_sensitivity.label === "non-responder") {
+      const predKeys = Object.keys(preds);
+      if (predKeys.length > 0) {
+        questions.push("Why was this prediction made?");
+        const firstPred = preds[predKeys[0]];
+        if (firstPred && firstPred.score < 0.5) {
           questions.push("What alternative treatments might work?");
         }
       }
       
-      if (preds.survival_5y) {
-        questions.push("What is the 5-year survival prognosis?");
+      if (predKeys.some(k => k.includes("survival"))) {
+        questions.push("What is the survival prognosis?");
       }
     }
     

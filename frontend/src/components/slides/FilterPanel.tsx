@@ -304,7 +304,7 @@ export function FilterPanel({
                     : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
                 )}
               >
-                {label === "1" ? "Sensitive" : "Resistant"}
+                {label === "1" ? "Positive" : "Negative"}
               </button>
             ))}
           </div>
