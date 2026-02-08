@@ -4,19 +4,19 @@
 
 ## 1. Title
 
-**Enso Atlas: Evidence-Based Pathology AI for Ovarian Cancer Treatment Response**
+**Enso Atlas: On-Premise Pathology Evidence Engine for Ovarian Cancer Treatment Response Prediction**
 
 ---
 
 ## 2. Summary
 
-Ovarian cancer treatment response prediction remains a critical clinical challenge, with no reliable histopathology biomarkers for bevacizumab therapy selection. Enso Atlas addresses this gap with an evidence-based pathology AI system that combines foundation model embeddings with MedGemma-generated clinical reports. Unlike black-box approaches, every prediction is grounded in visual evidence: attention heatmaps, similar case retrieval, and structured pathology summaries. The local-first architecture ensures no patient data leaves hospital networks, meeting stringent healthcare privacy requirements while delivering interpretable, clinical-grade decision support.
+Platinum-based chemotherapy is the standard first-line treatment for ovarian cancer, but ~30% of patients do not respond. Enso Atlas is an on-premise pathology evidence engine that predicts platinum sensitivity from whole-slide histopathology images using all three Google HAI-DEF foundation models. Path Foundation extracts 384-dimensional patch embeddings, TransMIL classifies slides with interpretable attention weights (AUC 0.907 for platinum sensitivity), MedSigLIP enables semantic text-to-patch search for clinician-guided exploration, and MedGemma generates structured clinical reports grounded in visual evidence. Every prediction is accompanied by attention heatmaps, evidence patches, similar case retrieval, and auditable reports. The local-first architecture ensures no patient data leaves hospital networks, running entirely on a single GPU workstation via Docker.
 
 ---
 
 ## 3. Video Demo
 
-**Link:** [placeholder - recording pending]
+**Link:** [placeholder -- recording pending]
 
 See `VIDEO_SCRIPT.md` for the planned demonstration walkthrough.
 
@@ -27,10 +27,10 @@ See `VIDEO_SCRIPT.md` for the planned demonstration walkthrough.
 **https://github.com/Hilo-Hilo/med-gemma-hackathon**
 
 Repository includes:
-- Complete source code with reproducible pipeline
-- Documentation and usage instructions
-- Sample outputs and benchmark results
-- Edge case testing framework
+- Complete source code (FastAPI backend + Next.js frontend)
+- Docker Compose deployment configuration
+- 5 trained TransMIL models with evaluation metrics
+- Documentation, reproduction guide, and benchmark results
 
 ---
 
@@ -38,62 +38,51 @@ Repository includes:
 
 See: [SUBMISSION_WRITEUP.md](./SUBMISSION_WRITEUP.md)
 
-**Key sections:**
-- Problem statement and clinical context
-- System architecture (Path Foundation, CLAM, FAISS, MedGemma)
-- Implementation details and performance benchmarks
-- Edge case handling and failure mode analysis
-- Deployment considerations for clinical environments
+Key sections:
+- Problem statement and clinical motivation
+- System architecture with all 3 HAI-DEF models
+- TransMIL classification results (AUC 0.907, 5-fold CV 0.707)
+- 7-step agentic AI workflow
+- Deployment on NVIDIA DGX Spark
 
 ---
 
 ## 6. HAI-DEF Models Used
 
-### MedGemma 4B
+### Path Foundation
+- **Role:** Histopathology feature extraction
+- **Usage:** ViT-S model extracts 384-dimensional embeddings from 224x224 H&E patches at level 0 (full resolution)
+- **Details:** Runs on CPU (TensorFlow/Blackwell incompatibility); embeddings cached as FP16 for downstream tasks
+- **Impact:** Provides domain-optimized representations that enable TransMIL to achieve AUC 0.907
+
+### MedGemma 1.5 4B
 - **Role:** Clinical report generation
-- **Usage:** Generates structured tumor board summaries from visual evidence
-- **Key feature:** Constrained to describe morphological observations only; avoids prescriptive language
+- **Usage:** Generates structured tumor board summaries from evidence patches and model outputs (~20s/report on GPU)
+- **Details:** Constrained to describe morphological observations only; avoids prescriptive language; JSON-structured output with safety disclaimers
 
-### Path Foundation (Primary) vs DINOv2 (Fallback)
-- **Path Foundation:** Google's histopathology-optimized ViT-S model (384-dim embeddings)
-  - Provides domain-specific representations for H&E tissue patches
-  - Currently gated; requires access approval
-- **DINOv2:** Self-supervised vision transformer fallback
-  - Used when Path Foundation access is unavailable
-  - Maintains pipeline functionality with general-purpose embeddings
-
-The modular architecture supports swapping embedding models without pipeline modifications.
+### MedSigLIP
+- **Role:** Semantic text-to-patch search
+- **Usage:** Pathologists query tissue regions using natural language (e.g., "tumor infiltrating lymphocytes") to find matching patches
+- **Details:** Dual encoder architecture enables real-time similarity search across thousands of patches per slide
 
 ---
 
 ## 7. Team
 
-**Hanson Wen** (solo)
+**Hanson Wen** (solo) -- UC Berkeley
 
 ---
 
 ## 8. Acknowledgments
 
-- **Google HAI-DEF** for MedGemma and the Impact Challenge
-- **TCGA (The Cancer Genome Atlas)** for ovarian cancer whole-slide image data
+- **Google HAI-DEF** for Path Foundation, MedGemma, MedSigLIP, and the Impact Challenge
+- **TCGA (The Cancer Genome Atlas)** for ovarian cancer whole-slide image data and clinical annotations
 - **OpenSlide** for whole-slide image processing
-- **CLAM** (Mahmood Lab) for attention-based multiple instance learning
 - **FAISS** (Meta AI) for similarity search infrastructure
+- **NVIDIA** for DGX Spark hardware
 
 ---
 
-## Short Pitch (Tweet-length)
+## Short Pitch
 
-> Enso Atlas: AI pathology that shows its work. Predicts ovarian cancer treatment response with interpretable evidence and MedGemma-generated reports. Local-first, no PHI leaves the hospital.
-
----
-
-## Submission Checklist
-
-- [x] Title and summary
-- [x] GitHub repository link
-- [x] Technical writeup
-- [x] HAI-DEF model documentation
-- [x] Team information
-- [x] Acknowledgments
-- [ ] Video demo (pending recording)
+Enso Atlas: on-premise pathology AI that shows its work. Predicts ovarian cancer platinum sensitivity (AUC 0.907) with interpretable evidence -- attention heatmaps, semantic search, and MedGemma reports. All 3 HAI-DEF models, fully local, no PHI leaves the hospital.

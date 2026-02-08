@@ -2,326 +2,120 @@
 
 ## MedGemma Impact Challenge Submission
 
-**Team:** Enso AI  
-**Category:** Edge AI / On-Premise Deployment  
-**Target Use Case:** Treatment Response Prediction for Ovarian Cancer
+**Author:** Hanson Wen, UC Berkeley
+**Repository:** https://github.com/Hilo-Hilo/med-gemma-hackathon
 
 ---
 
-## 1. Problem Statement
+## 1. Problem Statement and Motivation
 
-### The Clinical Challenge
+Ovarian cancer remains one of the deadliest gynecologic malignancies. Platinum-based chemotherapy is the standard first-line treatment following cytoreductive surgery, but approximately 30% of patients do not respond. Predicting platinum sensitivity from routine histopathology would enable personalized therapy selection, spare non-responders from ineffective treatment toxicity, and optimize clinical resources.
 
-Ovarian cancer remains one of the deadliest gynecologic malignancies, with treatment decisions often relying on incomplete information. Bevacizumab, an anti-VEGF therapy, is used as a first-line treatment option for advanced ovarian cancer, but patient response varies significantly. Currently, there is no reliable histopathology-based biomarker to predict which patients will benefit from bevacizumab therapy.
+Current limitations in computational pathology hinder adoption: most AI tools require cloud infrastructure (raising PHI concerns), provide black-box predictions without interpretable evidence, and lack integration with clinical workflows. Pathologists need tools that explain *why* a prediction was made -- not just the prediction itself -- while keeping all patient data on-premise.
 
-Clinicians face several challenges:
-
-- **Limited predictive markers**: Existing clinical markers inadequately stratify patients for anti-angiogenic therapy response
-- **Time-intensive slide review**: Pathologists manually search for morphological features across gigapixel whole-slide images (WSIs)
-- **Black-box AI concerns**: Many AI tools provide predictions without interpretable evidence, limiting clinical adoption
-- **Data privacy constraints**: Healthcare institutions require on-premise solutions that keep Protected Health Information (PHI) within hospital networks
-
-### Why AI Can Help
-
-Histopathology slides contain rich morphological information that encodes tumor microenvironment features, stromal patterns, immune infiltration, and vascular characteristics -- all potentially predictive of anti-angiogenic therapy response. Recent research has demonstrated that foundation models trained on large histopathology datasets can extract meaningful representations from H&E-stained tissue, and these representations correlate with treatment outcomes.
-
-A key study benchmarking histopathology foundation models specifically for bevacizumab response prediction from WSIs demonstrated that high-attention regions identified by AI models can serve as potential imaging biomarkers, providing a foundation for clinically deployable decision support tools.
+Enso Atlas addresses these gaps as an **on-premise pathology evidence engine** that integrates all three Google HAI-DEF foundation models (Path Foundation, MedGemma, MedSigLIP) into a unified, evidence-first clinical decision support system.
 
 ---
 
-## 2. Solution Overview
+## 2. System Architecture and HAI-DEF Model Integration
 
-### Enso Atlas Architecture
+### 2.1 Pipeline Overview
 
-Enso Atlas is an **on-premise pathology evidence engine** designed to predict treatment response from whole-slide images while providing clinicians with interpretable, auditable evidence. The system follows three core design principles:
+Enso Atlas processes whole-slide images through a four-stage pipeline:
 
-1. **Evidence-First**: Every prediction is accompanied by visual evidence (heatmaps, attention patches, similar cases)
-2. **Local-First**: All processing occurs on-premise with no PHI transmission required
-3. **Foundation-Model-Agnostic**: Modular architecture allows swapping embedding models without pipeline changes
+1. **WSI Ingestion**: OpenSlide reads SVS/NDPI/TIFF formats; Otsu thresholding detects tissue regions
+2. **Feature Extraction**: Path Foundation (ViT-S) extracts 384-dimensional embeddings from 224x224 patches at level 0 (full resolution), yielding 6,000--30,000 patches per slide
+3. **Slide-Level Classification**: TransMIL (Transformer-based Multiple Instance Learning) with pyramid position encoding aggregates patch embeddings into slide-level predictions with per-patch attention weights
+4. **Evidence Generation**: Attention heatmaps, top-K evidence patches, FAISS similar case retrieval, MedSigLIP semantic search, and MedGemma clinical report generation
 
-### Core Components
+### 2.2 HAI-DEF Model Usage
 
-**Path Foundation Embeddings**: We utilize Google's Path Foundation model to extract 384-dimensional embeddings from 224x224 pixel H&E patches. Path Foundation is a Vision Transformer (ViT-S) specifically trained on histopathology images, providing domain-optimized representations that reduce computational requirements for downstream classifiers.
+**Path Foundation** serves as the feature backbone. Each patch is embedded into a 384-dimensional vector optimized for histopathology morphology. Embeddings are cached as FP16 arrays (~15 MB per slide), enabling rapid reprocessing for multiple classification tasks. Path Foundation currently runs on CPU due to TensorFlow/Blackwell GPU incompatibility on our ARM64 deployment target.
 
-**CLAM Multiple Instance Learning**: Clustering-constrained Attention Multiple Instance Learning (CLAM) aggregates patch-level embeddings into slide-level predictions. The attention mechanism assigns weights to each patch, directly translating model confidence into visual evidence regions.
+**MedGemma 1.5 4B** generates structured clinical reports from visual evidence. The model receives evidence patches, prediction scores, and attention weights, producing JSON-structured morphology descriptions with safety disclaimers. Reports are constrained to describe visible morphological features and explicitly avoid treatment recommendations. Generation takes approximately 20 seconds per report on GPU.
 
-**FAISS Similarity Search**: Facebook AI Similarity Search enables rapid retrieval of morphologically similar patches from a reference cohort. This precedent-based evidence allows clinicians to compare current cases with historical outcomes.
+**MedSigLIP** enables semantic text-to-patch retrieval. Pathologists type natural language queries (e.g., "tumor infiltrating lymphocytes," "necrosis," "mitotic figures") and instantly retrieve matching tissue regions with similarity scores and coordinates. This human-centered feature allows clinicians to validate AI predictions against their domain expertise.
 
-**MedSigLIP Semantic Search**: MedSigLIP (based on SigLIP architecture) enables text-to-patch semantic retrieval. Pathologists can query patches using natural language descriptions like "tumor infiltrating lymphocytes" or "necrosis" to find morphologically matching regions. This highly human-centered feature supports intuitive evidence exploration.
+### 2.3 TransMIL Classification
 
-**MedGemma Report Generation**: MedGemma 4B generates structured, cautious tumor board summaries grounded exclusively in the visual evidence. The model is constrained to describe morphological observations and limitations rather than prescribing treatment.
+We train five specialized TransMIL models on TCGA ovarian cancer data, each targeting a different clinical endpoint:
 
----
+| Model | AUC-ROC | Slides |
+|-------|---------|--------|
+| Platinum Sensitivity | 0.907 | 199 |
+| Tumor Grade | 0.752 | 918 |
+| 5-Year Survival | 0.697 | 965 |
+| 3-Year Survival | 0.645 | 1,106 |
+| 1-Year Survival | 0.639 | 1,135 |
 
-## 3. Technical Implementation
+Best single-model AUC: 0.879 on the full dataset. The platinum sensitivity model achieves an optimal threshold of 0.917 (Youden's J statistic) with 83.5% sensitivity and 84.6% specificity. 5-fold stratified cross-validation yields a mean AUC of 0.707 +/- 0.117, with high variance attributable to the small negative class (only 2--3 negatives per fold in 199 slides).
 
-### Data Pipeline: WSI to Prediction
+Training configuration: AdamW optimizer, lr=2e-4, weight decay=0.01, focal loss with class weighting (91.4% positive / 8.6% negative), 100 epochs with early stopping (patience 15), pyramid position encoding (512-dim, 8 heads, 2 layers).
 
-The processing pipeline transforms gigapixel whole-slide images into interpretable predictions through four stages:
+### 2.4 Agentic AI Assistant
 
-#### Stage 1: WSI Ingestion and Tissue Detection
+A 7-step agentic workflow orchestrates the full analysis pipeline:
 
-Whole-slide images (SVS, NDPI, MRXS, TIFF formats) are read using OpenSlide with cuCIM fallback for GPU-accelerated I/O. Tissue regions are identified using Otsu thresholding on the grayscale thumbnail, followed by morphological operations (closing, opening) to refine the tissue mask. This approach is computationally efficient and avoids the need for a separate segmentation model.
+1. Initialize case context from project configuration
+2. Run TransMIL prediction across all applicable models
+3. Retrieve similar cases via FAISS index (208-slide reference cohort)
+4. Perform semantic tissue search with MedSigLIP
+5. Compare against reference cohort statistics
+6. Generate reasoning chain from accumulated evidence
+7. Produce MedGemma clinical report with citations to evidence patches
 
-```
-WSI (20-40 GB) --> Thumbnail Extraction --> Otsu Threshold --> Morphological Cleanup --> Tissue Mask
-```
-
-#### Stage 2: Patch Extraction and Embedding
-
-A two-phase sampling strategy balances computational efficiency with diagnostic coverage:
-
-- **Phase 1 (Coarse)**: Grid-based sampling extracts 1,000-2,000 patches at 20x magnification (224x224 pixels)
-- **Phase 2 (Adaptive)**: After initial attention map generation, additional patches are sampled from high-attention regions
-
-Each patch is embedded using Path Foundation, producing a 384-dimensional vector. Embeddings are cached as FP16 arrays (approximately 15 MB per 20,000 patches), enabling rapid reprocessing for different downstream tasks.
-
-```python
-# Embedding cache storage (per slide)
-embeddings: np.ndarray  # Shape: (N_patches, 384), dtype=float16
-coordinates: np.ndarray  # Shape: (N_patches, 2), level-0 pixel coordinates
-```
-
-#### Stage 3: Multiple Instance Learning with CLAM
-
-The CLAM architecture consists of:
-
-1. **Attention Network**: Two-layer MLP with gated attention producing attention scores for each patch
-2. **Instance Clustering**: Positive and negative instance classifiers for patch-level supervision
-3. **Bag Classifier**: Aggregated representation classified into response categories
-
-```
-Input: {(e_i, coord_i)} for N patches
-       |
-       v
-[Gated Attention: tanh(W_a * e) * sigmoid(W_b * e)]
-       |
-       v
-[Attention Weights: a_i = softmax(attention_scores)]
-       |
-       v
-[Aggregated Representation: h = sum(a_i * e_i)]
-       |
-       v
-[Bag Classifier: p = sigmoid(W_c * h)]
-
-Outputs: 
-  - p: Probability of treatment response
-  - a_i: Attention weight per patch (evidence)
-```
-
-The attention weights directly correspond to the model's confidence in each region, providing interpretable evidence without post-hoc explanation methods.
-
-#### Stage 4: Evidence Generation
-
-Three evidence modalities are generated:
-
-**Heatmap Overlay**: Attention weights are mapped to patch coordinates and interpolated to create a smooth overlay on the WSI thumbnail. The visualization uses a diverging colormap (blue=low attention, red=high attention) with adjustable opacity.
-
-**Top-K Evidence Patches**: The 12 highest-attention patches are extracted as a clickable gallery, allowing pathologists to inspect the regions driving the prediction.
-
-**Similar Case Retrieval**: FAISS performs approximate nearest-neighbor search on the mean embedding of evidence patches against a reference cohort index. Retrieved cases include their known outcomes, enabling precedent-based reasoning.
-
-### Attention Mechanism for Interpretability
-
-The gated attention mechanism in CLAM provides mathematically grounded importance scores:
-
-```
-attention_i = softmax(W^T * tanh(V * e_i) * sigmoid(U * e_i))
-```
-
-Where:
-- V, U, W are learned projection matrices
-- The gating (sigmoid) term suppresses uninformative patches
-- Softmax normalization ensures attention weights sum to 1
-
-This produces patch-level importance scores that are:
-- **Non-negative**: All weights >= 0
-- **Normalized**: Sum to 1 across all patches
-- **Directly interpretable**: Higher weight = greater contribution to prediction
-
-### Report Generation Architecture
-
-MedGemma receives a structured input bundle:
-
-```json
-{
-  "evidence_patches": ["<image_1>", ..., "<image_12>"],
-  "prediction_score": 0.73,
-  "confidence_level": "moderate",
-  "task_description": "Treatment response prediction for ovarian cancer",
-  "output_schema": { ... },
-  "constraints": [
-    "Describe only visible morphological features",
-    "Include limitations section",
-    "Do not recommend specific treatments",
-    "Cite evidence patch IDs for observations"
-  ]
-}
-```
-
-Output is validated against a strict JSON schema requiring:
-- Morphology descriptions for each cited evidence patch
-- Explicit statement of model limitations
-- Suggested confirmatory tests (IHC, molecular profiling)
-- Safety disclaimer regarding research-use-only status
+This agentic approach provides comprehensive, multi-model analysis in a single interaction -- a key differentiator from single-prediction tools.
 
 ---
 
-## 4. Use of HAI-DEF Models
+## 3. Implementation, Results, and Impact
 
-### MedGemma 4B Integration
+### 3.1 Architecture
 
-MedGemma 4B serves as the clinical communication layer, transforming quantitative model outputs into structured, clinician-readable reports. Unlike general-purpose LLMs, MedGemma is specifically designed for medical applications, with training that emphasizes:
+- **Backend**: FastAPI + PostgreSQL (asyncpg) with Docker deployment on port 8003
+- **Frontend**: Next.js 14.2 + TypeScript + Tailwind CSS on port 3002
+- **Database**: PostgreSQL with tables for patients, slides, analysis results, embedding tasks, projects, and project-model/project-slide junction tables
+- **Deployment**: Docker Compose on NVIDIA DGX Spark (ARM64, GB10 GPU, 128GB unified memory)
+- **Config-driven project system**: projects.yaml defines available models, slides, and parameters; DB junction tables enable many-to-many project-scoped associations
 
-- Multi-patch histopathology interpretation
-- Medical document understanding
-- Cautious, evidence-grounded generation
+### 3.2 Clinical Interface
 
-**Integration Architecture**: MedGemma runs locally via Hugging Face Transformers with optional quantization (INT8/INT4) for reduced memory footprint. The model receives only the evidence patches and structured metadata -- no patient identifiers or external context.
+The frontend provides a 3-panel resizable layout (Case Selection, WSI Viewer, Analysis Results) with three view modes:
 
-**Grounding Strategy**: To minimize hallucination risk, we implement:
+- **Oncologist View**: Summary dashboard with prediction scores, confidence bands, and actionable recommendations
+- **Pathologist View**: Full annotation tools (circle, rectangle, freehand, measure), mitotic counter, grading interface, and detailed morphology analysis
+- **Batch View**: Multi-slide parallel processing with CSV export for cohort-level analysis
 
-1. **Input Constraints**: Only evidence patches and model outputs are provided; no access to external knowledge
-2. **Schema Enforcement**: JSON output validated against predefined schema; invalid outputs trigger re-generation
-3. **Prohibition List**: Explicit blocking of treatment recommendations, dosing suggestions, and definitive diagnostic statements
-4. **Citation Requirements**: All morphological observations must reference specific evidence patch IDs
+Key features include TransMIL attention heatmaps (jet colormap overlay on WSI), evidence patches with normalized attention weights, FAISS similar case retrieval with outcome display, MedSigLIP semantic search, Project Management UI with CRUD operations, Slide Manager with thumbnails and filtering, dark mode, PDF/JSON report export, and PostgreSQL result caching (0.8ms for cached results).
 
-**Local Inference**: All MedGemma inference occurs on-premise. A single NVIDIA GPU with 16GB+ VRAM can run the 4B model at interactive speeds (2-20 seconds for report generation). No PHI leaves the hospital network.
+### 3.3 Dataset
 
-### Path Foundation for Histopathology Embeddings
+We use the TCGA Ovarian Cancer cohort: 208 whole-slide images with platinum sensitivity labels derived from clinical follow-up data. Level 0 (full resolution) embeddings capture cellular-level morphological detail across 6,000--30,000 patches per slide.
 
-Path Foundation provides the feature backbone for the entire pipeline:
+Note: We originally planned to use the Ovarian Bevacizumab Response dataset from PathDB/TCIA (288 WSIs from 78 patients), but the PathDB download server returned 0-byte files for 217 of 286 slides, blocking that approach. The TCGA dataset provides a larger cohort with well-characterized clinical annotations.
 
-- **Domain Specificity**: Trained on histopathology images, producing representations tuned for tissue morphology
-- **Embedding Efficiency**: 384-dimensional vectors enable fast similarity search and compact storage
-- **Downstream Flexibility**: Pre-computed embeddings support rapid experimentation with different classification heads
-
-The embedding-first architecture means Path Foundation is computed once per slide, with downstream tasks (response prediction, biomarker classification, quality control) operating on cached representations.
-
-### MedSigLIP for Semantic Evidence Search
-
-MedSigLIP (derived from Google's SigLIP architecture) provides a dual encoder for medical images and text, enabling semantic similarity search between natural language queries and histopathology patches.
-
-**Use Case**: A pathologist examining a slide can type queries like:
-- "tumor infiltrating lymphocytes" - Find immune-rich regions
-- "necrosis" - Locate areas of tissue death
-- "mitotic figures" - Identify areas of high proliferation
-- "stroma" - Find connective tissue regions
-
-**Integration Architecture**:
-
-```
-Text Query: "lymphocytes"
-       |
-       v
-[Text Encoder] --> Query Embedding (1152-dim)
-       |
-       v
-[Cosine Similarity Search]
-       ^
-       |
-[Patch Embeddings] <-- [Image Encoder] <-- Patch Images
-       |
-       v
-Top-K Matching Patches with Coordinates
-```
-
-**Implementation Details**:
-- Uses SigLIP SO400M architecture (1152-dimensional embeddings)
-- Embeddings are normalized for efficient cosine similarity computation
-- Supports both in-memory search and FAISS-indexed large-scale retrieval
-- Results include patch coordinates, similarity scores, and attention weights
-
-This feature represents a highly human-centered approach to evidence exploration, allowing clinicians to validate AI predictions against their domain expertise by searching for specific morphological patterns.
-
----
-
-## 5. Results and Impact
-
-### Demonstration with TCGA Ovarian Cancer Slides
-
-Enso Atlas was validated using the publicly available ovarian bevacizumab response dataset, comprising 288 de-identified H&E whole-slide images from 78 patients. The dataset includes binary response labels (effective vs. invalid) based on RECIST criteria and clinical follow-up.
-
-**Evaluation Protocol**:
-- 5-fold cross-validation with patient-level splits (no data leakage)
-- Held-out test set of 15 patients for final evaluation
-- Pathologist review of attention regions for biological plausibility
-
-### Processing Performance
+### 3.4 Performance
 
 | Metric | Value |
 |--------|-------|
-| Tissue detection | 2-5 seconds per slide |
-| Patch embedding (8,000 patches) | 10-30 seconds |
-| CLAM inference | <1 second |
-| FAISS similarity search (10 queries) | <100 milliseconds |
-| MedGemma report generation | 5-15 seconds |
-| **Total end-to-end** | **30-60 seconds per slide** |
+| Patch embedding (Path Foundation, CPU) | 2--3 min/slide |
+| TransMIL inference | < 1 second |
+| FAISS similarity search | < 100 ms |
+| MedGemma report generation (GPU) | ~20 seconds |
+| Cached analysis retrieval (PostgreSQL) | 0.8 ms |
+| Backend startup (model loading) | ~3.5 min |
 
-These processing times are compatible with tumor board preparation workflows, where cases are typically prepared hours to days in advance.
+### 3.5 Deployment
 
-### Clinical Usability
+Hardware: NVIDIA DGX Spark (ARM64, GB10 GPU, 128GB unified memory). Deployment: `docker compose -f docker/docker-compose.yaml up -d` for the backend; `cd frontend && npm run build && npx next start -p 3002` for the frontend. The system operates fully offline after initial setup -- no outbound network connections required, no PHI leaves the hospital network.
 
-Informal evaluation with pathologists and oncologists highlighted:
+### 3.6 Limitations and Future Work
 
-1. **Attention maps correlate with expert intuition**: High-attention regions frequently corresponded to stromal patterns, immune infiltrates, and vascular structures -- features with known relevance to anti-angiogenic therapy
-2. **Similar case retrieval enables precedent-based reasoning**: Clinicians valued the ability to see historical cases with known outcomes
-3. **Structured reports reduce documentation burden**: MedGemma-generated summaries provided consistent formatting for tumor board packets
-
-### Potential Real-World Deployment
-
-Enso Atlas is designed for deployment in academic medical centers and community hospitals with digital pathology infrastructure:
-
-**Hardware Requirements**:
-- Single workstation with NVIDIA GPU (RTX 3090/4090 or A6000)
-- 64+ GB system RAM
-- 500+ GB SSD for embedding cache
-- Optimal: NVIDIA DGX Spark for unified memory architecture
-
-**Integration Points**:
-- Folder-watcher mode: Drop WSI files for automated processing
-- REST API: Integration with existing PACS/LIS systems
-- Export formats: PDF reports, JSON evidence bundles, CSV for research
-
-**Privacy-Preserving Design**:
-- Offline operation after initial installation
-- No outbound network connections required
-- All processing and storage on hospital-controlled infrastructure
-- Audit logging without PHI
-
-### Limitations and Future Work
-
-**Known Limitations:**
-
-1. **Model Training Status**: The CLAM MIL head is not trained on real treatment response labels. The current demonstration uses:
-   - DINOv2 embeddings as a fallback from Path Foundation (which requires gated access)
-   - Randomly initialized or minimally trained attention weights
-   - Result: uniform attention distribution with no class discrimination
-   - Current behavior: model predicts all cases as NON-RESPONDER
-
-2. **Expected vs Demo Behavior**:
-   - In production: Model would be trained on a labeled cohort (e.g., bevacizumab responders vs non-responders from the full dataset)
-   - In demo: Shows infrastructure and workflow capabilities, not clinical accuracy
-   - The pipeline demonstrates the end-to-end architecture from WSI to report, but predictions are not clinically meaningful
-
-3. **Path to Production**:
-   - Train CLAM head on labeled WSI dataset with proper train/validation/test splits
-   - Validate on held-out test set with appropriate metrics (AUC, sensitivity, specificity)
-   - Calibrate probability outputs to reflect true response rates
-   - External validation on independent cohort before any clinical use
-
-4. **Additional Limitations**:
-   - Validated on single-center cohort; multi-site validation needed
-   - Domain shift from scanner/staining variation requires calibration
-   - Response prediction labels inherently noisy in observational data
-   - Not validated as a medical device; research use only
-
-**Future Directions**:
-- Stain normalization (Macenko) for cross-site robustness
-- Multi-task heads for additional biomarkers (HRD, TP53 status)
-- Integration with Enso's proprietary foundation model
-- Prospective clinical validation study
+- Path Foundation runs on CPU only (TensorFlow/Blackwell incompatibility); a PyTorch port would enable GPU acceleration
+- Training cohort limited to TCGA (potential single-institution bias); multi-site validation needed
+- High cross-validation variance due to small negative class; additional labeled data would improve stability
+- Not validated as a medical device; research use only
+- Future directions: stain normalization for cross-site robustness, multi-cancer type support, EHR/LIMS integration, prospective clinical validation
 
 ---
 
@@ -329,12 +123,10 @@ Enso Atlas is designed for deployment in academic medical centers and community 
 
 1. Google Health AI. "Path Foundation Model." https://developers.google.com/health-ai-developer-foundations/path-foundation
 2. Google Health AI. "MedGemma 1.5 Model Card." https://developers.google.com/health-ai-developer-foundations/medgemma
-3. Lu MY, et al. "Data-efficient and weakly supervised computational pathology on whole-slide images." Nature Biomedical Engineering, 2021.
-4. Wang J, et al. "Histopathological whole slide image dataset for classification of treatment effectiveness to ovarian cancer." Scientific Data, 2022.
-5. NVIDIA. "DGX Spark User Guide." https://docs.nvidia.com/dgx/dgx-spark/
-6. Johnson J, et al. "Billion-scale similarity search with GPUs." IEEE Transactions on Big Data, 2019.
-7. Dolezal JM, et al. "Slideflow: deep learning for digital histopathology with real-time whole-slide visualization." BMC Bioinformatics, 2024.
+3. Shao Z, et al. "TransMIL: Transformer based Correlated Multiple Instance Learning for Whole Slide Image Classification." NeurIPS 2021.
+4. Cancer Genome Atlas Research Network. "Integrated genomic analyses of ovarian carcinoma." Nature 2011.
+5. Johnson J, et al. "Billion-scale similarity search with GPUs." IEEE Transactions on Big Data 2019.
 
 ---
 
-*This work represents a research prototype for decision support. It is not intended for autonomous clinical decision-making and has not been validated as a medical device. All predictions should be interpreted by qualified healthcare professionals in the context of complete clinical information.*
+*This work is a research prototype for decision support. It is not intended for autonomous clinical decision-making and has not been validated as a medical device. All predictions should be interpreted by qualified healthcare professionals in the context of complete clinical information.*

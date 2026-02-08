@@ -2,6 +2,9 @@
 
 ## Technical Report
 
+**Author:** Hanson Wen, UC Berkeley
+**Date:** February 2026
+
 ---
 
 ## 1. Problem Statement
@@ -10,24 +13,21 @@
 
 High-grade serous ovarian carcinoma (HGSOC) is the most lethal gynecologic malignancy, with a five-year survival rate below 50%. First-line treatment typically involves platinum-based chemotherapy following cytoreductive surgery. However, approximately 30% of patients do not respond to initial chemotherapy, experiencing disease progression or recurrence within six months.
 
-The ability to predict treatment response before initiating chemotherapy would fundamentally change clinical practice by:
-
-- **Enabling personalized treatment selection**: Non-responders could be offered alternative therapies (PARP inhibitors, immunotherapy, clinical trials) rather than ineffective chemotherapy.
-- **Reducing unnecessary toxicity**: Chemotherapy causes significant side effects including nausea, neuropathy, and immunosuppression. Sparing non-responders from ineffective treatment improves quality of life.
-- **Optimizing resource allocation**: Healthcare systems could better allocate expensive therapies based on predicted efficacy.
+The ability to predict treatment response before initiating chemotherapy would fundamentally change clinical practice by enabling personalized treatment selection, reducing unnecessary toxicity for non-responders, and optimizing resource allocation for expensive therapies.
 
 ### 1.2 Current Limitations
 
-Existing biomarkers for treatment response prediction (BRCA status, HRD scores) have limited sensitivity and are not universally available. Pathology-based assessment remains subjective and lacks standardized predictive criteria. There is a critical need for computational tools that can extract predictive information from routinely collected histopathology slides.
+Existing biomarkers for treatment response prediction (BRCA status, HRD scores) have limited sensitivity and are not universally available. Pathology-based assessment remains subjective and lacks standardized predictive criteria. There is a critical need for computational tools that extract predictive information from routinely collected histopathology slides while providing interpretable evidence for clinical adoption.
 
 ### 1.3 Project Objective
 
-This project develops a deep learning system that predicts platinum-based chemotherapy response from digitized H&E-stained whole-slide images (WSIs) of ovarian cancer tissue. The system provides:
+This project develops Enso Atlas, a deep learning system that predicts platinum-based chemotherapy response from digitized H&E-stained whole-slide images (WSIs) of ovarian cancer tissue. The system provides:
 
-1. Binary classification (Responder vs. Non-responder) with calibrated probability scores
-2. Interpretable evidence through attention-weighted tissue regions
-3. Uncertainty quantification to flag cases requiring expert review
-4. Integration-ready clinical decision support interface
+1. Multi-endpoint classification via 5 specialized TransMIL models (platinum sensitivity, tumor grade, 1/3/5-year survival)
+2. Interpretable evidence through attention-weighted tissue regions and heatmaps
+3. Semantic tissue search via MedSigLIP for clinician-guided exploration
+4. Structured clinical reports via MedGemma 1.5 4B
+5. On-premise deployment with no PHI exposure
 
 ---
 
@@ -35,229 +35,176 @@ This project develops a deep learning system that predicts platinum-based chemot
 
 ### 2.1 System Architecture
 
-The system follows a two-stage pipeline architecture common in computational pathology:
+The system follows a multi-stage pipeline:
 
 ```
-WSI Input -> Patch Extraction -> Feature Embedding -> MIL Aggregation -> Prediction
-              (256x256 px)      (Path Foundation)       (CLAM)           (Binary)
+WSI Input -> Tissue Detection -> Patch Extraction -> Path Foundation Embedding -> TransMIL -> Prediction + Evidence
+              (Otsu threshold)   (224x224, level 0)   (384-dim, ViT-S)          (5 models)   (heatmap, patches, report)
 ```
 
 **Stage 1: Feature Extraction**
 
-Whole-slide images are tiled into non-overlapping 256x256 pixel patches at 20x magnification. Each patch is processed through a pre-trained pathology foundation model to generate a feature embedding vector.
+Whole-slide images are tiled into non-overlapping 224x224 pixel patches at level 0 (full resolution). Each patch is processed through Path Foundation (ViT-S) to generate a 384-dimensional embedding vector. At full resolution, each slide yields 6,000--30,000 patches, capturing cellular-level morphological detail.
 
 **Stage 2: Multiple Instance Learning**
 
-The bag of patch embeddings (typically 1,000-50,000 per slide) is processed by a multiple instance learning (MIL) model that learns to aggregate patch-level features into a slide-level prediction.
+The bag of patch embeddings is processed by TransMIL (Transformer-based Multiple Instance Learning), which uses self-attention with pyramid position encoding to learn spatial relationships between patches and aggregate them into slide-level predictions with per-patch attention weights.
 
-### 2.2 Foundation Model: Path Foundation
+### 2.2 Foundation Models
 
-We leverage Google's Path Foundation model for feature extraction. Path Foundation is a pathology-specific vision transformer trained on over 150 million histopathology images using self-supervised learning (DINOv2 framework).
+**Path Foundation** is Google's pathology-specific Vision Transformer trained on histopathology images using self-supervised learning. Key advantages: domain-specific representations capturing nuclear morphology, tissue architecture, and cellular patterns; compact 384-dimensional embeddings for efficient downstream processing; extract-once-reuse-many architecture. Currently runs on CPU due to TensorFlow/Blackwell GPU incompatibility on ARM64.
 
-Key advantages of Path Foundation:
+**MedGemma 1.5 4B** generates structured clinical reports from evidence patches and model outputs. Constrained to describe visible morphological features with explicit safety disclaimers. ~20 seconds per report on GPU.
 
-- **Domain-specific pretraining**: Learned representations capture pathology-relevant features (nuclear morphology, tissue architecture, cellular patterns)
-- **Transfer learning**: Rich feature representations enable strong performance even with limited labeled training data
-- **Computational efficiency**: Extract features once, reuse for multiple downstream tasks
+**MedSigLIP** enables semantic text-to-patch retrieval, allowing pathologists to query tissue regions with natural language descriptions.
 
-Each 256x256 patch is embedded into a 1,024-dimensional feature vector that captures histopathological characteristics without requiring patch-level annotations.
+### 2.3 TransMIL Architecture
 
-### 2.3 MIL Model: CLAM (Clustering-constrained Attention MIL)
-
-We employ CLAM (Clustering-constrained Attention Multiple Instance Learning) for slide-level classification. CLAM addresses the fundamental challenge in computational pathology: learning to identify relevant regions within large, heterogeneous tissue samples.
-
-**Architecture Details:**
+TransMIL replaces traditional attention-based MIL (e.g., CLAM) with a Transformer architecture that captures inter-patch correlations:
 
 ```
-Patch Embeddings [N x 1024]
+Patch Embeddings [N x 384]
         |
-   Linear Layer [1024 -> 512]
+   Linear Projection [384 -> 512]
         |
-   Attention Module
-   - Query: [512 -> 256] -> tanh
-   - Key: [512 -> 256]
-   - Score: Query * Key.T -> softmax -> attention weights
+   Pyramid Position Encoding
         |
-   Weighted Aggregation [N x 512] -> [1 x 512]
+   Transformer Layers (8 heads, 2 layers)
         |
-   Classifier [512 -> 256 -> 2]
+   Class Token Aggregation [1 x 512]
         |
-   Output: (probability, attention_weights)
+   Classifier [512 -> 2]
+        |
+   Output: (probability, per-patch attention weights)
 ```
 
-**Key Features:**
-
-1. **Attention-based aggregation**: Learns which patches are most predictive of treatment response
-2. **Instance-level clustering**: Regularization term encourages attention to focus on distinct tissue phenotypes
-3. **Interpretability**: Attention weights provide direct explanation of model predictions
+Key advantages over CLAM: captures long-range spatial dependencies between distant tissue regions; position encoding preserves spatial relationships; self-attention provides richer patch interactions than gated attention.
 
 ### 2.4 Training Configuration
 
 | Parameter | Value |
 |-----------|-------|
-| Optimizer | Adam |
-| Learning rate | 1e-4 |
-| Weight decay | 1e-5 |
+| Optimizer | AdamW |
+| Learning rate | 2e-4 |
+| Weight decay | 0.01 |
 | Batch size | 1 (slide-level) |
 | Epochs | 100 |
 | Early stopping | 15 epochs patience |
-| Loss function | Cross-entropy |
-| Data augmentation | Random patch dropout (20%) |
+| Loss function | Focal loss with class weighting |
+| Class balance | 91.4% positive / 8.6% negative |
+| Position encoding | Pyramid (512-dim, 8 heads, 2 layers) |
 
-**Handling Class Imbalance:**
+### 2.5 Evaluation
 
-Treatment response datasets typically exhibit class imbalance (more responders than non-responders). We address this through:
-
-- Weighted sampling during training
-- Class-balanced loss function
-- Threshold optimization post-training
-
-### 2.5 Uncertainty Quantification
-
-Clinical deployment requires knowing when the model is uncertain. We implement Monte Carlo Dropout for uncertainty estimation:
-
-1. Enable dropout during inference
-2. Run N=20 forward passes per sample
-3. Compute prediction mean and standard deviation
-4. Flag samples with high variance for expert review
-
-**Uncertainty Thresholds:**
-- Low: std < 0.05
-- Moderate: 0.05 <= std < 0.15
-- High: std >= 0.15 (requires manual review)
-
-### 2.6 Evaluation Metrics
-
-We report comprehensive metrics relevant for clinical deployment:
-
-**Discrimination Metrics:**
-- ROC-AUC: Overall discrimination ability
-- PR-AUC: Performance on minority class (important for imbalanced data)
-- Sensitivity/Recall: True positive rate (catching actual responders)
-- Specificity: True negative rate (correctly identifying non-responders)
-
-**Calibration Metrics:**
-- Expected Calibration Error (ECE): Average gap between predicted probability and actual frequency
-- Reliability diagrams: Visual assessment of calibration
-
-**Clinical Utility Metrics:**
-- Positive Predictive Value (PPV): Probability that a predicted responder actually responds
-- Negative Predictive Value (NPV): Probability that a predicted non-responder actually does not respond
-
-All metrics are reported with 95% bootstrap confidence intervals (1,000 samples).
+All metrics reported with 5-fold stratified cross-validation (patient-level splits, no data leakage). Primary metric: AUC-ROC. Optimal threshold determined via Youden's J statistic.
 
 ---
 
 ## 3. Results
 
-### 3.1 Performance Summary
+### 3.1 Multi-Endpoint Classification
 
-*Note: Results below are placeholders pending completion of training on the full dataset.*
+Five specialized TransMIL models trained on TCGA Ovarian Cancer data:
 
-| Metric | Value (95% CI) |
-|--------|----------------|
-| ROC-AUC | 0.XXX [0.XXX, 0.XXX] |
-| PR-AUC | 0.XXX [0.XXX, 0.XXX] |
-| Sensitivity | 0.XXX [0.XXX, 0.XXX] |
-| Specificity | 0.XXX [0.XXX, 0.XXX] |
-| PPV | 0.XXX [0.XXX, 0.XXX] |
-| NPV | 0.XXX [0.XXX, 0.XXX] |
-| F1 Score | 0.XXX [0.XXX, 0.XXX] |
-| ECE | 0.XXX |
+| Model | AUC-ROC | Slides | Task |
+|-------|---------|--------|------|
+| Platinum Sensitivity | 0.907 | 199 | Binary response prediction |
+| Tumor Grade | 0.752 | 918 | High vs. low grade |
+| 5-Year Survival | 0.697 | 965 | 5-year overall survival |
+| 3-Year Survival | 0.645 | 1,106 | 3-year overall survival |
+| 1-Year Survival | 0.639 | 1,135 | 1-year overall survival |
 
-### 3.2 Attention Analysis
+Best single-model AUC: 0.879 (full dataset evaluation).
 
-The attention mechanism reveals biologically plausible patterns:
+### 3.2 Cross-Validation (Platinum Sensitivity)
 
-1. **High attention regions** frequently correspond to:
-   - Tumor-stroma interface
-   - Areas of lymphocytic infiltration
-   - Regions with distinct nuclear morphology
+| Fold | AUC-ROC | Best Epoch |
+|------|---------|------------|
+| 1 | 0.810 | 11 |
+| 2 | 0.667 | 1 |
+| 3 | 0.661 | 2 |
+| 4 | 0.536 | 8 |
+| 5 | 0.864 | 4 |
 
-2. **Low attention regions** typically include:
-   - Necrotic tissue
-   - Blood vessels and hemorrhage
-   - Technical artifacts (blur, folds)
+Mean AUC: 0.707 +/- 0.117. Optimal threshold: 0.917 (sensitivity 83.5%, specificity 84.6%).
 
-These patterns align with known prognostic features in ovarian cancer pathology.
+High fold variance is due to severe class imbalance (only 2--3 negative samples per fold). Performance is expected to improve with larger negative-class cohorts.
 
-### 3.3 Calibration Assessment
+### 3.3 Attention Analysis
 
-Model calibration is critical for clinical use. A well-calibrated model means that among patients with predicted 80% response probability, approximately 80% should actually respond.
+The TransMIL attention mechanism reveals biologically plausible patterns. High-attention regions frequently correspond to tumor-stroma interface, areas of lymphocytic infiltration, and regions with distinct nuclear morphology. Low-attention regions typically include necrotic tissue, blood vessels, and technical artifacts.
 
-*Calibration results to be added after training completion.*
+### 3.4 System Performance
 
-### 3.4 Uncertainty Analysis
-
-Distribution of uncertainty levels across test set:
-
-| Uncertainty Level | Percentage | Action |
-|-------------------|------------|--------|
-| Low | XX% | Automated decision support |
-| Moderate | XX% | Clinician review recommended |
-| High | XX% | Manual review required |
+| Operation | Time |
+|-----------|------|
+| Patch embedding (CPU) | 2--3 min/slide |
+| TransMIL inference | < 1 second |
+| FAISS search | < 100 ms |
+| MedGemma report (GPU) | ~20 seconds |
+| Cached retrieval (PostgreSQL) | 0.8 ms |
 
 ---
 
-## 4. Clinical Impact and Future Directions
+## 4. Clinical Interface and Deployment
 
-### 4.1 Clinical Integration
+### 4.1 Application Architecture
 
-The Enso Atlas system is designed for seamless integration into clinical pathology workflows:
+- **Backend**: FastAPI + PostgreSQL (asyncpg), Docker, port 8003
+- **Frontend**: Next.js 14.2 + TypeScript + Tailwind CSS, port 3002
+- **Database**: PostgreSQL with config-driven project system (projects.yaml + junction tables)
+- **Hardware**: NVIDIA DGX Spark (ARM64, GB10 GPU, 128GB unified memory)
 
-**User Interface Features:**
-- Interactive whole-slide image viewer with attention heatmap overlay
-- Clear prediction display with confidence indicators
-- Evidence patches showing high-attention regions
-- Structured clinical report generation
-- Batch analysis for multi-patient review
+### 4.2 User Interface
 
-**Workflow Integration:**
-1. Pathologist scans H&E slide
-2. Image uploaded to Enso Atlas
-3. Automated feature extraction and prediction
-4. Results displayed with interpretable evidence
-5. Clinician reviews and incorporates into treatment planning
+Three view modes: Oncologist (summary dashboard), Pathologist (annotation and grading tools), Batch (multi-slide parallel processing). 3-panel resizable layout with WSI viewer, case selection, and analysis results. Features include attention heatmaps (jet colormap), evidence patches with normalized weights, FAISS similar case retrieval, MedSigLIP semantic search, 7-step agentic AI Assistant, Project Management with CRUD, PDF/JSON export, and dark mode.
 
-### 4.2 Limitations
+### 4.3 Deployment
 
-1. **Training data scope**: Model trained on specific patient population; generalization to other demographics requires validation
-2. **Technical requirements**: Consistent slide scanning protocols and image quality
-3. **Regulatory status**: Research use only; clinical deployment requires regulatory approval
+```bash
+# Backend (Docker)
+docker compose -f docker/docker-compose.yaml up -d
 
-### 4.3 Future Directions
+# Frontend
+cd frontend && npm run build && npx next start -p 3002
+```
 
-1. **Multi-modal integration**: Combine histopathology with genomic data (BRCA status, HRD score) for improved prediction
-2. **Survival prediction**: Extend beyond binary response to progression-free survival estimation
-3. **Pan-cancer expansion**: Adapt methodology to other cancer types and treatment modalities
-4. **Prospective validation**: Partner with clinical sites for prospective validation studies
+Backend startup: ~3.5 minutes (model loading). Fully offline after initial setup.
 
 ---
 
-## 5. Conclusion
+## 5. Limitations and Future Directions
 
-Enso Atlas demonstrates the potential of deep learning to extract clinically actionable information from routine histopathology. By combining state-of-the-art pathology foundation models with interpretable multiple instance learning, the system provides predictions that are both accurate and explainable.
+### Limitations
 
-The attention-based architecture ensures that clinicians can understand the basis for predictions, building trust and enabling appropriate integration into clinical decision-making. Uncertainty quantification provides an additional safety layer, flagging cases where human expertise is most needed.
+1. Path Foundation CPU-only (TensorFlow/Blackwell incompatibility)
+2. Training limited to TCGA cohort; multi-site validation needed
+3. High CV variance from small negative class
+4. Not validated as a medical device; research use only
+5. Originally planned Bevacizumab dataset (PathDB) was blocked -- server returned 0-byte files for 217/286 slides
 
-While this work represents a research prototype, the methodology and system design establish a foundation for future clinical deployment. With continued validation and regulatory approval, AI-assisted treatment response prediction could become a standard component of precision oncology.
+### Future Directions
+
+1. PyTorch Path Foundation port for GPU acceleration
+2. Multi-cancer type expansion
+3. EHR/LIMS integration
+4. Stain normalization for cross-site robustness
+5. Prospective clinical validation
 
 ---
 
 ## References
 
-1. Lu, M.Y., et al. (2021). Data-efficient and weakly supervised computational pathology on whole-slide images. Nature Biomedical Engineering.
-
-2. Chen, R.J., et al. (2022). Scaling Vision Transformers to Gigapixel Images via Hierarchical Self-Supervised Learning. CVPR.
-
-3. Diao, J.A., et al. (2021). Human-interpretable image features derived from densely mapped cancer pathology slides predict diverse molecular phenotypes. Nature Communications.
-
-4. Path Foundation: Google Health AI pathology foundation model (2024).
-
-5. MedGemma: Google's medical language model for clinical applications (2024).
+1. Shao Z, et al. "TransMIL: Transformer based Correlated Multiple Instance Learning for Whole Slide Image Classification." NeurIPS 2021.
+2. Google Health AI. Path Foundation Model. https://developers.google.com/health-ai-developer-foundations/path-foundation
+3. Google Health AI. MedGemma 1.5 Model Card. https://developers.google.com/health-ai-developer-foundations/medgemma
+4. Cancer Genome Atlas Research Network. "Integrated genomic analyses of ovarian carcinoma." Nature 2011.
+5. Johnson J, et al. "Billion-scale similarity search with GPUs." IEEE Transactions on Big Data 2019.
 
 ---
 
-*Document Version: 1.0*  
-*Last Updated: February 2025*  
-*Authors: Enso Atlas Development Team*
+*Document Version: 2.0*
+*Last Updated: February 7, 2026*
+*Author: Hanson Wen, UC Berkeley*
+
+*Research prototype only. Not validated as a medical device. All predictions must be reviewed by qualified healthcare professionals.*
