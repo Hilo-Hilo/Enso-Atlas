@@ -68,6 +68,70 @@ class ModelsConfig:
 
 
 @dataclass
+class FeaturesConfig:
+    """Feature toggles for a project."""
+    medgemma_reports: bool = True
+    medsiglip_search: bool = True
+    semantic_search: bool = True
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "FeaturesConfig":
+        return cls(
+            medgemma_reports=d.get("medgemma_reports", True),
+            medsiglip_search=d.get("medsiglip_search", True),
+            semantic_search=d.get("semantic_search", True),
+        )
+
+
+@dataclass
+class FoundationModelConfig:
+    """Definition of a foundation model."""
+    id: str
+    name: str
+    embedding_dim: int
+    description: str = ""
+
+    @classmethod
+    def from_dict(cls, model_id: str, d: Dict[str, Any]) -> "FoundationModelConfig":
+        return cls(
+            id=model_id,
+            name=d.get("name", model_id),
+            embedding_dim=int(d.get("embedding_dim", 384)),
+            description=d.get("description", ""),
+        )
+
+
+@dataclass
+class ClassificationModelConfig:
+    """Definition of a classification model from config."""
+    id: str
+    model_dir: str
+    display_name: str
+    description: str = ""
+    auc: float = 0.0
+    n_slides: int = 0
+    category: str = "general_pathology"
+    positive_label: str = "Positive"
+    negative_label: str = "Negative"
+    compatible_foundation: str = "path_foundation"
+
+    @classmethod
+    def from_dict(cls, model_id: str, d: Dict[str, Any]) -> "ClassificationModelConfig":
+        return cls(
+            id=model_id,
+            model_dir=d.get("model_dir", model_id),
+            display_name=d.get("display_name", model_id),
+            description=d.get("description", ""),
+            auc=float(d.get("auc", 0.0)),
+            n_slides=int(d.get("n_slides", 0)),
+            category=d.get("category", "general_pathology"),
+            positive_label=d.get("positive_label", "Positive"),
+            negative_label=d.get("negative_label", "Negative"),
+            compatible_foundation=d.get("compatible_foundation", "path_foundation"),
+        )
+
+
+@dataclass
 class ProjectConfig:
     """Full configuration for a single project (cancer type / prediction target)."""
     id: str
@@ -79,6 +143,9 @@ class ProjectConfig:
     description: str = ""
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     models: ModelsConfig = field(default_factory=ModelsConfig)
+    features: FeaturesConfig = field(default_factory=FeaturesConfig)
+    foundation_model: str = "path_foundation"
+    classification_models: List[str] = field(default_factory=list)
     threshold: float = 0.5
     threshold_config: Optional[str] = None
 
@@ -86,6 +153,7 @@ class ProjectConfig:
     def from_dict(cls, project_id: str, d: Dict[str, Any]) -> "ProjectConfig":
         dataset_raw = d.get("dataset", {})
         models_raw = d.get("models", {})
+        features_raw = d.get("features", {})
         return cls(
             id=project_id,
             name=d.get("name", project_id),
@@ -96,6 +164,9 @@ class ProjectConfig:
             description=d.get("description", ""),
             dataset=DatasetConfig.from_dict(dataset_raw),
             models=ModelsConfig.from_dict(models_raw),
+            features=FeaturesConfig.from_dict(features_raw),
+            foundation_model=d.get("foundation_model", "path_foundation"),
+            classification_models=d.get("classification_models", []),
             threshold=float(d.get("threshold", 0.5)),
             threshold_config=d.get("threshold_config"),
         )
@@ -110,6 +181,8 @@ class ProjectConfig:
             "classes": self.classes,
             "positive_class": self.positive_class,
             "description": self.description,
+            "foundation_model": self.foundation_model,
+            "classification_models": self.classification_models,
             "dataset": {
                 "slides_dir": self.dataset.slides_dir,
                 "embeddings_dir": self.dataset.embeddings_dir,
@@ -122,6 +195,11 @@ class ProjectConfig:
                 "mil_checkpoint": self.models.mil_checkpoint,
                 "report_generator": self.models.report_generator,
                 "semantic_search": self.models.semantic_search,
+            },
+            "features": {
+                "medgemma_reports": self.features.medgemma_reports,
+                "medsiglip_search": self.features.medsiglip_search,
+                "semantic_search": self.features.semantic_search,
             },
             "threshold": self.threshold,
             "threshold_config": self.threshold_config,
@@ -145,6 +223,8 @@ class ProjectRegistry:
     def __init__(self, config_path: str | Path = "config/projects.yaml"):
         self._config_path = Path(config_path)
         self._projects: Dict[str, ProjectConfig] = {}
+        self._foundation_models: Dict[str, FoundationModelConfig] = {}
+        self._classification_models: Dict[str, ClassificationModelConfig] = {}
         self._default_project_id: Optional[str] = None
         self._load()
 
@@ -156,6 +236,25 @@ class ProjectRegistry:
 
         with open(self._config_path, "r") as f:
             raw = yaml.safe_load(f) or {}
+
+        # Load global foundation model definitions
+        for fm_id, fm_data in raw.get("foundation_models", {}).items():
+            try:
+                self._foundation_models[fm_id] = FoundationModelConfig.from_dict(fm_id, fm_data)
+            except Exception as e:
+                logger.error(f"Failed to load foundation model '{fm_id}': {e}")
+
+        # Load global classification model definitions
+        for cm_id, cm_data in raw.get("classification_models", {}).items():
+            try:
+                self._classification_models[cm_id] = ClassificationModelConfig.from_dict(cm_id, cm_data)
+            except Exception as e:
+                logger.error(f"Failed to load classification model '{cm_id}': {e}")
+
+        logger.info(
+            f"Loaded {len(self._foundation_models)} foundation model(s), "
+            f"{len(self._classification_models)} classification model(s)"
+        )
 
         projects_raw = raw.get("projects", {})
         if not projects_raw:
@@ -181,6 +280,33 @@ class ProjectRegistry:
             f"ProjectRegistry loaded {len(self._projects)} project(s), "
             f"default: {self._default_project_id}"
         )
+
+    @property
+    def foundation_models(self) -> Dict[str, FoundationModelConfig]:
+        return dict(self._foundation_models)
+
+    @property
+    def classification_models(self) -> Dict[str, ClassificationModelConfig]:
+        return dict(self._classification_models)
+
+    def get_foundation_model(self, model_id: str) -> Optional[FoundationModelConfig]:
+        return self._foundation_models.get(model_id)
+
+    def get_classification_model(self, model_id: str) -> Optional[ClassificationModelConfig]:
+        return self._classification_models.get(model_id)
+
+    def get_project_classification_models(self, project_id: str) -> List[ClassificationModelConfig]:
+        """Get classification models configured for a project, filtered to those
+        compatible with the project's foundation model."""
+        project = self._projects.get(project_id)
+        if not project:
+            return []
+        result = []
+        for cm_id in project.classification_models:
+            cm = self._classification_models.get(cm_id)
+            if cm and cm.compatible_foundation == project.foundation_model:
+                result.append(cm)
+        return result
 
     def get_project(self, project_id: str) -> Optional[ProjectConfig]:
         """Get a project by ID. Returns None if not found."""

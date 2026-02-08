@@ -191,15 +191,45 @@ async def get_project(project_id: str):
     """
     Get full details for a specific project.
 
-    Includes dataset paths, model configuration, threshold, and class definitions.
+    Includes dataset paths, model configuration, threshold, class definitions,
+    foundation model info, feature toggles, and classification model metadata.
     """
     reg = get_registry()
     proj = reg.get_project(project_id)
     if proj is None:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+
+    # Include foundation model info if available
+    fm = reg.get_foundation_model(proj.foundation_model)
+    foundation_model_info = None
+    if fm:
+        foundation_model_info = {
+            "id": fm.id,
+            "name": fm.name,
+            "embedding_dim": fm.embedding_dim,
+            "description": fm.description,
+        }
+
+    # Include classification model metadata
+    cls_models = reg.get_project_classification_models(project_id)
+    classification_model_details = []
+    for cm in cls_models:
+        classification_model_details.append({
+            "id": cm.id,
+            "display_name": cm.display_name,
+            "description": cm.description,
+            "auc": cm.auc,
+            "n_slides": cm.n_slides,
+            "category": cm.category,
+            "positive_label": cm.positive_label,
+            "negative_label": cm.negative_label,
+        })
+
     return {
         "project": proj.to_dict(),
         "is_default": project_id == reg.default_project_id,
+        "foundation_model": foundation_model_info,
+        "classification_model_details": classification_model_details,
     }
 
 
@@ -527,6 +557,40 @@ async def unassign_project_models(project_id: str, body: ModelIdsRequest):
         "project_id": project_id,
         "removed": count,
         "requested": len(body.model_ids),
+    }
+
+
+@router.get("/{project_id}/available-models")
+async def get_project_available_models(project_id: str):
+    """Get classification models available for a project, with full metadata.
+
+    Returns model configs compatible with the project's foundation model.
+    This is the source of truth for the frontend ModelPicker -- it should
+    NOT rely on hardcoded model lists.
+    """
+    reg = get_registry()
+    proj = reg.get_project(project_id)
+    if proj is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+
+    cls_models = reg.get_project_classification_models(project_id)
+    models = []
+    for cm in cls_models:
+        models.append({
+            "id": cm.id,
+            "displayName": cm.display_name,
+            "description": cm.description,
+            "auc": cm.auc,
+            "category": cm.category,
+            "positiveLabel": cm.positive_label,
+            "negativeLabel": cm.negative_label,
+        })
+
+    return {
+        "project_id": project_id,
+        "foundation_model": proj.foundation_model,
+        "models": models,
+        "count": len(models),
     }
 
 

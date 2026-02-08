@@ -266,6 +266,7 @@ interface BackendPatientContext {
 interface BackendSlideInfo {
   slide_id: string;
   patient_id?: string;
+  display_name?: string | null;
   has_embeddings: boolean;
   has_level0_embeddings?: boolean;  // Whether level 0 (full res) embeddings exist
   label?: string;
@@ -300,6 +301,7 @@ export async function getSlides(params: { page?: number; perPage?: number; proje
     items.map((s) => ({
       id: s.slide_id,
       filename: `${s.slide_id}.svs`,
+      displayName: s.display_name ?? null,
       dimensions: s.dimensions ?? { width: 0, height: 0 },
       magnification: s.magnification ? parseInt(s.magnification.replace("x", ""), 10) : 40,
       mpp: s.mpp ?? 0.25,
@@ -2734,4 +2736,62 @@ export async function unassignModelsFromProject(projectId: string, modelIds: str
       body: JSON.stringify({ model_ids: modelIds }),
     }
   );
+}
+
+// -- Modularity overhaul API additions --
+
+export interface AvailableModelDetail {
+  id: string;
+  displayName: string;
+  description: string;
+  auc: number;
+  category: "ovarian_cancer" | "general_pathology";
+  positiveLabel: string;
+  negativeLabel: string;
+}
+
+/**
+ * Fetch available classification models for a project from the API.
+ * This is the config-driven replacement for the hardcoded AVAILABLE_MODELS list.
+ */
+export async function getProjectAvailableModels(
+  projectId: string
+): Promise<AvailableModelDetail[]> {
+  const resp = await fetchApi<{ models: AvailableModelDetail[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/available-models`
+  );
+  if (resp && typeof resp === "object" && "models" in resp) return resp.models;
+  return [];
+}
+
+/**
+ * Rename a slide (set display_name alias).
+ * Pass null to clear the alias.
+ */
+export async function renameSlide(
+  slideId: string,
+  displayName: string | null
+): Promise<{ slide_id: string; display_name: string | null }> {
+  return fetchApi(`/api/slides/${encodeURIComponent(slideId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ display_name: displayName }),
+  });
+}
+
+export interface SlideEmbeddingStatus {
+  slide_id: string;
+  has_level0_embeddings: boolean;
+  has_level1_embeddings: boolean;
+  num_patches: number | null;
+  embedding_date: string | null;
+  cached_model_ids: string[];
+}
+
+/**
+ * Get embedding and analysis status for a slide.
+ */
+export async function getSlideEmbeddingStatus(
+  slideId: string
+): Promise<SlideEmbeddingStatus> {
+  return fetchApi(`/api/slides/${encodeURIComponent(slideId)}/embedding-status`);
 }

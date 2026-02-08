@@ -34,6 +34,7 @@ export interface PatientContext {
 export interface SlideInfo {
   id: string;
   filename: string;
+  displayName?: string | null; // User-assigned alias (display_name from DB)
   dimensions: {
     width: number;
     height: number;

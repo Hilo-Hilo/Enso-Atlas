@@ -4,9 +4,10 @@ import React, { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 import { Badge } from "@/components/ui/Badge";
-import { ChevronDown, ChevronUp, FlaskConical, Activity, Layers, CheckCircle, Circle } from "lucide-react";
+import { ChevronDown, ChevronUp, FlaskConical, Activity, Layers, CheckCircle, Circle, History } from "lucide-react";
 import { useProject } from "@/contexts/ProjectContext";
-import { getProjectModels as getProjectModelsApi } from "@/lib/api";
+import { getProjectModels as getProjectModelsApi, getProjectAvailableModels, getSlideEmbeddingStatus } from "@/lib/api";
+import type { AvailableModelDetail } from "@/lib/api";
 
 export interface ModelConfig {
   id: string;
@@ -73,6 +74,8 @@ interface ModelPickerProps {
   disabled?: boolean;
   className?: string;
   embeddingStatus?: EmbeddingStatus;
+  /** Currently selected slide ID, used to fetch "Previously Ran" status */
+  selectedSlideId?: string | null;
 }
 
 export function ModelPicker({
@@ -85,37 +88,80 @@ export function ModelPicker({
   disabled = false,
   className,
   embeddingStatus,
+  selectedSlideId,
 }: ModelPickerProps) {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const { currentProject } = useProject();
   const cancerTypeLabel = currentProject.cancer_type || "Ovarian Cancer";
 
-  // Fetch project-scoped model IDs from the API
+  // Fetch full model configs from the project available-models API
+  const [apiModelDetails, setApiModelDetails] = useState<AvailableModelDetail[]>([]);
   const [apiModels, setApiModels] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchModels = async () => {
       try {
+        // Try the new config-driven endpoint first
+        const details = await getProjectAvailableModels(currentProject.id);
+        if (details.length > 0) {
+          setApiModelDetails(details);
+          setApiModels(details.map((m) => m.id));
+          return;
+        }
+      } catch {
+        // ignore, fall through
+      }
+      try {
+        // Fallback to the older model IDs endpoint
         const modelIds = await getProjectModelsApi(currentProject.id);
         setApiModels(modelIds);
       } catch {
-        // Fallback to all models if API fails
         setApiModels(AVAILABLE_MODELS.map((m) => m.id));
       }
     };
     fetchModels();
   }, [currentProject.id]);
 
-  // Filter AVAILABLE_MODELS to only those assigned to the project, with
-  // the primary prediction target first.
+  // Track which models have been previously run on the selected slide
+  const [previouslyRanModels, setPreviouslyRanModels] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!selectedSlideId) {
+      setPreviouslyRanModels(new Set());
+      return;
+    }
+    const fetchStatus = async () => {
+      try {
+        const status = await getSlideEmbeddingStatus(selectedSlideId);
+        setPreviouslyRanModels(new Set(status.cached_model_ids));
+      } catch {
+        setPreviouslyRanModels(new Set());
+      }
+    };
+    fetchStatus();
+  }, [selectedSlideId]);
+
+  // Build ModelConfig list from API details, falling back to hardcoded AVAILABLE_MODELS
   const models = React.useMemo(() => {
-    if (apiModels.length === 0) return AVAILABLE_MODELS;
-    const filtered = AVAILABLE_MODELS.filter((m) => apiModels.includes(m.id));
+    let result: ModelConfig[];
+    if (apiModelDetails.length > 0) {
+      result = apiModelDetails.map((d) => ({
+        id: d.id,
+        displayName: d.displayName,
+        description: d.description,
+        auc: d.auc,
+        category: d.category,
+      }));
+    } else if (apiModels.length > 0) {
+      result = AVAILABLE_MODELS.filter((m) => apiModels.includes(m.id));
+    } else {
+      result = AVAILABLE_MODELS;
+    }
     // Reorder: primary target first
-    const primary = filtered.find((m) => m.id === currentProject.prediction_target);
-    if (!primary) return filtered;
-    return [primary, ...filtered.filter((m) => m.id !== primary.id)];
-  }, [apiModels, currentProject.prediction_target]);
+    const primary = result.find((m) => m.id === currentProject.prediction_target);
+    if (!primary) return result;
+    return [primary, ...result.filter((m) => m.id !== primary.id)];
+  }, [apiModelDetails, apiModels, currentProject.prediction_target]);
 
   const toggleModel = (modelId: string) => {
     if (disabled) return;
@@ -338,6 +384,7 @@ export function ModelPicker({
                     onChange={() => toggleModel(model.id)}
                     disabled={disabled}
                     isPrimary={model.id === currentProject.prediction_target}
+                    previouslyRan={previouslyRanModels.has(model.id)}
                   />
                 ))}
               </div>
@@ -359,6 +406,7 @@ export function ModelPicker({
                     checked={selectedModels.includes(model.id)}
                     onChange={() => toggleModel(model.id)}
                     disabled={disabled}
+                    previouslyRan={previouslyRanModels.has(model.id)}
                   />
                 ))}
               </div>
@@ -376,12 +424,14 @@ function ModelCheckbox({
   onChange,
   disabled,
   isPrimary,
+  previouslyRan,
 }: {
   model: ModelConfig;
   checked: boolean;
   onChange: () => void;
   disabled?: boolean;
   isPrimary?: boolean;
+  previouslyRan?: boolean;
 }) {
   return (
     <label
@@ -405,6 +455,12 @@ function ModelCheckbox({
             <span className="text-sm font-medium text-gray-900 truncate">{model.displayName}</span>
             {isPrimary && (
               <Badge variant="info" size="sm">Primary</Badge>
+            )}
+            {previouslyRan && (
+              <Badge variant="default" size="sm" className="bg-green-100 text-green-700 border-green-200">
+                <History className="h-3 w-3 mr-0.5 inline" />
+                Cached
+              </Badge>
             )}
           </div>
           <span className="text-xs text-gray-400 font-mono shrink-0">

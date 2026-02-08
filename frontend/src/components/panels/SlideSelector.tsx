@@ -31,8 +31,9 @@ import {
   ImageOff,
   Cpu,
   Clock,
+  Pencil,
 } from "lucide-react";
-import { getSlides, getSlideQC, getThumbnailUrl } from "@/lib/api";
+import { getSlides, getSlideQC, getThumbnailUrl, renameSlide } from "@/lib/api";
 import { ANALYSIS_STEPS } from "@/hooks/useAnalysis";
 import type { SlideInfo, SlideQCMetrics, PatientContext } from "@/types";
 
@@ -201,7 +202,8 @@ export function SlideSelector({
       result = result.filter(
         (slide) =>
           slide.filename.toLowerCase().includes(query) ||
-          slide.id.toLowerCase().includes(query)
+          slide.id.toLowerCase().includes(query) ||
+          (slide.displayName && slide.displayName.toLowerCase().includes(query))
       );
     }
 
@@ -387,8 +389,11 @@ export function SlideSelector({
               />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-clinical-900 truncate">
-                  {selectedSlide.filename}
+                  {selectedSlide.displayName || selectedSlide.filename}
                 </p>
+                {selectedSlide.displayName && (
+                  <p className="text-2xs text-clinical-500 truncate">{selectedSlide.filename}</p>
+                )}
                 <p className="text-xs text-clinical-600 font-mono">
                   {selectedSlide.id.slice(0, 12)}...
                 </p>
@@ -483,6 +488,21 @@ export function SlideSelector({
                 </div>
               </div>
             )}
+
+            {/* Inline Rename */}
+            <SlideRenameInline
+              slideId={selectedSlide.id}
+              currentName={selectedSlide.displayName || ""}
+              onRenamed={(newName) => {
+                setSlides((prev) =>
+                  prev.map((s) =>
+                    s.id === selectedSlide.id
+                      ? { ...s, displayName: newName || null }
+                      : s
+                  )
+                );
+              }}
+            />
           </div>
         )}
 
@@ -601,6 +621,76 @@ interface SlideItemProps {
   qcMetrics?: SlideQCMetrics;
 }
 
+// Inline rename component for the selected slide
+function SlideRenameInline({
+  slideId,
+  currentName,
+  onRenamed,
+}: {
+  slideId: string;
+  currentName: string;
+  onRenamed: (newName: string | null) => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [value, setValue] = useState(currentName);
+
+  useEffect(() => {
+    setValue(currentName);
+  }, [currentName, slideId]);
+
+  const handleSave = async () => {
+    const trimmed = value.trim();
+    try {
+      await renameSlide(slideId, trimmed || null);
+      onRenamed(trimmed || null);
+    } catch (err) {
+      console.error("Failed to rename slide:", err);
+    }
+    setIsEditing(false);
+  };
+
+  if (!isEditing) {
+    return (
+      <button
+        onClick={() => setIsEditing(true)}
+        className="mt-2 flex items-center gap-1.5 text-xs text-clinical-600 hover:text-clinical-800 transition-colors"
+      >
+        <Pencil className="h-3 w-3" />
+        <span>{currentName ? "Edit alias" : "Add alias"}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex items-center gap-1.5">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleSave();
+          if (e.key === "Escape") setIsEditing(false);
+        }}
+        placeholder="Display name..."
+        autoFocus
+        className="flex-1 text-xs px-2 py-1 border border-clinical-300 rounded focus:outline-none focus:ring-1 focus:ring-clinical-500"
+      />
+      <button
+        onClick={handleSave}
+        className="text-xs px-2 py-1 bg-clinical-600 text-white rounded hover:bg-clinical-700"
+      >
+        Save
+      </button>
+      <button
+        onClick={() => setIsEditing(false)}
+        className="text-xs px-2 py-1 text-gray-500 hover:text-gray-700"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 function SlideItem({ slide, isSelected, onClick, qcMetrics }: SlideItemProps) {
   const formattedDate = new Date(slide.createdAt).toLocaleDateString("en-US", {
     month: "short",
@@ -630,10 +720,13 @@ function SlideItem({ slide, isSelected, onClick, qcMetrics }: SlideItemProps) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium text-gray-900 truncate flex-1">
-            {slide.filename}
+            {slide.displayName || slide.filename}
           </p>
           {qcMetrics && <QCBadge qc={qcMetrics} />}
         </div>
+        {slide.displayName && (
+          <p className="text-2xs text-gray-400 truncate">{slide.filename}</p>
+        )}
         <div className="flex items-center gap-2 mt-1.5">
           <span className="text-xs text-gray-500 font-mono">
             {slide.dimensions.width.toLocaleString()} x {slide.dimensions.height.toLocaleString()}

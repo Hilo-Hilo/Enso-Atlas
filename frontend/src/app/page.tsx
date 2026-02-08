@@ -15,7 +15,6 @@ import {
   ReportPanel,
   SemanticSearchPanel,
   CaseNotesPanel,
-  QuickStatsPanel,
   OncologistSummaryView,
   PathologistView,
   BatchAnalysisPanel,
@@ -1499,9 +1498,6 @@ function HomePage() {
           </div>
         </div>
       )}
-
-      {/* Quick Stats Dashboard */}
-      <QuickStatsPanel />
 
       {/* Case Notes */}
       <CaseNotesPanel slideId={selectedSlide?.id ?? null} />

@@ -4186,6 +4186,33 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
     # ====== Cached Results API ======
 
+    # ====== Slide Rename (display_name) ======
+
+    class SlideRenameRequest(BaseModel):
+        display_name: Optional[str] = None
+
+    @app.patch("/api/slides/{slide_id}")
+    async def rename_slide(slide_id: str, body: SlideRenameRequest):
+        """Update a slide's display_name (alias). Pass null to clear."""
+        updated = await db.update_slide_display_name(slide_id, body.display_name)
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"Slide '{slide_id}' not found")
+        return {"slide_id": slide_id, "display_name": body.display_name}
+
+    # ====== Slide Embedding Status ======
+
+    @app.get("/api/slides/{slide_id}/embedding-status")
+    async def get_slide_embedding_status(slide_id: str):
+        """Get embedding and analysis status for a slide.
+
+        Returns which embeddings exist and which classification models
+        have cached results.
+        """
+        status = await db.get_slide_embedding_status(slide_id)
+        if "error" in status:
+            raise HTTPException(status_code=404, detail=status["error"])
+        return status
+
     @app.get("/api/slides/{slide_id}/cached-results")
     async def get_slide_cached_results(slide_id: str):
         """

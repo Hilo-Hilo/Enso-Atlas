@@ -1,3 +1,84 @@
+# Enso Atlas Project Configuration
+#
+# Each project defines a cancer type / prediction target with its own
+# foundation model, classification models, feature toggles, and dataset paths.
+#
+# Foundation models produce embeddings of a specific dimension. Classification
+# models (TransMIL) are trained on those embeddings and must match the
+# foundation model's output dimension.
+
+# Global foundation model definitions (referenced by projects)
+foundation_models:
+  path_foundation:
+    name: "Path Foundation"
+    embedding_dim: 384
+    description: "Google Health pathology foundation model (ViT-S, 384-dim)"
+  dinov2:
+    name: "DINOv2"
+    embedding_dim: 768
+    description: "Meta DINOv2 self-supervised vision transformer (768-dim)"
+  uni:
+    name: "UNI"
+    embedding_dim: 1024
+    description: "Mass General pathology foundation model (1024-dim)"
+  conch:
+    name: "CONCH"
+    embedding_dim: 512
+    description: "Contrastive learning pathology model (512-dim)"
+
+# Global classification model definitions (referenced by projects)
+classification_models:
+  platinum_sensitivity:
+    model_dir: "transmil_v2"
+    display_name: "Platinum Sensitivity"
+    description: "Predicts response to platinum-based chemotherapy"
+    auc: 0.907
+    n_slides: 199
+    category: "ovarian_cancer"
+    positive_label: "Sensitive"
+    negative_label: "Resistant"
+    compatible_foundation: "path_foundation"
+  tumor_grade:
+    model_dir: "transmil_grade"
+    display_name: "Tumor Grade"
+    description: "Predicts tumor grade (high vs low grade)"
+    auc: 0.752
+    n_slides: 918
+    category: "general_pathology"
+    positive_label: "High Grade"
+    negative_label: "Low Grade"
+    compatible_foundation: "path_foundation"
+  survival_5y:
+    model_dir: "transmil_surv5y"
+    display_name: "5-Year Survival"
+    description: "Predicts 5-year overall survival probability"
+    auc: 0.697
+    n_slides: 965
+    category: "ovarian_cancer"
+    positive_label: "Survived"
+    negative_label: "Deceased"
+    compatible_foundation: "path_foundation"
+  survival_3y:
+    model_dir: "transmil_full"
+    display_name: "3-Year Survival"
+    description: "Predicts 3-year overall survival probability"
+    auc: 0.645
+    n_slides: 1106
+    category: "ovarian_cancer"
+    positive_label: "Survived"
+    negative_label: "Deceased"
+    compatible_foundation: "path_foundation"
+  survival_1y:
+    model_dir: "transmil_surv1y"
+    display_name: "1-Year Survival"
+    description: "Predicts 1-year overall survival probability"
+    auc: 0.639
+    n_slides: 1135
+    category: "ovarian_cancer"
+    positive_label: "Survived"
+    negative_label: "Deceased"
+    compatible_foundation: "path_foundation"
+
 projects:
   ovarian-platinum:
     name: "Ovarian Cancer - Platinum Sensitivity"
@@ -6,6 +87,7 @@ projects:
     classes: ["resistant", "sensitive"]
     positive_class: sensitive
     description: "Predicts platinum-based chemotherapy sensitivity in high-grade serous ovarian carcinoma"
+    foundation_model: path_foundation
     dataset:
       slides_dir: data/tcga_full/slides
       embeddings_dir: data/embeddings/level0
@@ -17,5 +99,15 @@ projects:
       mil_checkpoint: models/transmil_best.pt
       report_generator: medgemma-4b
       semantic_search: medsiglip
+    classification_models:
+      - platinum_sensitivity
+      - tumor_grade
+      - survival_5y
+      - survival_3y
+      - survival_1y
+    features:
+      medgemma_reports: true
+      medsiglip_search: true
+      semantic_search: true
     threshold: 0.9229
     threshold_config: models/threshold_config.json

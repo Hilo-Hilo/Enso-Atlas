@@ -209,6 +209,7 @@ async def init_schema():
     # Run migrations for new columns
     await _migrate_project_columns()
     await _migrate_project_scoped_tables()
+    await _migrate_display_name()
 
 
 async def _migrate_project_columns():
@@ -313,6 +314,85 @@ async def _migrate_project_scoped_tables():
             "INSERT INTO schema_version (version) VALUES (3) ON CONFLICT DO NOTHING"
         )
         logger.info("v3 migration complete: project_models and project_slides tables ready")
+
+
+async def _migrate_display_name():
+    """v4 migration: add display_name column to slides table."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        v4_done = await conn.fetchval(
+            "SELECT COUNT(*) FROM schema_version WHERE version = 4"
+        )
+        if v4_done:
+            return
+        col_exists = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_name = 'slides' AND column_name = 'display_name'
+            """
+        )
+        if not col_exists:
+            await conn.execute(
+                "ALTER TABLE slides ADD COLUMN display_name TEXT"
+            )
+            logger.info("Added display_name column to slides table")
+        await conn.execute(
+            "INSERT INTO schema_version (version) VALUES (4) ON CONFLICT DO NOTHING"
+        )
+        logger.info("v4 migration complete: display_name column added")
+
+
+async def update_slide_display_name(slide_id: str, display_name: str | None) -> bool:
+    """Update the display_name for a slide. Returns True if the slide exists."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE slides SET display_name = $2, updated_at = now()
+            WHERE slide_id = $1
+            """,
+            slide_id, display_name,
+        )
+        return result != "UPDATE 0"
+
+
+async def get_slide_embedding_status(slide_id: str) -> dict:
+    """Get embedding and analysis status for a slide.
+
+    Returns which foundation models have been used to embed this slide,
+    and which classification models have cached results.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        slide = await conn.fetchrow(
+            """
+            SELECT has_embeddings, has_level0_embeddings, num_patches, embedding_date
+            FROM slides WHERE slide_id = $1
+            """,
+            slide_id,
+        )
+        if not slide:
+            return {"error": "slide not found"}
+
+        # Get distinct model_ids that have cached results
+        cached_models = await conn.fetch(
+            """
+            SELECT DISTINCT model_id FROM analysis_results
+            WHERE slide_id = $1
+            """,
+            slide_id,
+        )
+
+        # Check MedSigLIP embedding status by looking for the .npy file
+        # (we track this via has_embeddings flag currently)
+        return {
+            "slide_id": slide_id,
+            "has_level0_embeddings": slide["has_level0_embeddings"],
+            "has_level1_embeddings": slide["has_embeddings"],
+            "num_patches": slide["num_patches"],
+            "embedding_date": slide["embedding_date"].isoformat() if slide["embedding_date"] else None,
+            "cached_model_ids": [r["model_id"] for r in cached_models],
+        }
 
 
 async def populate_projects_from_registry(registry) -> None:
@@ -683,6 +763,7 @@ async def get_all_slides() -> List[Dict[str, Any]]:
                 s.slide_id,
                 s.patient_id,
                 s.filename,
+                s.display_name,
                 s.width,
                 s.height,
                 s.mpp,

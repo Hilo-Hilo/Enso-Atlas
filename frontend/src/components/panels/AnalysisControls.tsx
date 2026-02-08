@@ -83,6 +83,7 @@ export function AnalysisControls({
               onForceReembedChange={onForceReembedChange}
               disabled={isAnalyzing || isGeneratingEmbeddings}
               embeddingStatus={embeddingStatus}
+              selectedSlideId={selectedSlideId}
             />
 
             {/* Embedding Progress for Level 0 */}
