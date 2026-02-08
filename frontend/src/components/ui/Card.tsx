@@ -37,7 +37,7 @@ export const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>(
       <div
         ref={ref}
         className={cn(
-          "px-4 py-3.5 border-b border-surface-border dark:border-slate-700 bg-gradient-to-r from-surface-secondary to-white dark:from-slate-800 dark:to-slate-800",
+          "px-3 py-2.5 border-b border-surface-border dark:border-slate-700 bg-gradient-to-r from-surface-secondary to-white dark:from-slate-800 dark:to-slate-800",
           className
         )}
         {...props}
@@ -73,7 +73,7 @@ interface CardContentProps extends React.HTMLAttributes<HTMLDivElement> {}
 export const CardContent = React.forwardRef<HTMLDivElement, CardContentProps>(
   ({ className, children, ...props }, ref) => {
     return (
-      <div ref={ref} className={cn("p-4", className)} {...props}>
+      <div ref={ref} className={cn("p-3", className)} {...props}>
         {children}
       </div>
     );
@@ -90,7 +90,7 @@ export const CardFooter = React.forwardRef<HTMLDivElement, CardFooterProps>(
       <div
         ref={ref}
         className={cn(
-          "px-4 py-3 border-t border-surface-border dark:border-slate-700 bg-surface-secondary dark:bg-slate-800",
+          "px-3 py-2 border-t border-surface-border dark:border-slate-700 bg-surface-secondary dark:bg-slate-800",
           className
         )}
         {...props}

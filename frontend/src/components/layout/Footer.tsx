@@ -10,7 +10,7 @@ interface FooterProps {
 
 export function Footer({ version = "0.1.0", buildDate }: FooterProps) {
   return (
-    <footer className="h-10 sm:h-12 bg-gradient-to-r from-surface-secondary via-white to-surface-secondary dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 border-t border-surface-border dark:border-slate-700 px-3 sm:px-4 lg:px-6 flex items-center justify-between shrink-0">
+    <footer className="h-8 sm:h-9 bg-gradient-to-r from-surface-secondary via-white to-surface-secondary dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 border-t border-surface-border dark:border-slate-700 px-3 sm:px-4 lg:px-5 flex items-center justify-between shrink-0">
       {/* Left: Regulatory Disclaimers */}
       <div className="flex items-center gap-2 sm:gap-4 lg:gap-6">
         <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 bg-amber-50 dark:bg-amber-900/30 rounded-full border border-amber-200 dark:border-amber-700">

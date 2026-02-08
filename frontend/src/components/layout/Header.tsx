@@ -291,7 +291,7 @@ export function Header({
         />
       )}
 
-      <header className="h-14 sm:h-16 bg-gradient-to-r from-navy-900 via-navy-900 to-navy-800 border-b border-navy-700/50 px-3 sm:px-4 lg:px-6 flex items-center justify-between shrink-0 shadow-lg">
+      <header className="h-11 sm:h-12 bg-gradient-to-r from-navy-900 via-navy-900 to-navy-800 border-b border-navy-700/50 px-3 sm:px-4 lg:px-5 flex items-center justify-between shrink-0 shadow-lg">
         {/* Left: Logo and Branding */}
         <div className="flex items-center gap-2 sm:gap-4">
           {/* Mobile Menu Button */}

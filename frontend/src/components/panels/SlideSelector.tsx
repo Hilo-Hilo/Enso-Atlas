@@ -110,7 +110,7 @@ function SlideThumbnail({
     <div 
       ref={imageRef}
       className={cn(
-        "w-16 h-16 rounded-lg bg-gray-100 shrink-0 overflow-hidden border border-gray-200 transition-colors relative",
+        "w-12 h-12 rounded-md bg-gray-100 shrink-0 overflow-hidden border border-gray-200 transition-colors relative",
         className
       )}
     >

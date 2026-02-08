@@ -1686,7 +1686,7 @@ function HomePage() {
       <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Batch Mode - Full Width Panel */}
         {userViewMode === "batch" ? (
-          <div className="flex-1 p-3 sm:p-4 lg:p-6 bg-gray-50 dark:bg-slate-900 overflow-auto">
+          <div className="flex-1 p-2 sm:p-3 lg:p-4 bg-gray-50 dark:bg-slate-900 overflow-auto">
             <div className="max-w-6xl mx-auto h-full">
               <BatchAnalysisPanel
                 onSlideSelect={(slideId) => {
@@ -1708,7 +1708,7 @@ function HomePage() {
           ref={slideSelectorRef as React.RefObject<HTMLElement>}
           tabIndex={-1}
           className={cn(
-            "bg-white dark:bg-slate-800 border-b lg:border-b-0 lg:border-r border-surface-border dark:border-slate-700 overflow-y-auto shrink-0 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative transition-all duration-300",
+            "bg-white dark:bg-slate-800 border-b lg:border-b-0 lg:border-r border-surface-border dark:border-slate-700 overflow-y-auto shrink-0 space-y-3 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative transition-all duration-300",
             // Mobile: Full width, show/hide based on tab
             "lg:hidden",
             mobilePanelTab === "slides" ? "flex-1 p-3 sm:p-4" : "hidden"
@@ -1741,8 +1741,8 @@ function HomePage() {
           ref={slideSelectorRef as React.RefObject<HTMLElement>}
           tabIndex={-1}
           className={cn(
-            "h-full bg-white dark:bg-slate-800 border-r border-surface-border dark:border-slate-700 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative",
-            leftSidebarOpen ? "p-4 overflow-y-auto" : "overflow-hidden"
+            "h-full bg-white dark:bg-slate-800 border-r border-surface-border dark:border-slate-700 space-y-3 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative",
+            leftSidebarOpen ? "p-3 overflow-y-auto" : "overflow-hidden"
           )}
           data-demo="slide-selector"
         >
@@ -1813,7 +1813,7 @@ function HomePage() {
           )}
 
           {/* Content Area */}
-          <div className="flex-1 p-2 sm:p-3 lg:p-4 overflow-hidden" data-demo="wsi-viewer">
+          <div className="flex-1 p-1.5 sm:p-2 lg:p-3 overflow-hidden" data-demo="wsi-viewer">
             {userViewMode === "oncologist" && viewMode === "summary" && analysisResult ? (
               <OncologistSummaryView
                 analysisResult={analysisResult}
@@ -1893,7 +1893,7 @@ function HomePage() {
         >
         <aside
           className={cn(
-            "h-full bg-white dark:bg-slate-800 p-4 overflow-y-auto space-y-4 relative",
+            "h-full bg-white dark:bg-slate-800 p-3 overflow-y-auto space-y-3 relative",
             !rightSidebarOpen && "overflow-hidden"
           )}
         >
