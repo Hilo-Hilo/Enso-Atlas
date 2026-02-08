@@ -2675,9 +2675,13 @@ export async function pollBatchEmbed(
  * Get model IDs assigned to a project
  */
 export async function getProjectModels(projectId: string): Promise<string[]> {
-  return fetchApi<string[]>(
+  const resp = await fetchApi<{ model_ids: string[] } | string[]>(
     `/api/projects/${encodeURIComponent(projectId)}/models`
   );
+  // Backend returns {project_id, model_ids, count} -- extract the array
+  if (Array.isArray(resp)) return resp;
+  if (resp && typeof resp === "object" && "model_ids" in resp) return resp.model_ids;
+  return [];
 }
 
 /**

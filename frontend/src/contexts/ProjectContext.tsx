@@ -42,7 +42,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8003";
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
         const res = await fetch(`${apiUrl}/api/projects`, { signal: AbortSignal.timeout(5000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();

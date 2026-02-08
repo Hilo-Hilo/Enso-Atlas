@@ -1266,7 +1266,7 @@ function HomePage() {
       };
       
       // Call backend PDF export endpoint
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8003"}/api/export/pdf`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/export/pdf`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1286,7 +1286,7 @@ function HomePage() {
         console.warn("Server PDF export failed, trying lightweight endpoint...");
         try {
           const lightResponse = await fetch(
-            `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8003"}/api/report/pdf`,
+            `${process.env.NEXT_PUBLIC_API_URL || ""}/api/report/pdf`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },

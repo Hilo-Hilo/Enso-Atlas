@@ -59,7 +59,7 @@ export function SystemStatusModal({ isOpen, onClose, isConnected }: SystemStatus
     const startTime = Date.now();
     
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8003"}/api/health`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/health`, {
         method: "GET",
         signal: AbortSignal.timeout(5000),
       });
