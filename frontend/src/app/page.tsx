@@ -1678,14 +1678,14 @@ function HomePage() {
         {/* Desktop Resizable Layout */}
         <PanelGroup
           orientation="horizontal"
-          id="enso-atlas-layout"
+          id="enso-atlas-layout-v2"
           className="hidden lg:flex flex-1"
         >
         {/* Left Sidebar - Desktop (Resizable) */}
         <Panel
           panelRef={leftPanelRef}
-          defaultSize="18%"
-          minSize="5%"
+          defaultSize="22%"
+          minSize="10%"
           maxSize="35%"
           collapsible
           collapsedSize="0%"
@@ -1722,7 +1722,7 @@ function HomePage() {
         </PanelResizeHandle>
 
         {/* Center - WSI Viewer or Oncologist Summary */}
-        <Panel defaultSize="54%" minSize="30%">
+        <Panel defaultSize="50%" minSize="30%">
         <section
           ref={viewerRef as React.RefObject<HTMLElement>}
           tabIndex={-1}
