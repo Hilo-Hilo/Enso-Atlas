@@ -345,7 +345,7 @@ export interface BatchAnalyzeResponse {
 export interface ModelPrediction {
   modelId: string;
   modelName: string;
-  category: 'ovarian_cancer' | 'general_pathology';
+  category: string;
   score: number;
   label: string;
   positiveLabel: string;
@@ -365,7 +365,7 @@ export interface AvailableModel {
   confidenceInterval?: { lower: number; upper: number };
   auc: number;
   nSlides: number;
-  category: 'ovarian_cancer' | 'general_pathology';
+  category: string;
   positiveLabel: string;
   negativeLabel: string;
   available: boolean;
@@ -383,7 +383,7 @@ export interface MultiModelResponse {
   slideId: string;
   predictions: Record<string, ModelPrediction>;
   byCategory: {
-    ovarianCancer: ModelPrediction[];
+    cancerSpecific: ModelPrediction[];
     generalPathology: ModelPrediction[];
   };
   nPatches: number;

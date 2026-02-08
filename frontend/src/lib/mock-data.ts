@@ -33,7 +33,7 @@ export const mockSlides: SlideInfo[] = [
   },
   {
     id: "slide-003",
-    filename: "ovarian_sample_003.ndpi",
+    filename: "sample_003.ndpi",
     dimensions: { width: 51200, height: 35840 },
     magnification: 20,
     mpp: 0.5,

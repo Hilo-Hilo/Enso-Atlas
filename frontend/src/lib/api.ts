@@ -1261,10 +1261,7 @@ interface BackendModelPrediction {
 interface BackendMultiModelResponse {
   slide_id: string;
   predictions: Record<string, BackendModelPrediction>;
-  by_category: {
-    ovarian_cancer: BackendModelPrediction[];
-    general_pathology: BackendModelPrediction[];
-  };
+  by_category: Record<string, BackendModelPrediction[]>;
   n_patches: number;
   processing_time_ms: number;
 }
@@ -1292,7 +1289,7 @@ function transformModelPrediction(backend: BackendModelPrediction): ModelPredict
   return {
     modelId: backend.model_id,
     modelName: backend.model_name,
-    category: backend.category as 'ovarian_cancer' | 'general_pathology',
+    category: backend.category,
     score: backend.score,
     label: backend.label,
     positiveLabel: backend.positive_label,
@@ -1317,7 +1314,7 @@ export async function getAvailableModels(): Promise<AvailableModelsResponse> {
       description: m.description,
       auc: m.auc,
       nSlides: m.n_slides,
-      category: m.category as 'ovarian_cancer' | 'general_pathology',
+      category: m.category,
       positiveLabel: m.positive_label,
       negativeLabel: m.negative_label,
       available: m.available,
@@ -1399,8 +1396,10 @@ export async function analyzeSlideMultiModel(
     slideId: backend.slide_id,
     predictions,
     byCategory: {
-      ovarianCancer: backend.by_category.ovarian_cancer.map(transformModelPrediction),
-      generalPathology: backend.by_category.general_pathology.map(transformModelPrediction),
+      cancerSpecific: Object.entries(backend.by_category)
+        .filter(([key]) => key !== "general_pathology")
+        .flatMap(([, preds]) => preds.map(transformModelPrediction)),
+      generalPathology: (backend.by_category.general_pathology ?? []).map(transformModelPrediction),
     },
     nPatches: backend.n_patches,
     processingTimeMs: backend.processing_time_ms,
@@ -2745,7 +2744,7 @@ export interface AvailableModelDetail {
   displayName: string;
   description: string;
   auc: number;
-  category: "ovarian_cancer" | "general_pathology";
+  category: string;
   positiveLabel: string;
   negativeLabel: string;
 }

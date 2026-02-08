@@ -451,7 +451,7 @@ class ModelPrediction(BaseModel):
     """Single model prediction result."""
     model_id: str
     model_name: str
-    category: str  # ovarian_cancer or general_pathology
+    category: str  # cancer-specific category or general_pathology
     score: float
     label: str
     positive_label: str
@@ -5216,8 +5216,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 if cached:
                     # Build a response from cached results
                     cached_predictions = {}
-                    cached_ovarian = []
-                    cached_general = []
+                    cached_by_cat: Dict[str, list] = {}
                     requested_models = set(request.models) if request.models else None
 
                     for row in cached:
@@ -5242,10 +5241,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                         mp = ModelPrediction(**pred_dict)
                         cached_predictions[mid] = mp
                         cat = cfg.get("category", "general_pathology")
-                        if cat == "ovarian_cancer":
-                            cached_ovarian.append(mp)
-                        else:
-                            cached_general.append(mp)
+                        cached_by_cat.setdefault(cat, []).append(mp)
 
                     # Only return cached if we found at least one matching result
                     if cached_predictions:
@@ -5254,10 +5250,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                         return MultiModelResponse(
                             slide_id=slide_id,
                             predictions=cached_predictions,
-                            by_category={
-                                "ovarian_cancer": cached_ovarian,
-                                "general_pathology": cached_general,
-                            },
+                            by_category=cached_by_cat,
                             n_patches=0,
                             processing_time_ms=processing_time,
                             warnings=["Results loaded from cache"],
@@ -5333,12 +5326,12 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             if "error" not in pred:
                 predictions[model_id] = ModelPrediction(**_normalize_prediction_dict(pred))
 
-        by_category = {
-            "ovarian_cancer": [ModelPrediction(**_normalize_prediction_dict(p))
-                              for p in results["by_category"]["ovarian_cancer"] if "error" not in p],
-            "general_pathology": [ModelPrediction(**_normalize_prediction_dict(p))
-                                  for p in results["by_category"]["general_pathology"] if "error" not in p],
-        }
+        by_category: Dict[str, List[ModelPrediction]] = {}
+        for cat_key, cat_preds in results.get("by_category", {}).items():
+            by_category[cat_key] = [
+                ModelPrediction(**_normalize_prediction_dict(p))
+                for p in cat_preds if "error" not in p
+            ]
         
         # Add simple logical consistency warnings for survival horizons
         warnings: List[str] = list(results.get("warnings") or [])

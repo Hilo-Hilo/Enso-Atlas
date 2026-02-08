@@ -601,7 +601,7 @@ function HomePage() {
       if (cachedResult && cachedResult.count > 0) {
         // Known model metadata so cached results display correct AUC and labels
         const MODEL_META: Record<string, {
-          name: string; category: "ovarian_cancer" | "general_pathology";
+          name: string; category: string;
           auc: number; posLabel: string; negLabel: string; desc: string;
         }> = {
           platinum_sensitivity: { name: "Platinum Sensitivity", category: "ovarian_cancer", auc: 0.907, posLabel: "Sensitive", negLabel: "Resistant", desc: "Predicts response to platinum-based chemotherapy" },
@@ -612,7 +612,7 @@ function HomePage() {
         };
 
         const predictions: Record<string, import("@/types").ModelPrediction> = {};
-        const ovarianCancer: import("@/types").ModelPrediction[] = [];
+        const cancerSpecific: import("@/types").ModelPrediction[] = [];
         const generalPathology: import("@/types").ModelPrediction[] = [];
         let latestTimestamp: string | null = null;
 
@@ -635,8 +635,8 @@ function HomePage() {
           };
 
           predictions[r.model_id] = pred;
-          if (category === "ovarian_cancer") {
-            ovarianCancer.push(pred);
+          if (category !== "general_pathology") {
+            cancerSpecific.push(pred);
           } else {
             generalPathology.push(pred);
           }
@@ -649,7 +649,7 @@ function HomePage() {
         setMultiModelResult({
           slideId: slide.id,
           predictions,
-          byCategory: { ovarianCancer, generalPathology },
+          byCategory: { cancerSpecific, generalPathology },
           nPatches: 0,
           processingTimeMs: 0,
         });
@@ -907,7 +907,7 @@ function HomePage() {
       toast.removeToast(toastId);
       toast.success(
         "Analysis Complete",
-        `Analyzed ${result.nPatches} patches with ${(result.byCategory.ovarianCancer?.length ?? 0) + (result.byCategory.generalPathology?.length ?? 0)} models`
+        `Analyzed ${result.nPatches} patches with ${(result.byCategory.cancerSpecific?.length ?? 0) + (result.byCategory.generalPathology?.length ?? 0)} models`
       );
       
     } catch (err) {

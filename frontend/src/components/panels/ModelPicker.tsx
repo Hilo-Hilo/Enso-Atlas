@@ -14,7 +14,7 @@ export interface ModelConfig {
   displayName: string;
   description: string;
   auc: number;
-  category: "ovarian_cancer" | "general_pathology";
+  category: string;
 }
 
 // Default models -- used as fallback when project context is not available
@@ -184,7 +184,7 @@ export function ModelPicker({
 
   const selectOvarian = () => {
     onSelectionChange(
-      models.filter((m) => m.category === "ovarian_cancer").map((m) => m.id)
+      models.filter((m) => m.category !== "general_pathology").map((m) => m.id)
     );
   };
 
@@ -194,7 +194,7 @@ export function ModelPicker({
     );
   };
 
-  const ovarianModels = models.filter((m) => m.category === "ovarian_cancer");
+  const ovarianModels = models.filter((m) => m.category !== "general_pathology");
   const generalModels = models.filter((m) => m.category === "general_pathology");
 
   // Determine embedding readiness for each level

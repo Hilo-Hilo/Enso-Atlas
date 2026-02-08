@@ -653,7 +653,7 @@ export function MultiModelPredictionPanel({
         <CategorySection
           title={`${cancerTypeLabel} Specific`}
           icon={<HeartPulse className="h-4 w-4 text-pink-600" />}
-          predictions={byCategory.ovarianCancer}
+          predictions={byCategory.cancerSpecific}
           expandedModels={expandedModels}
           onToggleModel={toggleModelExpanded}
         />
