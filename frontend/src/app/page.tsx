@@ -1533,11 +1533,15 @@ function HomePage() {
       {/* Prediction Results */}
       <div ref={predictionPanelRef} tabIndex={-1} className="focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:ring-offset-2 rounded-lg" data-demo="prediction-panel">
         <PredictionPanel
-          prediction={analysisResult?.prediction ?? null}
+          prediction={analysisResult?.prediction ?? (multiModelResult?.predictions?.[currentProject.prediction_target] ? {
+            score: multiModelResult.predictions[currentProject.prediction_target].score,
+            label: multiModelResult.predictions[currentProject.prediction_target].label,
+            confidence: multiModelResult.predictions[currentProject.prediction_target].confidence,
+          } : null)}
           isLoading={isAnalyzing}
-          processingTime={analysisResult?.processingTimeMs}
+          processingTime={analysisResult?.processingTimeMs ?? multiModelResult?.processingTimeMs}
           analysisStep={analysisStep}
-          error={!isAnalyzing && !analysisResult ? error : null}
+          error={!isAnalyzing && !analysisResult && !multiModelResult ? error : null}
           onRetry={retryAnalysis}
           qcMetrics={slideQCMetrics}
           isCached={isCachedResult && !analysisResult}
