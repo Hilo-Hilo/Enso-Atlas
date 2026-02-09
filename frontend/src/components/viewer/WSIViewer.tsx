@@ -402,20 +402,17 @@ export function WSIViewer({
     return { x: Math.round(imagePoint.x), y: Math.round(imagePoint.y) };
   }, []);
 
-  // Disable OSD mouse tracking when an annotation tool is active
+  // Keep mouse navigation enabled so users can always pan/zoom.
+  // Drawing temporarily disables navigation only while dragging.
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !isReady) return;
-    const isAnnotating = activeAnnotationTool !== "pointer";
-    viewer.setMouseNavEnabled(!isAnnotating);
-    // Keep scroll zoom working even while annotating
-    if (isAnnotating) {
-      const gestureSettingsMouse = (viewer as any).gestureSettingsMouse;
-      if (gestureSettingsMouse) {
-        gestureSettingsMouse.scrollToZoom = true;
-      }
+    viewer.setMouseNavEnabled(true);
+    const gestureSettingsMouse = (viewer as any).gestureSettingsMouse;
+    if (gestureSettingsMouse) {
+      gestureSettingsMouse.scrollToZoom = true;
     }
-  }, [activeAnnotationTool, isReady]);
+  }, [isReady]);
 
   // Annotation mouse handlers attached to the container
   useEffect(() => {
@@ -441,6 +438,8 @@ export function WSIViewer({
 
       e.preventDefault();
       e.stopPropagation();
+      const viewer = viewerRef.current;
+      if (viewer) viewer.setMouseNavEnabled(false);
       setIsDrawing(true);
       drawStartRef.current = imgCoords;
       freehandPointsRef.current = [imgCoords];
@@ -477,11 +476,17 @@ export function WSIViewer({
     const handleMouseUp = (e: MouseEvent) => {
       if (!isDrawing || !drawStartRef.current) return;
       const tool = activeAnnotationToolRef.current;
-      const imgCoords = screenToImageCoords(e.clientX, e.clientY);
-      if (!imgCoords) return;
-
       setIsDrawing(false);
+      const viewer = viewerRef.current;
+      if (viewer) viewer.setMouseNavEnabled(true);
       setDrawingPreview(null);
+
+      const imgCoords = screenToImageCoords(e.clientX, e.clientY);
+      if (!imgCoords) {
+        drawStartRef.current = null;
+        freehandPointsRef.current = [];
+        return;
+      }
 
       if (tool === "freehand") {
         const pts = freehandPointsRef.current;
@@ -856,6 +861,7 @@ export function WSIViewer({
         "relative bg-navy-900 rounded-xl overflow-hidden shadow-clinical-lg border border-navy-700",
         className
       )}
+      style={{ cursor: activeAnnotationTool !== "pointer" ? "crosshair" : "default" }}
     >
       {/* Viewer Container */}
       <div

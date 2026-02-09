@@ -1945,6 +1945,7 @@ function HomePage() {
                   onSelectAnnotation={setSelectedAnnotationId}
                   onExportPdf={handleExportPdf}
                   report={report}
+                  mpp={selectedSlide.mpp}
                 />
               ) : (
                 renderRightSidebarContent()
@@ -1990,6 +1991,7 @@ function HomePage() {
               onSelectAnnotation={setSelectedAnnotationId}
               onExportPdf={handleExportPdf}
               report={report}
+              mpp={selectedSlide.mpp}
             />
           ) : (
             renderRightSidebarContent()

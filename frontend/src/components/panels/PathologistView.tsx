@@ -46,6 +46,7 @@ interface PathologistViewProps {
   onSelectAnnotation?: (annotationId: string) => void;
   onExportPdf?: () => void;
   report?: StructuredReport | null;
+  mpp?: number;
 }
 
 type AnnotationTool = "pointer" | "circle" | "rectangle" | "freehand" | "measure" | "note";
@@ -84,6 +85,7 @@ export function PathologistView({
   onSelectAnnotation,
   onExportPdf,
   report,
+  mpp,
 }: PathologistViewProps) {
   const [activeTool, setActiveTool] = useState<AnnotationTool>("pointer");
   const [showAnnotations, setShowAnnotations] = useState(true);
@@ -104,20 +106,40 @@ export function PathologistView({
   const [mitoticCount, setMitoticCount] = useState(0);
   const [mitoticFields, setMitoticFields] = useState(0);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setActiveTool("pointer");
+        onAnnotationToolChange?.("pointer");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onAnnotationToolChange]);
+
   // Derive current magnification label from viewer zoom
+  const baseMagnification = useMemo(() => {
+    if (mpp && mpp > 0) {
+      return 10 / mpp;
+    }
+    return 40;
+  }, [mpp]);
+
+  const effectiveMagnification = useMemo(() => viewerZoom * baseMagnification, [viewerZoom, baseMagnification]);
+
   const currentMagnification = useMemo(() => {
-    // Find closest magnification option to current viewer zoom
+    // Find closest magnification option to current effective magnification
     let closest = MAGNIFICATION_OPTIONS[0];
     let minDist = Infinity;
     for (const opt of MAGNIFICATION_OPTIONS) {
-      const dist = Math.abs(viewerZoom - opt.viewerZoom);
+      const dist = Math.abs(effectiveMagnification - opt.value);
       if (dist < minDist) {
         minDist = dist;
         closest = opt;
       }
     }
     return closest;
-  }, [viewerZoom]);
+  }, [effectiveMagnification]);
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -125,26 +147,24 @@ export function PathologistView({
 
   const handleMagnificationClick = useCallback((opt: typeof MAGNIFICATION_OPTIONS[number]) => {
     if (onZoomTo) {
-      onZoomTo(opt.viewerZoom);
+      const targetViewerZoom = opt.value / baseMagnification;
+      onZoomTo(targetViewerZoom);
     }
-  }, [onZoomTo]);
+  }, [onZoomTo, baseMagnification]);
 
   const handleToolChange = useCallback((tool: AnnotationTool) => {
-    setActiveTool(tool);
-    if (tool === "note") {
+    const nextTool: AnnotationTool = activeTool === tool ? "pointer" : tool;
+    setActiveTool(nextTool);
+    if (nextTool === "note" || nextTool === "pointer") {
       onAnnotationToolChange?.("pointer");
       return;
     }
-    if (tool === "pointer") {
-      onAnnotationToolChange?.("pointer");
-      return;
-    }
-    if (tool === "measure") {
+    if (nextTool === "measure") {
       onAnnotationToolChange?.("point");
       return;
     }
-    onAnnotationToolChange?.(tool);
-  }, [onAnnotationToolChange]);
+    onAnnotationToolChange?.(nextTool);
+  }, [activeTool, onAnnotationToolChange]);
 
   const handleAddNote = useCallback(() => {
     if (!noteText.trim()) return;
@@ -356,7 +376,8 @@ export function PathologistView({
               <Info className="h-3 w-3" />
               <span>
                 Viewer zoom: {viewerZoom < 1 ? viewerZoom.toFixed(2) : viewerZoom.toFixed(1)}x
-                {" | "}Approx. {currentMagnification.label} magnification
+                {" | "}Effective: {effectiveMagnification.toFixed(1)}x
+                {" | "}Nearest preset: {currentMagnification.label}
               </span>
             </div>
           </div>
@@ -425,7 +446,7 @@ export function PathologistView({
             {/* Active tool indicator */}
             {activeTool !== "pointer" && activeTool !== "note" && (
               <div className="text-xs text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/30 px-3 py-2 rounded-md">
-                Tool active: {activeTool}. Draw directly on the slide to create an annotation.
+                Tool active: {activeTool}. Draw on the slide. Click the active tool again or press Esc to return to pan mode.
               </div>
             )}
 
