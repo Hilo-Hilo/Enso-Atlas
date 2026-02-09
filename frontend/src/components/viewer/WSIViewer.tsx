@@ -319,12 +319,13 @@ export function WSIViewer({
     const viewportPoint = tiledImage.imageToViewportCoordinates(imagePoint);
 
     // Calculate appropriate zoom level to show the patch in context
-    // Aim for the patch to be about 1/4 of the viewport width
+    // Show a ~5x5 neighborhood of patches around the target (not just the single patch)
     const patchWidth = targetCoordinates.width || 224;
+    const neighborhoodWidth = patchWidth * 5; // 5 patches wide visible area
     const imageWidth = tiledImage.getContentSize().x;
-    const patchViewportWidth = patchWidth / imageWidth;
-    const targetZoom = 0.25 / patchViewportWidth;  // Patch takes up 25% of viewport
-    const clampedZoom = Math.min(Math.max(targetZoom, 1), 20);  // Clamp between 1x and 20x
+    const neighborhoodViewportWidth = neighborhoodWidth / imageWidth;
+    const targetZoom = 0.8 / neighborhoodViewportWidth; // Neighborhood fills ~80% of viewport
+    const clampedZoom = Math.min(Math.max(targetZoom, 1), 10);  // Clamp between 1x and 10x
 
     // Pan and zoom to the target location
     viewer.viewport.panTo(viewportPoint, false);
@@ -366,10 +367,22 @@ export function WSIViewer({
       opacity: 0, // Start hidden, update via showHeatmap effect
       success: (event: any) => {
         heatmapTiledImageRef.current = event.item;
-        // Apply pixelated rendering for the heatmap
-        if (event.item?._drawer?.canvas) {
-          event.item._drawer.canvas.style.imageRendering = "pixelated";
-        }
+        // Apply pixelated rendering for discrete patch squares
+        try {
+          // Try direct canvas access
+          const canvas = event.item?._drawer?.canvas;
+          if (canvas) {
+            canvas.style.imageRendering = "pixelated";
+            canvas.style.imageRendering = "crisp-edges";
+            // Disable image smoothing on the 2d context
+            const ctx = canvas.getContext("2d");
+            if (ctx) ctx.imageSmoothingEnabled = false;
+          }
+          // Also try OSD drawer-level smoothing
+          if (event.item?._drawer) {
+            try { event.item._drawer.setImageSmoothingEnabled(false); } catch (_e) { /* not available */ }
+          }
+        } catch (_e) { /* best effort */ }
         setHeatmapLoaded(true);
         setHeatmapError(false);
         console.log("Heatmap added as tiled image layer");
@@ -392,6 +405,26 @@ export function WSIViewer({
       }
     };
   }, [heatmapImageUrl, isReady]);
+
+  // Force pixelated rendering on all OSD canvas elements for discrete heatmap patches
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !isReady) return;
+
+    const applyPixelated = () => {
+      const canvases = container.querySelectorAll("canvas");
+      canvases.forEach((c) => {
+        (c as HTMLCanvasElement).style.imageRendering = "pixelated";
+      });
+    };
+
+    // Apply immediately and also observe for new canvases added by OSD
+    applyPixelated();
+    const observer = new MutationObserver(applyPixelated);
+    observer.observe(container, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
+  }, [isReady]);
 
   // Update heatmap opacity via the tiled image layer
   useEffect(() => {
@@ -666,23 +699,14 @@ export function WSIViewer({
     };
   }, [isReady]);
 
-  // Outlier overlay color: amber to red gradient based on score (0..1)
-  const outlierColor = useCallback((score: number): string => {
-    // Interpolate from amber (score=0) to red (score=1)
-    const r = Math.round(245 + (239 - 245) * score); // 245 -> 239
-    const g = Math.round(158 - 158 * score);          // 158 -> 0
-    const b = Math.round(11 - 11 * score);             // 11 -> 0
-    return `rgba(${r},${g},${b},0.45)`;
-  }, []);
-
   // CLASS_COLORS hex values for classifier overlay (stable reference)
   // Defined at module scope below the component to avoid hook dependency warnings
 
-  // Render patch overlay on canvas (outlier scores or classifier classes)
+  // Render patch overlay on canvas imperatively via OSD animation events (no React state lag)
   useEffect(() => {
     const canvas = patchCanvasRef.current;
     const viewer = viewerRef.current;
-    if (!canvas || !viewer || !isReady || !patchOverlay || !patchOverlay.data.length) {
+    if (!canvas || !viewer || !isReady) {
       // Clear canvas if no overlay
       if (canvas) {
         const ctx = canvas.getContext("2d");
@@ -691,80 +715,97 @@ export function WSIViewer({
       return;
     }
 
-    const container = containerRef.current;
-    if (!container) return;
-
-    const tiledImage = viewer.world.getItemAt(0);
-    if (!tiledImage) return;
-
-    // Match canvas size to container
-    const cw = container.clientWidth;
-    const ch = container.clientHeight;
-    if (canvas.width !== cw || canvas.height !== ch) {
-      canvas.width = cw;
-      canvas.height = ch;
+    if (!patchOverlay || !patchOverlay.data.length) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
     }
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, cw, ch);
+    const overlayRef = patchOverlay; // capture for closure
 
-    // Get viewport bounds in image coordinates to cull offscreen patches
-    const topLeftVP = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(0, 0));
-    const bottomRightVP = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(cw, ch));
-    const topLeftImg = tiledImage.viewportToImageCoordinates(topLeftVP);
-    const bottomRightImg = tiledImage.viewportToImageCoordinates(bottomRightVP);
+    const draw = () => {
+      const container = containerRef.current;
+      if (!container) return;
 
-    const PATCH_SIZE = 224;
-    const margin = PATCH_SIZE; // slight margin so partially visible patches render
+      const tiledImage = viewer.world.getItemAt(0);
+      if (!tiledImage) return;
 
-    const viewMinX = topLeftImg.x - margin;
-    const viewMinY = topLeftImg.y - margin;
-    const viewMaxX = bottomRightImg.x + margin;
-    const viewMaxY = bottomRightImg.y + margin;
-
-    // Pre-compute two corner screen positions for a reference patch to get scale
-    const refVP1 = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(0, 0));
-    const refVP2 = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(PATCH_SIZE, PATCH_SIZE));
-    const refPx1 = viewer.viewport.pixelFromPoint(refVP1);
-    const refPx2 = viewer.viewport.pixelFromPoint(refVP2);
-    const patchScreenW = refPx2.x - refPx1.x;
-    const patchScreenH = refPx2.y - refPx1.y;
-
-    // Skip rendering if patches are smaller than 1 pixel (too zoomed out)
-    if (patchScreenW < 1 || patchScreenH < 1) return;
-
-    for (const patch of patchOverlay.data) {
-      // Viewport culling
-      if (patch.x < viewMinX || patch.y < viewMinY ||
-          patch.x > viewMaxX || patch.y > viewMaxY) {
-        continue;
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      if (canvas.width !== cw || canvas.height !== ch) {
+        canvas.width = cw;
+        canvas.height = ch;
       }
 
-      // Convert image coords to screen coords
-      const vpPoint = tiledImage.imageToViewportCoordinates(
-        new OpenSeadragon.Point(patch.x, patch.y)
-      );
-      const screenPoint = viewer.viewport.pixelFromPoint(vpPoint);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, cw, ch);
 
-      // Set fill color based on overlay type
-      if (patchOverlay.type === "outlier") {
-        ctx.fillStyle = outlierColor(patch.score ?? 0);
-      } else {
-        // classifier: use class color with alpha based on confidence
-        const colorIdx = (patch.classIdx ?? 0) % CLASS_COLOR_HEX.length;
-        const hex = CLASS_COLOR_HEX[colorIdx];
-        const alpha = 0.25 + (patch.confidence ?? 0.5) * 0.35;
-        // Parse hex to rgba
-        const r = parseInt(hex.slice(1, 3), 16);
-        const g = parseInt(hex.slice(3, 5), 16);
-        const b = parseInt(hex.slice(5, 7), 16);
-        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+      const topLeftVP = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(0, 0));
+      const bottomRightVP = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(cw, ch));
+      const topLeftImg = tiledImage.viewportToImageCoordinates(topLeftVP);
+      const bottomRightImg = tiledImage.viewportToImageCoordinates(bottomRightVP);
+
+      const PATCH_SIZE = 224;
+      const margin = PATCH_SIZE;
+
+      const viewMinX = topLeftImg.x - margin;
+      const viewMinY = topLeftImg.y - margin;
+      const viewMaxX = bottomRightImg.x + margin;
+      const viewMaxY = bottomRightImg.y + margin;
+
+      const refVP1 = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(0, 0));
+      const refVP2 = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(PATCH_SIZE, PATCH_SIZE));
+      const refPx1 = viewer.viewport.pixelFromPoint(refVP1);
+      const refPx2 = viewer.viewport.pixelFromPoint(refVP2);
+      const patchScreenW = refPx2.x - refPx1.x;
+      const patchScreenH = refPx2.y - refPx1.y;
+
+      if (patchScreenW < 1 || patchScreenH < 1) return;
+
+      for (const patch of overlayRef.data) {
+        if (patch.x < viewMinX || patch.y < viewMinY ||
+            patch.x > viewMaxX || patch.y > viewMaxY) {
+          continue;
+        }
+
+        const vpPoint = tiledImage.imageToViewportCoordinates(
+          new OpenSeadragon.Point(patch.x, patch.y)
+        );
+        const screenPoint = viewer.viewport.pixelFromPoint(vpPoint);
+
+        if (overlayRef.type === "outlier") {
+          const score = patch.score ?? 0;
+          const r = Math.round(245 + (239 - 245) * score);
+          const g = Math.round(158 - 158 * score);
+          const b = Math.round(11 - 11 * score);
+          ctx.fillStyle = `rgba(${r},${g},${b},0.45)`;
+        } else {
+          const colorIdx = (patch.classIdx ?? 0) % CLASS_COLOR_HEX.length;
+          const hex = CLASS_COLOR_HEX[colorIdx];
+          const alpha = 0.25 + (patch.confidence ?? 0.5) * 0.35;
+          const cr = parseInt(hex.slice(1, 3), 16);
+          const cg = parseInt(hex.slice(3, 5), 16);
+          const cb = parseInt(hex.slice(5, 7), 16);
+          ctx.fillStyle = `rgba(${cr},${cg},${cb},${alpha})`;
+        }
+
+        ctx.fillRect(screenPoint.x, screenPoint.y, patchScreenW, patchScreenH);
       }
+    };
 
-      ctx.fillRect(screenPoint.x, screenPoint.y, patchScreenW, patchScreenH);
-    }
-  }, [patchOverlay, renderTick, isReady, outlierColor]);
+    const handler = () => requestAnimationFrame(draw);
+    viewer.addHandler("animation", handler);
+    viewer.addHandler("resize", handler);
+    draw(); // initial draw
+
+    return () => {
+      viewer.removeHandler("animation", handler);
+      viewer.removeHandler("resize", handler);
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    };
+  }, [patchOverlay, isReady]);
 
   // Handle click for patch selection mode
   useEffect(() => {

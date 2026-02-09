@@ -66,7 +66,18 @@ export function OutlierDetectorPanel({
     const newState = !showHeatmap;
     setShowHeatmap(newState);
     if (onHeatmapToggle) {
-      onHeatmapToggle(newState, newState && result ? result.heatmapData : null);
+      if (newState && result) {
+        // Only include actual outlier patches, not all patches
+        const outlierCoords = new Set(
+          result.outlierPatches.map((p) => `${p.x},${p.y}`)
+        );
+        const outlierData = result.heatmapData.filter((d) =>
+          outlierCoords.has(`${d.x},${d.y}`)
+        );
+        onHeatmapToggle(true, outlierData);
+      } else {
+        onHeatmapToggle(false, null);
+      }
     }
   }, [showHeatmap, result, onHeatmapToggle]);
 
