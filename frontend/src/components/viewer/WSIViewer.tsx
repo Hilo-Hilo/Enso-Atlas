@@ -34,7 +34,7 @@ import {
   Settings2,
   ImageIcon,
 } from "lucide-react";
-import type { PatchCoordinates, HeatmapData, Annotation } from "@/types";
+import type { PatchCoordinates, HeatmapData, Annotation, PatchOverlay } from "@/types";
 
 // Heatmap model options
 const HEATMAP_MODELS = [
@@ -56,6 +56,12 @@ export interface WSIViewerControls {
   toggleHeatmapOnly: () => void;
   toggleFullscreen: () => void;
 }
+
+// Hex colors for classifier patch overlay, matching PatchClassifierPanel CLASS_COLORS
+const CLASS_COLOR_HEX = [
+  "#3b82f6", "#ef4444", "#10b981", "#f59e0b",
+  "#8b5cf6", "#ec4899", "#06b6d4", "#f97316",
+];
 
 type AnnotationTool = "pointer" | "circle" | "rectangle" | "freehand" | "point";
 
@@ -83,6 +89,12 @@ interface WSIViewerProps {
   onAnnotationSelect?: (annotationId: string) => void;
   onAnnotationDelete?: (annotationId: string) => void;
   selectedAnnotationId?: string | null;
+  // Canvas-based patch overlay (outlier heatmap or classifier heatmap)
+  patchOverlay?: PatchOverlay | null;
+  // Spatial patch selection mode for few-shot classifier
+  patchSelectionMode?: { activeClassIdx: number; classColor: string } | null;
+  patchCoordinates?: Array<{ x: number; y: number }> | null;
+  onPatchSelected?: (patchIdx: number, x: number, y: number) => void;
 }
 
 export function WSIViewer({
@@ -106,12 +118,17 @@ export function WSIViewer({
   onAnnotationSelect,
   onAnnotationDelete,
   selectedAnnotationId,
+  patchOverlay,
+  patchSelectionMode,
+  patchCoordinates,
+  onPatchSelected,
 }: WSIViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerShellRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
   const heatmapOverlayRef = useRef<HTMLElement | null>(null);
   const heatmapTiledImageRef = useRef<any>(null);
+  const patchCanvasRef = useRef<HTMLCanvasElement>(null);
   
   // Store callbacks in refs so they don't trigger viewer recreation
   const onRegionClickRef = useRef(onRegionClick);
@@ -123,6 +140,11 @@ export function WSIViewer({
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange;
   }, [onZoomChange]);
+
+  const onPatchSelectedRef = useRef(onPatchSelected);
+  useEffect(() => {
+    onPatchSelectedRef.current = onPatchSelected;
+  }, [onPatchSelected]);
 
   const [isReady, setIsReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -558,6 +580,173 @@ export function WSIViewer({
     };
   }, [isReady]);
 
+  // Outlier overlay color: amber to red gradient based on score (0..1)
+  const outlierColor = useCallback((score: number): string => {
+    // Interpolate from amber (score=0) to red (score=1)
+    const r = Math.round(245 + (239 - 245) * score); // 245 -> 239
+    const g = Math.round(158 - 158 * score);          // 158 -> 0
+    const b = Math.round(11 - 11 * score);             // 11 -> 0
+    return `rgba(${r},${g},${b},0.45)`;
+  }, []);
+
+  // CLASS_COLORS hex values for classifier overlay (stable reference)
+  // Defined at module scope below the component to avoid hook dependency warnings
+
+  // Render patch overlay on canvas (outlier scores or classifier classes)
+  useEffect(() => {
+    const canvas = patchCanvasRef.current;
+    const viewer = viewerRef.current;
+    if (!canvas || !viewer || !isReady || !patchOverlay || !patchOverlay.data.length) {
+      // Clear canvas if no overlay
+      if (canvas) {
+        const ctx = canvas.getContext("2d");
+        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const tiledImage = viewer.world.getItemAt(0);
+    if (!tiledImage) return;
+
+    // Match canvas size to container
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+    }
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, cw, ch);
+
+    // Get viewport bounds in image coordinates to cull offscreen patches
+    const topLeftVP = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(0, 0));
+    const bottomRightVP = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(cw, ch));
+    const topLeftImg = tiledImage.viewportToImageCoordinates(topLeftVP);
+    const bottomRightImg = tiledImage.viewportToImageCoordinates(bottomRightVP);
+
+    const PATCH_SIZE = 224;
+    const margin = PATCH_SIZE; // slight margin so partially visible patches render
+
+    const viewMinX = topLeftImg.x - margin;
+    const viewMinY = topLeftImg.y - margin;
+    const viewMaxX = bottomRightImg.x + margin;
+    const viewMaxY = bottomRightImg.y + margin;
+
+    // Pre-compute two corner screen positions for a reference patch to get scale
+    const refVP1 = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(0, 0));
+    const refVP2 = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(PATCH_SIZE, PATCH_SIZE));
+    const refPx1 = viewer.viewport.pixelFromPoint(refVP1);
+    const refPx2 = viewer.viewport.pixelFromPoint(refVP2);
+    const patchScreenW = refPx2.x - refPx1.x;
+    const patchScreenH = refPx2.y - refPx1.y;
+
+    // Skip rendering if patches are smaller than 1 pixel (too zoomed out)
+    if (patchScreenW < 1 || patchScreenH < 1) return;
+
+    for (const patch of patchOverlay.data) {
+      // Viewport culling
+      if (patch.x < viewMinX || patch.y < viewMinY ||
+          patch.x > viewMaxX || patch.y > viewMaxY) {
+        continue;
+      }
+
+      // Convert image coords to screen coords
+      const vpPoint = tiledImage.imageToViewportCoordinates(
+        new OpenSeadragon.Point(patch.x, patch.y)
+      );
+      const screenPoint = viewer.viewport.pixelFromPoint(vpPoint);
+
+      // Set fill color based on overlay type
+      if (patchOverlay.type === "outlier") {
+        ctx.fillStyle = outlierColor(patch.score ?? 0);
+      } else {
+        // classifier: use class color with alpha based on confidence
+        const colorIdx = (patch.classIdx ?? 0) % CLASS_COLOR_HEX.length;
+        const hex = CLASS_COLOR_HEX[colorIdx];
+        const alpha = 0.25 + (patch.confidence ?? 0.5) * 0.35;
+        // Parse hex to rgba
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+      }
+
+      ctx.fillRect(screenPoint.x, screenPoint.y, patchScreenW, patchScreenH);
+    }
+  }, [patchOverlay, renderTick, isReady, outlierColor]);
+
+  // Handle click for patch selection mode
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !isReady || !patchSelectionMode || !patchCoordinates) return;
+
+    const handler = (event: OpenSeadragon.CanvasClickEvent) => {
+      if (!event.quick) return;
+      if (!onPatchSelectedRef.current || !patchCoordinates) return;
+
+      const tiledImage = viewer.world.getItemAt(0);
+      if (!tiledImage) return;
+
+      const viewportPoint = viewer.viewport.pointFromPixel(event.position);
+      const imagePoint = tiledImage.viewportToImageCoordinates(viewportPoint);
+      const clickX = imagePoint.x;
+      const clickY = imagePoint.y;
+
+      // Find nearest patch
+      let bestIdx = -1;
+      let bestDist = Infinity;
+      for (let i = 0; i < patchCoordinates.length; i++) {
+        const px = patchCoordinates[i].x;
+        const py = patchCoordinates[i].y;
+        // Check if click is inside the patch rectangle (224x224)
+        if (clickX >= px && clickX <= px + 224 && clickY >= py && clickY <= py + 224) {
+          const dx = clickX - (px + 112);
+          const dy = clickY - (py + 112);
+          const dist = dx * dx + dy * dy;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+          }
+        }
+      }
+
+      // If not inside any patch, find closest center
+      if (bestIdx === -1) {
+        for (let i = 0; i < patchCoordinates.length; i++) {
+          const px = patchCoordinates[i].x + 112;
+          const py = patchCoordinates[i].y + 112;
+          const dx = clickX - px;
+          const dy = clickY - py;
+          const dist = dx * dx + dy * dy;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+          }
+        }
+      }
+
+      if (bestIdx >= 0) {
+        onPatchSelectedRef.current(
+          bestIdx,
+          patchCoordinates[bestIdx].x,
+          patchCoordinates[bestIdx].y
+        );
+        // Prevent OSD default click behavior
+        event.preventDefaultAction = true;
+      }
+    };
+
+    viewer.addHandler("canvas-click", handler);
+    return () => {
+      viewer.removeHandler("canvas-click", handler);
+    };
+  }, [isReady, patchSelectionMode, patchCoordinates]);
+
   // Render an annotation as SVG element
   const renderAnnotationSVG = useCallback((ann: Annotation, isSelected: boolean) => {
     const coords = ann.coordinates;
@@ -869,6 +1058,26 @@ export function WSIViewer({
         className="w-full h-full min-h-[400px]"
         style={{ background: heatmapOnly ? "#000000" : "#0f172a" }}
       />
+
+      {/* Patch overlay canvas (outlier/classifier heatmap rendered as colored rectangles) */}
+      <canvas
+        ref={patchCanvasRef}
+        className="absolute inset-0 w-full h-full"
+        style={{
+          pointerEvents: patchSelectionMode ? "auto" : "none",
+          cursor: patchSelectionMode ? "crosshair" : "default",
+        }}
+      />
+
+      {/* Selection mode indicator */}
+      {patchSelectionMode && (
+        <div
+          className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full text-xs font-medium text-white shadow-lg z-20"
+          style={{ backgroundColor: patchSelectionMode.classColor }}
+        >
+          Click on slide to select patches
+        </div>
+      )}
 
       {/* Annotation overlay (SVG rendered in screen coordinates) */}
       {isReady && (

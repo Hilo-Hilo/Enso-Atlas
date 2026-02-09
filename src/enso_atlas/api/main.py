@@ -6055,6 +6055,26 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             heatmap_data=heatmap_data,
         )
 
+    # ------------------------------------------------------------------
+    # Patch Coordinates (for spatial selection in the viewer)
+    # ------------------------------------------------------------------
+    @app.get("/api/slides/{slide_id}/patch-coords")
+    async def get_patch_coords(slide_id: str):
+        """Return patch (x,y) coordinates for a slide.
+
+        Used by the frontend to enable spatial patch selection on the WSI
+        viewer (e.g. click-to-select patches for few-shot classification).
+        """
+        coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+        if not coord_path.exists():
+            raise HTTPException(status_code=404, detail=f"No coordinates found for slide {slide_id}")
+        coords = np.load(coord_path)
+        return {
+            "slide_id": slide_id,
+            "count": len(coords),
+            "coords": coords.tolist(),
+        }
+
     return app
 
 

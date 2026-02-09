@@ -517,6 +517,19 @@ export interface PatchClassifyResult {
   heatmapData: Array<{x: number; y: number; classIdx: number; confidence: number}>;
 }
 
+// Canvas-based patch overlay for WSI viewer (outlier scores or classifier classes)
+export interface PatchOverlay {
+  type: 'outlier' | 'classifier';
+  data: Array<{
+    x: number;
+    y: number;
+    score?: number;       // outlier: 0-1 normalized distance
+    classIdx?: number;    // classifier: index into classes array
+    confidence?: number;  // classifier: prediction confidence
+  }>;
+  classes?: string[];     // classifier only: class names indexed by classIdx
+}
+
 // Visual search status
 export interface VisualSearchStatus {
   indexLoaded: boolean;

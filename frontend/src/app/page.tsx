@@ -29,12 +29,12 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
-import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults } from "@/lib/api";
+import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords } from "@/lib/api";
 import { useProject } from "@/contexts/ProjectContext";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
-import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse, VisualSearchResponse, SimilarCase, StructuredReport } from "@/types";
+import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse, VisualSearchResponse, SimilarCase, StructuredReport, PatchOverlay } from "@/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui";
 import { ChevronLeft, ChevronRight, Layers, BarChart3, X } from "lucide-react";
@@ -223,6 +223,10 @@ function HomePage() {
   // Patch classification state
   const [classifyResult, setClassifyResult] = useState<import("@/types").PatchClassifyResult | null>(null);
   const [showClassifyHeatmap, setShowClassifyHeatmap] = useState(false);
+
+  // Spatial patch selection state (for few-shot classifier)
+  const [patchSelectionMode, setPatchSelectionMode] = useState<{ activeClassIdx: number; classColor: string } | null>(null);
+  const [patchCoordinates, setPatchCoordinates] = useState<Array<{ x: number; y: number }> | null>(null);
 
   // Visual search (image-to-image) state
   const [visualSearchResults, setVisualSearchResults] = useState<SimilarCase[]>([]);
@@ -1450,6 +1454,55 @@ function HomePage() {
     };
   }, [selectedSlide]);
 
+  // Compute patch overlay for WSI viewer (outlier or classifier heatmap)
+  const patchOverlayData = useMemo<PatchOverlay | null>(() => {
+    if (showOutlierHeatmap && outlierHeatmapData && outlierHeatmapData.length > 0) {
+      return {
+        type: 'outlier',
+        data: outlierHeatmapData.map(d => ({ x: d.x, y: d.y, score: d.score })),
+      };
+    }
+    if (showClassifyHeatmap && classifyResult && classifyResult.heatmapData.length > 0) {
+      return {
+        type: 'classifier',
+        data: classifyResult.heatmapData.map(d => ({
+          x: d.x,
+          y: d.y,
+          classIdx: d.classIdx,
+          confidence: d.confidence,
+        })),
+        classes: classifyResult.classes,
+      };
+    }
+    return null;
+  }, [showOutlierHeatmap, outlierHeatmapData, showClassifyHeatmap, classifyResult]);
+
+  // Load patch coordinates when slide changes (for spatial selection)
+  useEffect(() => {
+    if (!selectedSlide) {
+      setPatchCoordinates(null);
+      return;
+    }
+    getPatchCoords(selectedSlide.id)
+      .then((result) => {
+        setPatchCoordinates(result.coords.map(([x, y]) => ({ x, y })));
+      })
+      .catch(() => {
+        // Coordinates not available -- spatial selection will be disabled
+        setPatchCoordinates(null);
+      });
+  }, [selectedSlide?.id]);
+
+  // Handler for spatial patch selection on the WSI viewer
+  const handlePatchSelectedOnSlide = useCallback((patchIdx: number, x: number, y: number) => {
+    if (!patchSelectionMode) return;
+    // Dispatch event to PatchClassifierPanel via a custom callback
+    // The panel will handle adding the patch index to the appropriate class
+    if ((window as any).__patchClassifierAddPatch) {
+      (window as any).__patchClassifierAddPatch(patchSelectionMode.activeClassIdx, patchIdx);
+    }
+  }, [patchSelectionMode]);
+
   // Get DZI and heatmap URLs
   const dziUrl = selectedSlide ? getDziUrl(selectedSlide.id) : undefined;
   
@@ -1663,6 +1716,8 @@ function HomePage() {
         onClassifyResult={setClassifyResult}
         onShowHeatmap={setShowClassifyHeatmap}
         showHeatmap={showClassifyHeatmap}
+        onSelectionModeChange={setPatchSelectionMode}
+        hasPatchCoordinates={!!patchCoordinates && patchCoordinates.length > 0}
       />
 
       {/* Clinical Report */}
@@ -1895,6 +1950,10 @@ function HomePage() {
                 onAnnotationSelect={userViewMode === "pathologist" ? setSelectedAnnotationId : undefined}
                 onAnnotationDelete={userViewMode === "pathologist" ? handleDeleteAnnotation : undefined}
                 selectedAnnotationId={selectedAnnotationId}
+                patchOverlay={patchOverlayData}
+                patchSelectionMode={patchSelectionMode}
+                patchCoordinates={patchCoordinates}
+                onPatchSelected={handlePatchSelectedOnSlide}
               />
             ) : (
               <div className="h-full flex items-center justify-center bg-gray-100 dark:bg-slate-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-slate-600 p-4">

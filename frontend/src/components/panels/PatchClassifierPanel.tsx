@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -70,6 +70,9 @@ interface PatchClassifierPanelProps {
   onClassifyResult?: (result: PatchClassifyResult | null) => void;
   onShowHeatmap?: (show: boolean) => void;
   showHeatmap?: boolean;
+  // Spatial selection mode: when active, clicks on WSI add patches to a class
+  onSelectionModeChange?: (mode: { activeClassIdx: number; classColor: string } | null) => void;
+  hasPatchCoordinates?: boolean;
 }
 
 export function PatchClassifierPanel({
@@ -79,6 +82,8 @@ export function PatchClassifierPanel({
   onClassifyResult,
   onShowHeatmap,
   showHeatmap = false,
+  onSelectionModeChange,
+  hasPatchCoordinates = false,
 }: PatchClassifierPanelProps) {
   const [classes, setClasses] = useState<ClassDefinition[]>([
     { name: "tumor", patchIndicesText: "" },
@@ -87,6 +92,44 @@ export function PatchClassifierPanel({
   const [isClassifying, setIsClassifying] = useState(false);
   const [result, setResult] = useState<PatchClassifyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeSelectionClass, setActiveSelectionClass] = useState<number | null>(null);
+
+  // Register global callback for spatial patch selection from WSI viewer
+  useEffect(() => {
+    (window as any).__patchClassifierAddPatch = (classIdx: number, patchIdx: number) => {
+      setClasses((prev) =>
+        prev.map((c, i) => {
+          if (i !== classIdx) return c;
+          const existing = parsePatchIndices(c.patchIndicesText);
+          if (existing.includes(patchIdx)) return c; // already added
+          const newText = c.patchIndicesText
+            ? `${c.patchIndicesText},${patchIdx}`
+            : String(patchIdx);
+          return { ...c, patchIndicesText: newText };
+        })
+      );
+    };
+    return () => {
+      delete (window as any).__patchClassifierAddPatch;
+    };
+  }, []);
+
+  // Sync selection mode to parent when activeSelectionClass changes
+  useEffect(() => {
+    if (activeSelectionClass !== null) {
+      const color = CLASS_COLORS[activeSelectionClass % CLASS_COLORS.length];
+      onSelectionModeChange?.({ activeClassIdx: activeSelectionClass, classColor: color.hex });
+    } else {
+      onSelectionModeChange?.(null);
+    }
+  }, [activeSelectionClass, onSelectionModeChange]);
+
+  // Clear selection mode when result arrives or component resets
+  useEffect(() => {
+    if (result) {
+      setActiveSelectionClass(null);
+    }
+  }, [result]);
 
   const addClass = useCallback(() => {
     if (classes.length >= 8) return;
@@ -150,6 +193,7 @@ export function PatchClassifierPanel({
   const handleReset = useCallback(() => {
     setResult(null);
     setError(null);
+    setActiveSelectionClass(null);
     onClassifyResult?.(null);
     onShowHeatmap?.(false);
   }, [onClassifyResult, onShowHeatmap]);
@@ -226,13 +270,29 @@ export function PatchClassifierPanel({
                         </button>
                       )}
                     </div>
-                    <input
-                      type="text"
-                      value={cls.patchIndicesText}
-                      onChange={(e) => updatePatchIndices(idx, e.target.value)}
-                      placeholder="Patch indices: 1,2,3 or 10-20"
-                      className="w-full text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-clinical-500"
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={cls.patchIndicesText}
+                        onChange={(e) => updatePatchIndices(idx, e.target.value)}
+                        placeholder="Patch indices: 1,2,3 or 10-20"
+                        className="flex-1 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-clinical-500"
+                      />
+                      {hasPatchCoordinates && (
+                        <button
+                          onClick={() => setActiveSelectionClass(activeSelectionClass === idx ? null : idx)}
+                          className={cn(
+                            "shrink-0 px-2 py-1.5 text-2xs rounded border transition-colors",
+                            activeSelectionClass === idx
+                              ? "bg-clinical-500 text-white border-clinical-500"
+                              : "bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:border-clinical-300"
+                          )}
+                          title={activeSelectionClass === idx ? "Stop selecting" : "Click patches on slide to add"}
+                        >
+                          {activeSelectionClass === idx ? "Selecting..." : "Select"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}

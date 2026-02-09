@@ -2833,6 +2833,32 @@ export async function getSlideEmbeddingStatus(
   return fetchApi(`/api/slides/${encodeURIComponent(slideId)}/embedding-status`);
 }
 
+// ====== Patch Coordinates ======
+
+/**
+ * Fetch patch (x,y) coordinates for a slide.
+ * Used for spatial selection on the WSI viewer.
+ */
+export async function getPatchCoords(
+  slideId: string
+): Promise<{ slideId: string; count: number; coords: Array<[number, number]> }> {
+  const backend = await fetchApi<{
+    slide_id: string;
+    count: number;
+    coords: Array<[number, number]>;
+  }>(
+    `/api/slides/${encodeURIComponent(slideId)}/patch-coords`,
+    {},
+    { timeoutMs: 15000 }
+  );
+
+  return {
+    slideId: backend.slide_id,
+    count: backend.count,
+    coords: backend.coords,
+  };
+}
+
 // ====== Outlier Tissue Detection ======
 
 // Backend response (snake_case)
