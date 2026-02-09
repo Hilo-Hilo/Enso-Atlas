@@ -55,6 +55,7 @@ export interface WSIViewerControls {
   toggleHeatmap: () => void;
   toggleHeatmapOnly: () => void;
   toggleFullscreen: () => void;
+  toggleGrid: () => void;
 }
 
 // Hex colors for classifier patch overlay, matching PatchClassifierPanel CLASS_COLORS
@@ -150,6 +151,8 @@ export function WSIViewer({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showHeatmap, setShowHeatmap] = useState(true); // Default to showing heatmap
   const [heatmapOnly, setHeatmapOnly] = useState(false); // Hide pathology, show only attention
+  const [showGrid, setShowGrid] = useState(false);
+  const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [heatmapOpacity, setHeatmapOpacity] = useState(0.6);
   const [zoom, setZoom] = useState(1);
   const [showToolbar, setShowToolbar] = useState(true);
@@ -408,6 +411,89 @@ export function WSIViewer({
       tiledImage.setOpacity(heatmapOnly ? 0 : 1);
     }
   }, [heatmapOnly, isReady]);
+
+  // Draw 224px patch grid overlay on a canvas
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const canvas = gridCanvasRef.current;
+    if (!viewer || !canvas || !isReady) return;
+
+    const PATCH = 224;
+
+    const draw = () => {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const container = canvas.parentElement;
+      if (!container) return;
+
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+
+      ctx.clearRect(0, 0, w, h);
+      if (!showGrid) return;
+
+      const tiledImage = viewer.world.getItemAt(0);
+      if (!tiledImage) return;
+
+      const contentSize = tiledImage.getContentSize();
+      const imgW = contentSize.x;
+      const imgH = contentSize.y;
+
+      // Determine visible image-coordinate bounds
+      const topLeftVP = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(0, 0));
+      const bottomRightVP = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(w, h));
+      const topLeftImg = tiledImage.viewportToImageCoordinates(topLeftVP);
+      const bottomRightImg = tiledImage.viewportToImageCoordinates(bottomRightVP);
+
+      const minX = Math.max(0, Math.floor(topLeftImg.x / PATCH) * PATCH);
+      const maxX = Math.min(imgW, Math.ceil(bottomRightImg.x / PATCH) * PATCH);
+      const minY = Math.max(0, Math.floor(topLeftImg.y / PATCH) * PATCH);
+      const maxY = Math.min(imgH, Math.ceil(bottomRightImg.y / PATCH) * PATCH);
+
+      ctx.strokeStyle = "rgba(0, 255, 255, 0.3)";
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+
+      // Vertical lines
+      for (let ix = minX; ix <= maxX; ix += PATCH) {
+        const vpTop = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(ix, minY));
+        const vpBot = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(ix, maxY));
+        const sTop = viewer.viewport.pixelFromPoint(vpTop);
+        const sBot = viewer.viewport.pixelFromPoint(vpBot);
+        ctx.moveTo(Math.round(sTop.x) + 0.5, sTop.y);
+        ctx.lineTo(Math.round(sBot.x) + 0.5, sBot.y);
+      }
+
+      // Horizontal lines
+      for (let iy = minY; iy <= maxY; iy += PATCH) {
+        const vpLeft = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(minX, iy));
+        const vpRight = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(maxX, iy));
+        const sLeft = viewer.viewport.pixelFromPoint(vpLeft);
+        const sRight = viewer.viewport.pixelFromPoint(vpRight);
+        ctx.moveTo(sLeft.x, Math.round(sLeft.y) + 0.5);
+        ctx.lineTo(sRight.x, Math.round(sRight.y) + 0.5);
+      }
+
+      ctx.stroke();
+    };
+
+    draw();
+    viewer.addHandler("animation", draw);
+    viewer.addHandler("resize", draw);
+
+    return () => {
+      viewer.removeHandler("animation", draw);
+      viewer.removeHandler("resize", draw);
+      // Clear canvas on cleanup
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    };
+  }, [isReady, showGrid]);
 
   // Helper: convert screen pixel position to image coordinates
   const screenToImageCoords = useCallback((screenX: number, screenY: number): { x: number; y: number } | null => {
@@ -899,6 +985,7 @@ export function WSIViewer({
           });
         },
         toggleFullscreen: handleFullscreen,
+        toggleGrid: () => setShowGrid((prev) => !prev),
       });
     }
   }, [isReady, onControlsReady]);
@@ -1069,6 +1156,13 @@ export function WSIViewer({
         }}
       />
 
+      {/* Patch grid overlay canvas */}
+      <canvas
+        ref={gridCanvasRef}
+        className="absolute top-0 left-0 w-full h-full z-10"
+        style={{ pointerEvents: "none" }}
+      />
+
       {/* Selection mode indicator */}
       {patchSelectionMode && (
         <div
@@ -1198,53 +1292,66 @@ export function WSIViewer({
         </div>
       )}
 
-      {/* Heatmap Controls */}
-      {isReady && heatmap && (
+      {/* Overlay Controls (always visible when viewer is ready) */}
+      {isReady && (
         <div className="absolute top-4 right-4">
           <div className="viewer-toolbar flex-col items-stretch gap-2 p-3 min-w-[200px]">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Layers className="h-4 w-4 text-gray-600" />
-                <span className="text-sm font-medium text-gray-700">
-                  Attention Heatmap
-                </span>
-                {heatmapLoaded && (
-                  <span className="w-2 h-2 rounded-full bg-green-500" title="Loaded" />
-                )}
-                {heatmapError && (
-                  <span className="w-2 h-2 rounded-full bg-red-500" title="Failed to load" />
-                )}
-              </div>
-              <button
-                onClick={() => setShowHeatmapPanel(!showHeatmapPanel)}
-                className="p-1 rounded hover:bg-gray-100"
-              >
-                <Settings2 className="h-3.5 w-3.5 text-gray-400" />
-              </button>
-            </div>
+            {heatmap && (
+              <>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-gray-600" />
+                    <span className="text-sm font-medium text-gray-700">
+                      Attention Heatmap
+                    </span>
+                    {heatmapLoaded && (
+                      <span className="w-2 h-2 rounded-full bg-green-500" title="Loaded" />
+                    )}
+                    {heatmapError && (
+                      <span className="w-2 h-2 rounded-full bg-red-500" title="Failed to load" />
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setShowHeatmapPanel(!showHeatmapPanel)}
+                    className="p-1 rounded hover:bg-gray-100"
+                  >
+                    <Settings2 className="h-3.5 w-3.5 text-gray-400" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Show overlay (H)</span>
+                  <Toggle
+                    checked={showHeatmap}
+                    onChange={setShowHeatmap}
+                    size="sm"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Heatmap only (J)</span>
+                  <Toggle
+                    checked={heatmapOnly}
+                    onChange={(checked) => {
+                      setHeatmapOnly(checked);
+                      if (checked) setShowHeatmap(true);
+                    }}
+                    size="sm"
+                  />
+                </div>
+              </>
+            )}
 
             <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">Show overlay (H)</span>
+              <span className="text-xs text-gray-500">Patch grid (G)</span>
               <Toggle
-                checked={showHeatmap}
-                onChange={setShowHeatmap}
+                checked={showGrid}
+                onChange={setShowGrid}
                 size="sm"
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">Heatmap only (J)</span>
-              <Toggle
-                checked={heatmapOnly}
-                onChange={(checked) => {
-                  setHeatmapOnly(checked);
-                  if (checked) setShowHeatmap(true);
-                }}
-                size="sm"
-              />
-            </div>
-
-            {showHeatmapPanel && showHeatmap && (
+            {heatmap && showHeatmapPanel && showHeatmap && (
               <div className="pt-2 border-t border-gray-100 animate-fade-in">
                 <ModelSelector />
                 <Slider

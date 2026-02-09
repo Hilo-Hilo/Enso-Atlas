@@ -294,6 +294,7 @@ function HomePage() {
     toggleHeatmap: () => void;
     toggleFullscreen: () => void;
     toggleHeatmapOnly: () => void;
+    toggleGrid: () => void;
   } | null>(null);
 
   // Analysis hook
@@ -575,6 +576,10 @@ function HomePage() {
 
   const handleToggleHeatmapOnly = useCallback(() => {
     viewerControlsRef.current?.toggleHeatmapOnly();
+  }, []);
+
+  const handleToggleGrid = useCallback(() => {
+    viewerControlsRef.current?.toggleGrid();
   }, []);
 
   const handlePrintReport = useCallback(() => {
@@ -1198,6 +1203,12 @@ function HomePage() {
       handler: handleToggleHeatmapOnly,
     },
     {
+      key: "g",
+      description: "Toggle patch grid overlay",
+      category: "Viewer",
+      handler: handleToggleGrid,
+    },
+    {
       key: "f",
       description: "Fullscreen viewer",
       category: "Viewer",
@@ -1277,6 +1288,7 @@ function HomePage() {
     handleToggleHeatmap,
     handleToggleFullscreen,
     handleToggleHeatmapOnly,
+    handleToggleGrid,
     handleFocusPanel,
     handleFocusSearch,
     handlePrintReport,
