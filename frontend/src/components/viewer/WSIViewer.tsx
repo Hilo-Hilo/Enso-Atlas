@@ -876,7 +876,7 @@ export function WSIViewer({
           key={renderTick}
           ref={svgOverlayRef}
           className="absolute inset-0 w-full h-full"
-          style={{ pointerEvents: "auto" }}
+          style={{ pointerEvents: activeAnnotationTool !== "pointer" ? "auto" : "none" }}
           viewBox={`0 0 ${containerRef.current?.clientWidth || 1} ${containerRef.current?.clientHeight || 1}`}
           preserveAspectRatio="none"
         >
@@ -1061,23 +1061,21 @@ export function WSIViewer({
         </div>
       )}
 
-      {/* Scale Bar */}
+      {/* Scale Bar + Magnification (single container to prevent overlap) */}
       {isReady && (
-        <div className="absolute bottom-4 left-4 scale-bar">
-          <div
-            className="scale-bar-line"
-            style={{ width: "100px" }}
-          />
-          <span>
-            {scaleInfo.displayValue} {scaleInfo.displayUnit}
-          </span>
-        </div>
-      )}
-
-      {/* Magnification Indicator */}
-      {isReady && (
-        <div className="absolute bottom-4 left-36 bg-black/70 text-white px-2 py-1 rounded text-xs font-mono">
-          {scaleInfo.effectiveMag.toFixed(1)}x effective
+        <div className="absolute bottom-4 left-4 flex items-end gap-3">
+          <div className="scale-bar">
+            <div
+              className="scale-bar-line"
+              style={{ width: "100px" }}
+            />
+            <span>
+              {scaleInfo.displayValue} {scaleInfo.displayUnit}
+            </span>
+          </div>
+          <div className="bg-black/70 text-white px-2 py-1 rounded text-xs font-mono whitespace-nowrap">
+            {scaleInfo.effectiveMag.toFixed(1)}x
+          </div>
         </div>
       )}
 
