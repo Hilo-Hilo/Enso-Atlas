@@ -497,10 +497,50 @@ export interface VisualSearchResponse {
   searchTimeMs: number;
 }
 
+// Few-shot patch classification types
+export interface PatchClassification {
+  patchIdx: number;
+  x: number;
+  y: number;
+  predictedClass: string;
+  confidence: number;
+  probabilities: Record<string, number>;
+}
+
+export interface PatchClassifyResult {
+  slideId: string;
+  classes: string[];
+  totalPatches: number;
+  predictions: PatchClassification[];
+  classCounts: Record<string, number>;
+  accuracyEstimate: number | null;
+  heatmapData: Array<{x: number; y: number; classIdx: number; confidence: number}>;
+}
+
 // Visual search status
 export interface VisualSearchStatus {
   indexLoaded: boolean;
   totalPatches: number;
   totalSlides: number;
   embeddingDim: number;
+}
+
+// Outlier tissue detection types
+export interface OutlierPatch {
+  patchIdx: number;
+  x: number;
+  y: number;
+  distance: number;
+  zScore: number;
+}
+
+export interface OutlierDetectionResult {
+  slideId: string;
+  outlierPatches: OutlierPatch[];
+  totalPatches: number;
+  outlierCount: number;
+  meanDistance: number;
+  stdDistance: number;
+  threshold: number;
+  heatmapData: Array<{ x: number; y: number; score: number }>;
 }

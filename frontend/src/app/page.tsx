@@ -20,6 +20,7 @@ import {
   BatchAnalysisPanel,
   AIAssistantPanel,
   AnalysisControls,
+  OutlierDetectorPanel,
   recordAnalysis,
   getCaseNotes,
 } from "@/components/panels";
@@ -213,6 +214,10 @@ function HomePage() {
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+
+  // Outlier detection state
+  const [outlierHeatmapData, setOutlierHeatmapData] = useState<Array<{ x: number; y: number; score: number }> | null>(null);
+  const [showOutlierHeatmap, setShowOutlierHeatmap] = useState(false);
 
   // Visual search (image-to-image) state
   const [visualSearchResults, setVisualSearchResults] = useState<SimilarCase[]>([]);
@@ -1634,6 +1639,16 @@ function HomePage() {
           </div>
         )}
       </div>
+
+      {/* Outlier Tissue Detector */}
+      <OutlierDetectorPanel
+        slideId={selectedSlide?.id ?? null}
+        onHeatmapToggle={(enabled, data) => {
+          setShowOutlierHeatmap(enabled);
+          setOutlierHeatmapData(data);
+        }}
+        onPatchClick={handlePatchClick}
+      />
 
       {/* Clinical Report */}
       <div data-demo="report-panel">

@@ -2832,3 +2832,120 @@ export async function getSlideEmbeddingStatus(
 ): Promise<SlideEmbeddingStatus> {
   return fetchApi(`/api/slides/${encodeURIComponent(slideId)}/embedding-status`);
 }
+
+// ====== Outlier Tissue Detection ======
+
+// Backend response (snake_case)
+interface BackendOutlierPatch {
+  patch_idx: number;
+  x: number;
+  y: number;
+  distance: number;
+  z_score: number;
+}
+
+interface BackendOutlierDetectionResponse {
+  slide_id: string;
+  outlier_patches: BackendOutlierPatch[];
+  total_patches: number;
+  outlier_count: number;
+  mean_distance: number;
+  std_distance: number;
+  threshold: number;
+  heatmap_data: Array<{ x: number; y: number; score: number }>;
+}
+
+/**
+ * Detect outlier tissue patches using embedding distance from centroid.
+ */
+export async function detectOutliers(
+  slideId: string,
+  threshold?: number
+): Promise<import("@/types").OutlierDetectionResult> {
+  const params = threshold !== undefined ? `?threshold=${threshold}` : "";
+  const backend = await fetchApi<BackendOutlierDetectionResponse>(
+    `/api/slides/${encodeURIComponent(slideId)}/outlier-detection${params}`,
+    { method: "POST" },
+    { timeoutMs: 30000 }
+  );
+
+  return {
+    slideId: backend.slide_id,
+    outlierPatches: backend.outlier_patches.map((p) => ({
+      patchIdx: p.patch_idx,
+      x: p.x,
+      y: p.y,
+      distance: p.distance,
+      zScore: p.z_score,
+    })),
+    totalPatches: backend.total_patches,
+    outlierCount: backend.outlier_count,
+    meanDistance: backend.mean_distance,
+    stdDistance: backend.std_distance,
+    threshold: backend.threshold,
+    heatmapData: backend.heatmap_data,
+  };
+}
+
+// ====== Few-Shot Patch Classification ======
+
+// Backend response (snake_case)
+interface BackendPatchClassificationItem {
+  patch_idx: number;
+  x: number;
+  y: number;
+  predicted_class: string;
+  confidence: number;
+  probabilities: Record<string, number>;
+}
+
+interface BackendPatchClassifyResponse {
+  slide_id: string;
+  classes: string[];
+  total_patches: number;
+  predictions: BackendPatchClassificationItem[];
+  class_counts: Record<string, number>;
+  accuracy_estimate: number | null;
+  heatmap_data: Array<{ x: number; y: number; class_idx: number; confidence: number }>;
+}
+
+/**
+ * Few-shot patch classification: train logistic regression on user-selected
+ * example patches and classify all patches in the slide.
+ */
+export async function classifyPatches(
+  slideId: string,
+  classes: Record<string, number[]>
+): Promise<import("@/types").PatchClassifyResult> {
+  const backend = await fetchApi<BackendPatchClassifyResponse>(
+    `/api/slides/${encodeURIComponent(slideId)}/patch-classify`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classes }),
+    },
+    { timeoutMs: 30000 }
+  );
+
+  return {
+    slideId: backend.slide_id,
+    classes: backend.classes,
+    totalPatches: backend.total_patches,
+    predictions: backend.predictions.map((p) => ({
+      patchIdx: p.patch_idx,
+      x: p.x,
+      y: p.y,
+      predictedClass: p.predicted_class,
+      confidence: p.confidence,
+      probabilities: p.probabilities,
+    })),
+    classCounts: backend.class_counts,
+    accuracyEstimate: backend.accuracy_estimate,
+    heatmapData: backend.heatmap_data.map((h) => ({
+      x: h.x,
+      y: h.y,
+      classIdx: h.class_idx,
+      confidence: h.confidence,
+    })),
+  };
+}

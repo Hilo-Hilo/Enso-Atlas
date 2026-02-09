@@ -497,6 +497,53 @@ class AvailableModelsResponse(BaseModel):
     models: List[Dict[str, Any]]
 
 
+class PatchClassifyRequest(BaseModel):
+    """Request for few-shot patch classification."""
+    classes: Dict[str, List[int]]  # class_name -> list of patch indices
+
+
+class PatchClassificationItem(BaseModel):
+    """Single patch classification result."""
+    patch_idx: int
+    x: int
+    y: int
+    predicted_class: str
+    confidence: float
+    probabilities: Dict[str, float]
+
+
+class PatchClassifyResponse(BaseModel):
+    """Response from few-shot patch classification."""
+    slide_id: str
+    classes: List[str]
+    total_patches: int
+    predictions: List[PatchClassificationItem]
+    class_counts: Dict[str, int]
+    accuracy_estimate: Optional[float]
+    heatmap_data: List[Dict[str, Any]]
+
+
+class OutlierPatch(BaseModel):
+    """Single outlier patch result."""
+    patch_idx: int
+    x: int
+    y: int
+    distance: float
+    z_score: float
+
+
+class OutlierDetectionResponse(BaseModel):
+    """Response from outlier tissue detection."""
+    slide_id: str
+    outlier_patches: List[OutlierPatch]
+    total_patches: int
+    outlier_count: int
+    mean_distance: float
+    std_distance: float
+    threshold: float
+    heatmap_data: List[Dict[str, Any]]
+
+
 def create_app(
     embeddings_dir: Path = Path("data/embeddings"),
     model_path: Path = Path("models/clam_attention.pt"),
@@ -5791,6 +5838,222 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         
     except Exception as e:
         logger.warning(f"Failed to initialize ChatManager: {e}")
+
+    # ------------------------------------------------------------------
+    # Few-Shot Patch Classification
+    # ------------------------------------------------------------------
+    @app.post("/api/slides/{slide_id}/patch-classify", response_model=PatchClassifyResponse)
+    async def classify_patches(slide_id: str, request: PatchClassifyRequest):
+        """Few-shot patch classification using logistic regression on Path Foundation embeddings.
+
+        Users provide a small number of example patch indices per class. A logistic
+        regression is trained on the corresponding embeddings and then applied to
+        ALL patches in the slide, returning per-patch class predictions suitable
+        for heatmap rendering.
+        """
+        from sklearn.linear_model import LogisticRegression
+
+        # Validate: need at least 2 classes
+        if len(request.classes) < 2:
+            raise HTTPException(status_code=400, detail="At least 2 classes are required")
+
+        # Validate: each class needs at least 1 example
+        for cls_name, indices in request.classes.items():
+            if len(indices) < 1:
+                raise HTTPException(status_code=400, detail=f"Class '{cls_name}' needs at least 1 example patch")
+
+        # Load embeddings and coordinates
+        emb_path = embeddings_dir / f"{slide_id}.npy"
+        coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+
+        if not emb_path.exists():
+            raise HTTPException(status_code=404, detail=f"Embeddings not found for slide {slide_id}")
+        if not coord_path.exists():
+            raise HTTPException(status_code=404, detail=f"Coordinates not found for slide {slide_id}")
+
+        embeddings_data = np.load(emb_path).astype(np.float32)
+        coords = np.load(coord_path)
+        n_patches = len(embeddings_data)
+
+        if n_patches == 0:
+            raise HTTPException(status_code=400, detail="Slide has no patch embeddings")
+
+        # Validate patch indices are in range
+        for cls_name, indices in request.classes.items():
+            for idx in indices:
+                if idx < 0 or idx >= n_patches:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Patch index {idx} out of range for class '{cls_name}' (slide has {n_patches} patches)"
+                    )
+
+        # Build training set
+        class_names = sorted(request.classes.keys())
+        train_indices = []
+        train_labels = []
+        for cls_name in class_names:
+            for idx in request.classes[cls_name]:
+                train_indices.append(idx)
+                train_labels.append(cls_name)
+
+        X_train = embeddings_data[train_indices]
+        y_train = np.array(train_labels)
+
+        # Train logistic regression
+        clf = LogisticRegression(max_iter=1000, random_state=42)
+        clf.fit(X_train, y_train)
+
+        # Predict on ALL patches
+        y_pred = clf.predict(embeddings_data)
+        y_proba = clf.predict_proba(embeddings_data)
+        proba_classes = list(clf.classes_)
+
+        # Build predictions list
+        predictions = []
+        class_counts: Dict[str, int] = {c: 0 for c in class_names}
+        for i in range(n_patches):
+            pred_class = str(y_pred[i])
+            proba_dict = {str(proba_classes[j]): round(float(y_proba[i][j]), 4) for j in range(len(proba_classes))}
+            confidence = float(max(y_proba[i]))
+            class_counts[pred_class] = class_counts.get(pred_class, 0) + 1
+            predictions.append(PatchClassificationItem(
+                patch_idx=i,
+                x=int(coords[i][0]),
+                y=int(coords[i][1]),
+                predicted_class=pred_class,
+                confidence=round(confidence, 4),
+                probabilities=proba_dict,
+            ))
+
+        # Build heatmap data (class index + confidence for each patch)
+        heatmap_data = []
+        for i in range(n_patches):
+            heatmap_data.append({
+                "x": int(coords[i][0]),
+                "y": int(coords[i][1]),
+                "class_idx": class_names.index(str(y_pred[i])),
+                "confidence": round(float(max(y_proba[i])), 4),
+            })
+
+        # Leave-one-out accuracy on training examples
+        accuracy_estimate = None
+        if len(train_indices) > len(class_names):
+            correct = 0
+            for leave_out in range(len(train_indices)):
+                loo_indices = train_indices[:leave_out] + train_indices[leave_out + 1:]
+                loo_labels = list(train_labels[:leave_out]) + list(train_labels[leave_out + 1:])
+                # Need at least 2 distinct classes in LOO set
+                if len(set(loo_labels)) < 2:
+                    continue
+                X_loo = embeddings_data[loo_indices]
+                y_loo = np.array(loo_labels)
+                clf_loo = LogisticRegression(max_iter=1000, random_state=42)
+                clf_loo.fit(X_loo, y_loo)
+                pred = clf_loo.predict(embeddings_data[[train_indices[leave_out]]])[0]
+                if pred == train_labels[leave_out]:
+                    correct += 1
+            if len(train_indices) > 0:
+                accuracy_estimate = round(correct / len(train_indices), 4)
+
+        log_audit_event("patch_classification", slide_id, details={
+            "classes": class_names,
+            "training_examples": len(train_indices),
+            "total_patches": n_patches,
+            "accuracy_estimate": accuracy_estimate,
+        })
+
+        return PatchClassifyResponse(
+            slide_id=slide_id,
+            classes=class_names,
+            total_patches=n_patches,
+            predictions=predictions,
+            class_counts=class_counts,
+            accuracy_estimate=accuracy_estimate,
+            heatmap_data=heatmap_data,
+        )
+
+    # ------------------------------------------------------------------
+    # Outlier Tissue Detection
+    # ------------------------------------------------------------------
+    @app.post("/api/slides/{slide_id}/outlier-detection", response_model=OutlierDetectionResponse)
+    async def detect_outlier_tissue(slide_id: str, threshold: float = 2.0):
+        """Detect outlier tissue patches using embedding distance from centroid.
+
+        Computes the mean centroid of all patch embeddings for a slide, then
+        flags patches whose Euclidean distance exceeds mean + threshold * std.
+        Returns per-patch normalized scores suitable for heatmap rendering.
+        """
+        emb_path = embeddings_dir / f"{slide_id}.npy"
+        coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+
+        if not emb_path.exists():
+            raise HTTPException(status_code=404, detail=f"Embeddings not found for slide {slide_id}")
+        if not coord_path.exists():
+            raise HTTPException(status_code=404, detail=f"Coordinates not found for slide {slide_id}")
+
+        embeddings_data = np.load(emb_path).astype(np.float32)
+        coords = np.load(coord_path)
+
+        if len(embeddings_data) == 0:
+            raise HTTPException(status_code=400, detail="Slide has no patch embeddings")
+
+        # Compute centroid and distances
+        centroid = np.mean(embeddings_data, axis=0)
+        distances = np.linalg.norm(embeddings_data - centroid, axis=1)
+
+        mean_dist = float(np.mean(distances))
+        std_dist = float(np.std(distances))
+
+        # Identify outliers
+        cutoff = mean_dist + threshold * std_dist
+        outlier_mask = distances > cutoff
+
+        # Build outlier patch list sorted by distance descending
+        outlier_indices = np.where(outlier_mask)[0]
+        outlier_patches = []
+        for idx in outlier_indices:
+            z = (float(distances[idx]) - mean_dist) / std_dist if std_dist > 0 else 0.0
+            outlier_patches.append(OutlierPatch(
+                patch_idx=int(idx),
+                x=int(coords[idx][0]),
+                y=int(coords[idx][1]),
+                distance=float(distances[idx]),
+                z_score=round(z, 3),
+            ))
+        outlier_patches.sort(key=lambda p: p.distance, reverse=True)
+
+        # Normalize distances to 0-1 for heatmap rendering
+        d_min = float(distances.min())
+        d_max = float(distances.max())
+        if d_max - d_min > 0:
+            scores = (distances - d_min) / (d_max - d_min)
+        else:
+            scores = np.zeros_like(distances)
+
+        heatmap_data = []
+        for i in range(len(coords)):
+            heatmap_data.append({
+                "x": int(coords[i][0]),
+                "y": int(coords[i][1]),
+                "score": round(float(scores[i]), 4),
+            })
+
+        log_audit_event("outlier_detection", slide_id, details={
+            "threshold": threshold,
+            "total_patches": len(embeddings_data),
+            "outlier_count": len(outlier_patches),
+        })
+
+        return OutlierDetectionResponse(
+            slide_id=slide_id,
+            outlier_patches=outlier_patches,
+            total_patches=len(embeddings_data),
+            outlier_count=len(outlier_patches),
+            mean_distance=round(mean_dist, 4),
+            std_distance=round(std_dist, 4),
+            threshold=threshold,
+            heatmap_data=heatmap_data,
+        )
 
     return app
 
