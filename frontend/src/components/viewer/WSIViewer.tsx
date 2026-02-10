@@ -170,6 +170,12 @@ export function WSIViewer({
     activeToolRef.current = activeTool;
   }, [activeTool]);
 
+  // Store heatmap display state in refs for use in addSimpleImage success callback
+  const showHeatmapRef = useRef(showHeatmap);
+  useEffect(() => { showHeatmapRef.current = showHeatmap; }, [showHeatmap]);
+  const heatmapOpacityRef = useRef(heatmapOpacity);
+  useEffect(() => { heatmapOpacityRef.current = heatmapOpacity; }, [heatmapOpacity]);
+
   // Store patchSelectionMode in ref so the primary click handler can check it
   const patchSelectionModeRef = useRef(patchSelectionMode);
   useEffect(() => {
@@ -382,6 +388,12 @@ export function WSIViewer({
     const viewer = viewerRef.current;
     if (!viewer || !isReady || !heatmapImageUrl) return;
 
+    // Reset loaded flag so the opacity effect re-fires when the new image loads.
+    // Without this, switching models leaves heatmapLoaded=true (stale from the
+    // previous model), so setHeatmapLoaded(true) in the success callback is a
+    // no-op and the opacity effect never re-runs for the new image.
+    setHeatmapLoaded(false);
+
     // Remove existing heatmap tiled image if present
     if (heatmapTiledImageRef.current) {
       try {
@@ -432,6 +444,10 @@ export function WSIViewer({
             try { event.item._drawer.setImageSmoothingEnabled(false); } catch (_e) { /* not available */ }
           }
         } catch (_e) { /* best effort */ }
+        // Apply correct opacity immediately so the heatmap is visible right away.
+        // Use refs to get current values (closure captures stale state).
+        const targetOpacity = showHeatmapRef.current ? heatmapOpacityRef.current : 0;
+        event.item.setOpacity(targetOpacity);
         setHeatmapLoaded(true);
         setHeatmapError(false);
         console.log("Heatmap added as tiled image layer");
