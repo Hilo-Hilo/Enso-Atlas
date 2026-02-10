@@ -795,19 +795,24 @@ export function WSIViewer({
     return { x: pixelPoint.x, y: pixelPoint.y };
   }, []);
 
-  // Force SVG re-render on zoom/pan
+  // Force SVG annotation re-render on zoom/pan (throttled to avoid lag).
+  // Only uses the animation-end event, not every animation frame, since
+  // annotations don't need 60fps updates and setState per frame is expensive.
   const [renderTick, setRenderTick] = useState(0);
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !isReady) return;
-    const handler = () => setRenderTick((t) => t + 1);
-    viewer.addHandler("zoom", handler);
-    viewer.addHandler("pan", handler);
-    viewer.addHandler("animation", handler);
+    let rafId = 0;
+    const handler = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => setRenderTick((t) => t + 1));
+    };
+    viewer.addHandler("animation-finish", handler);
+    viewer.addHandler("resize", handler);
     return () => {
-      viewer.removeHandler("zoom", handler);
-      viewer.removeHandler("pan", handler);
-      viewer.removeHandler("animation", handler);
+      cancelAnimationFrame(rafId);
+      viewer.removeHandler("animation-finish", handler);
+      viewer.removeHandler("resize", handler);
     };
   }, [isReady]);
 
