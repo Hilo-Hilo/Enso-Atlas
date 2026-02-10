@@ -1,8 +1,8 @@
 # Enso Atlas: Technical Specification
 
-## On-Premise Pathology Evidence Engine for Treatment-Response Prediction
+## A Modular, Model-Agnostic Pathology Evidence Platform
 
-**Version:** 2.0.0
+**Version:** 2.1.0
 **Date:** February 2025
 **Authors:** Enso Labs
 **Classification:** Technical Documentation -- Hackathon Submission / Investor Review
@@ -37,50 +37,79 @@
 
 ## 1.1 Project Overview
 
-Enso Atlas is an on-premise pathology evidence engine that predicts treatment response from whole-slide histopathology images (WSIs) using Google's HAI-DEF foundation models. The system is designed for deployment within hospital networks, ensuring that Protected Health Information (PHI) never leaves the premises. It deeply integrates all three Google Health AI Developer Foundations models -- Path Foundation, MedGemma 4B, and MedSigLIP -- with a Transformer-based Multiple Instance Learning (TransMIL) classifier to deliver interpretable, evidence-grounded predictions.
+Enso Atlas is a modular, model-agnostic pathology evidence platform for on-premise deployment in hospital networks. It provides the complete infrastructure for deploying pathology AI -- from slide ingestion and embedding generation through classification, evidence visualization, and structured reporting -- while ensuring that Protected Health Information (PHI) never leaves the premises.
 
-The system manages five specialized TransMIL models through a project-scoped architecture backed by PostgreSQL with junction tables (project_models, project_slides) for flexible many-to-many relationships between projects, slides, and models. A comprehensive annotations system persists pathologist markup to PostgreSQL. Interactive tools including outlier tissue detection and few-shot patch classification operate directly on Path Foundation embeddings, enabling pathologists to interrogate and verify model reasoning without leaving the platform.
+The platform is built around four independently swappable layers: a **foundation model layer** (any patch-level embedding model), a **classification layer** (any attention-based MIL architecture), an **evidence layer** (heatmaps, retrieval, semantic search, outlier detection), and a **UI layer** (WSI viewer, annotations, reports). Hospitals bring their own foundation models, train task-specific classification heads, and deploy within their existing infrastructure. No code changes are required to add new cancer types, swap models, or adjust feature sets -- everything is driven by a single YAML configuration file.
+
+To demonstrate these capabilities, the current deployment uses Google's HAI-DEF models (Path Foundation, MedGemma 4B, MedSigLIP) with five TransMIL classifiers for ovarian cancer treatment-response prediction. But the HAI-DEF models are interchangeable examples, not the core value proposition. The core value is the platform itself: a production-ready, on-premise system that makes any pathology AI model deployable, interpretable, and clinically useful.
 
 The platform addresses a critical gap in precision oncology: determining which patients will respond to specific chemotherapy regimens before treatment begins. Currently, treatment response can only be assessed after multiple cycles of therapy, exposing non-responding patients to unnecessary toxicity and delays in receiving effective alternatives. Enso Atlas provides early, morphology-based predictions from standard H&E-stained tissue slides that are already collected during routine clinical care.
 
 ### Mission Statement
 
-To build a modular, model-agnostic pathology evidence platform that gives oncologists, pathologists, and tumor boards the information they need to make better treatment decisions -- while keeping patient data secure and on-premise.
+To build the platform that makes pathology AI deployable -- not just another model, but the infrastructure that turns any foundation model and any classification head into a clinical-grade, evidence-based decision support tool, running entirely on-premise.
 
 ### Design Philosophy: Platform, Not a Demo
 
-Enso Atlas is fundamentally a **modular platform**, not a single-purpose tool. The Google HAI-DEF models (Path Foundation, MedGemma, MedSigLIP) are used to demonstrate the platform's capabilities, but every component is designed to be swapped:
+Enso Atlas is a modular platform, not a single-purpose tool. Every component is designed to be swapped without code changes:
 
-- **Foundation models are config-driven.** Replace Path Foundation with UNI, CONCH, Virchow, DINOv2, or any custom embedding model by editing a YAML file. The system only requires a model name and embedding dimension.
-- **Classification models are pluggable.** Any attention-based MIL variant (TransMIL, CLAM, ABMIL) can be registered by dropping in a weights file and adding a config entry. No code changes required.
-- **Cancer types are project-defined.** Add lung, breast, prostate, or any other cancer by creating a new project block in the configuration. Labels, thresholds, model assignments, and feature toggles are all per-project.
-- **Feature toggles are per-project.** Enable or disable MedGemma reports, MedSigLIP semantic search, or similar case retrieval independently for each project.
-- **The UI adapts automatically.** All labels, categories, model lists, and workflow steps derive from the project configuration. No hardcoded cancer types or model IDs exist in the frontend.
+- **Foundation models are config-driven.** Replace Path Foundation with UNI, CONCH, Virchow, DINOv2, or any custom embedding model by editing a YAML file. The system only requires a model name and embedding dimension. All downstream components (classification, retrieval, outlier detection, few-shot learning) automatically adapt to the new embedding space.
+- **Classification models are pluggable.** Any attention-based MIL variant (TransMIL, CLAM, ABMIL) can be registered by dropping in a weights file and adding a config entry. Train on your own data, plug in the checkpoint, and it appears in the UI with full heatmap and evidence support.
+- **Cancer types are project-defined.** Ovarian, lung, breast, prostate, colorectal -- add any cancer type by creating a new project block in the configuration. Labels, thresholds, model assignments, class names, and dataset paths are all per-project.
+- **Feature toggles are per-project.** Enable or disable report generation, semantic search, or similar case retrieval independently for each project. Resource-constrained deployments can disable GPU-heavy features while retaining core classification.
+- **The UI adapts automatically.** All labels, categories, model lists, and workflow steps derive from the project configuration. No hardcoded cancer types or model IDs exist in the frontend. Switch projects and the entire interface reconfigures.
+- **Report generators are swappable.** The structured report system works with MedGemma, but any LLM that accepts a prompt and returns JSON can be substituted. A template-based fallback ensures reports are always available, even without a language model.
 
-### Key Capabilities
+### Key Platform Capabilities
 
-- **Treatment-Response Prediction:** Binary classification of platinum sensitivity in high-grade serous ovarian carcinoma (HGSOC) using TransMIL with attention-based evidence -- best AUC 0.879 with optimized threshold 0.9229
-- **Multi-Model Ensemble:** Five specialized TransMIL models covering platinum sensitivity (AUC 0.907 full dataset), tumor grade (AUC 0.752), 5-year survival (AUC 0.697), 3-year survival (AUC 0.645), and 1-year survival (AUC 0.639)
+- **Plug-and-Play Foundation Models:** Register any embedding model (Path Foundation, UNI, CONCH, Virchow, DINOv2, or custom) via YAML. The platform requires only a model name and output dimension -- all downstream layers adapt automatically.
+- **Pluggable Classification Heads:** Train your own attention-based MIL model (TransMIL, CLAM, ABMIL) on your own embeddings, drop in the weights file, and register it. No code changes. The system handles multi-model ensemble, heatmap generation, and evidence extraction for any registered model.
+- **Config-Driven Cancer Types:** Each cancer type is a project definition in YAML. Add lung, breast, prostate, or any other cancer by specifying dataset paths, labels, thresholds, and model assignments. The entire UI -- labels, categories, model lists, workflows -- reconfigures per project.
+- **Per-Project Feature Toggles:** Enable or disable report generation, semantic search, or similar case retrieval independently per project. Tailor the deployment to your hardware and clinical needs.
 - **Evidence Generation:** Per-model attention heatmaps overlaid on WSIs with coverage-based alignment, top-K evidence patches with coordinates, and FAISS-based similar case retrieval
-- **Semantic Tissue Search:** MedSigLIP-powered text-to-patch search enabling queries like "tumor infiltrating lymphocytes" or "necrotic tissue" with on-the-fly embedding when cached embeddings are unavailable
-- **Outlier Tissue Detector:** Centroid distance analysis on Path Foundation embeddings identifies morphologically unusual patches -- highlighting rare tissue patterns, artifacts, or atypical regions for pathologist review
-- **Few-Shot Patch Classifier:** Pathologists define custom tissue classes by selecting example patches on the viewer; a LogisticRegression trained on Path Foundation embeddings classifies all patches in the slide with per-class heatmap overlay
-- **Structured Reporting:** MedGemma 4B generates tumor-board-ready reports with morphology descriptions, clinical significance, limitations, and mandatory safety statements
+- **Semantic Tissue Search:** Vision-language model-powered text-to-patch search enabling queries like "tumor infiltrating lymphocytes" or "necrotic tissue" with on-the-fly embedding
+- **Outlier Tissue Detector:** Centroid distance analysis on foundation model embeddings identifies morphologically unusual patches -- highlighting rare tissue patterns, artifacts, or atypical regions for pathologist review
+- **Few-Shot Patch Classifier:** Pathologists define custom tissue classes by selecting example patches on the viewer; a LogisticRegression trained on the active foundation model's embeddings classifies all patches in the slide with per-class heatmap overlay
+- **Structured Reporting:** Pluggable LLM report generation (demonstrated with MedGemma 4B) with JSON-first prompting, safety validation, and template-based fallback
 - **Agentic Workflow:** Seven-step AI agent with visible reasoning, SSE streaming, and session memory for follow-up questions
 - **Pathologist Annotations:** SVG-based drawing tools (circle, rectangle, freehand, point) on the OpenSeadragon viewer with full CRUD persistence to PostgreSQL
 - **Batch Analysis:** Async batch processing with model selection, embedding level (L0/L1), force re-embed, real-time progress tracking, and cancellation support
 - **PDF Export:** Professional PDF reports suitable for clinical documentation and tumor board presentations
-- **Project Management:** Config-driven multi-cancer support with CRUD API and junction table architecture
+- **On-Premise by Design:** Docker Compose deployment with air-gapped mode, no cloud dependencies at runtime, and full audit trail for HIPAA alignment
 
-## 1.2 HAI-DEF Model Integration
+### Demo Configuration: Ovarian Cancer with Google HAI-DEF
 
-Enso Atlas deeply integrates all three Google Health AI Developer Foundations models, going far beyond a simple wrapper:
+The current deployment demonstrates the platform with:
+- **Foundation model:** Google Path Foundation (384-dim, ViT-S)
+- **Classification:** 5 TransMIL models (platinum sensitivity AUC 0.907, tumor grade, survival prediction)
+- **Reports:** MedGemma 4B (4 billion parameter medical LLM)
+- **Semantic search:** MedSigLIP (medical SigLIP vision-language model)
+- **Dataset:** 208 TCGA ovarian cancer slides with clinical labels
 
-| HAI-DEF Model | Integration Depth |
-|---|---|
-| **Path Foundation** | 384-dim embeddings are the universal representation: TransMIL classification, FAISS retrieval, outlier detection (centroid distance), few-shot classification (LogisticRegression), attention heatmaps, and batch re-embedding |
-| **MedGemma 4B** | Structured clinical report generation with JSON-first prompting, safety validation, decision support integration, async generation with progress tracking, and template fallback |
-| **MedSigLIP** | Text-to-patch semantic search with on-the-fly embedding, predefined pathology query sets, image-to-image visual search via FAISS, and GPU-accelerated batch embedding |
+This configuration is one example of what the platform can do. Replacing the foundation model, training new classification heads for a different cancer type, or swapping the report generator requires zero code changes -- only YAML configuration and model weights.
+
+## 1.2 Abstraction Layers
+
+The platform is organized into four abstraction layers, each independently replaceable:
+
+| Layer | Role | Currently Demonstrated With | Swap By |
+|---|---|---|---|
+| **Foundation Model** | Patch-level embedding (N x D vectors) | Path Foundation (384-dim) | Register new model in YAML, re-embed slides |
+| **Classification** | Slide-level prediction from embeddings | TransMIL (5 models) | Train new MIL head, drop in weights, register in YAML |
+| **Evidence** | Heatmaps, retrieval, outlier detection, semantic search, few-shot | FAISS + MedSigLIP + LogisticRegression | Foundation model change propagates automatically |
+| **Reporting** | Structured clinical reports | MedGemma 4B | Any LLM with JSON output; template fallback always available |
+
+### HAI-DEF Demo Integration
+
+The demo configuration deeply integrates all three Google Health AI Developer Foundations models to showcase the platform:
+
+| HAI-DEF Model | Platform Layer | Integration Depth |
+|---|---|---|
+| **Path Foundation** | Foundation Model | 384-dim embeddings serve as the universal representation: classification, FAISS retrieval, outlier detection (centroid distance), few-shot classification (LogisticRegression), attention heatmaps, and batch re-embedding |
+| **MedGemma 4B** | Reporting | Structured clinical report generation with JSON-first prompting, safety validation, decision support integration, async generation with progress tracking, and template fallback |
+| **MedSigLIP** | Evidence | Text-to-patch semantic search with on-the-fly embedding, predefined pathology query sets, image-to-image visual search via FAISS, and GPU-accelerated batch embedding |
+
+Any of these can be replaced with alternative models serving the same role. The platform enforces contracts (embedding dimension, attention output format, JSON report schema) rather than coupling to specific model implementations.
 
 ## 1.3 Target Users
 
@@ -92,9 +121,9 @@ Enso Atlas deeply integrates all three Google Health AI Developer Foundations mo
 | Clinical Researcher | Cohort analysis, biomarker discovery | Batch analysis, semantic search, project system, slide manager with filtering |
 | Hospital IT | Deployment, maintenance | Docker Compose, on-premise, PostgreSQL, health checks, Tailscale Funnel access |
 
-## 1.4 Clinical Contribution
+## 1.4 Clinical Validation (Demo Configuration)
 
-The primary clinical contribution is predicting platinum-based chemotherapy sensitivity in high-grade serous ovarian carcinoma from standard H&E tissue slides:
+To validate the platform's end-to-end capabilities, the demo configuration predicts platinum-based chemotherapy sensitivity in high-grade serous ovarian carcinoma from standard H&E tissue slides. These results demonstrate what the platform produces when configured with a specific foundation model, classification head, and dataset:
 
 | Metric | Value |
 |---|---|
@@ -108,29 +137,73 @@ The primary clinical contribution is predicting platinum-based chemotherapy sens
 | Embedding model | Path Foundation (ViT-S, 384-dim) |
 | Classification model | TransMIL (3.2M parameters) |
 
-This is not just a score -- Enso Atlas provides the complete evidence chain: attention heatmaps showing which tissue regions drove the prediction, similar cases from the reference cohort for comparison, semantic search for specific tissue patterns, outlier detection for unusual morphology, and structured MedGemma reports with limitations and safety statements.
+These results are specific to the demo configuration. The same platform infrastructure -- heatmaps, evidence patches, similar cases, outlier detection, structured reports -- works identically with any foundation model and classification head. A hospital deploying their own breast cancer HER2 predictor or lung cancer subtype classifier would get the same evidence chain, the same interpretability tools, and the same reporting pipeline.
 
 ## 1.5 Competition Landscape
 
 | Feature | Enso Atlas | Paige.ai | PathAI | Google DeepMind |
 |---|---|---|---|---|
 | On-Premise | Yes (required) | Cloud + Edge | Cloud | Research only |
-| Foundation Models | Path Foundation + MedGemma + MedSigLIP (all 3 HAI-DEF) | Proprietary | Proprietary | Internal |
+| Model-Agnostic | Yes -- any foundation model, any MIL head via YAML | Proprietary only | Proprietary only | N/A |
+| Foundation Models | Any (demo: all 3 HAI-DEF) | Proprietary | Proprietary | Internal |
+| Pluggable Classification | Yes -- TransMIL, CLAM, ABMIL, custom | No | No | N/A |
+| Multi-Cancer via Config | Yes -- YAML project definitions | Per-product | Per-product | N/A |
 | Explainability | Attention heatmaps + evidence patches + semantic search + outlier detection + few-shot classifier + structured reports | Limited | Moderate | Research |
-| Treatment Response | Yes (platinum sensitivity) | Cancer detection | Drug response (research) | N/A |
 | Interactive Tools | Outlier detector, few-shot classifier, annotation system | None | Limited | N/A |
-| Open Architecture | Config-driven, extensible | Closed | Closed | N/A |
 | Cost | Open source / self-hosted | SaaS subscription | SaaS subscription | N/A |
+
+The key differentiator: Paige.ai and PathAI sell single-purpose, closed-source tools for specific cancer types. Enso Atlas is the open platform that lets hospitals deploy any model for any cancer, on their own hardware, under their own control.
 
 ---
 
 # 2. System Architecture
 
-## 2.1 High-Level Architecture
+## 2.1 Abstraction Layer Architecture
+
+The system is organized into four swappable layers. Each layer communicates through defined contracts (embedding dimension, attention format, JSON report schema) rather than coupling to specific model implementations.
+
+```
++=====================================================================+
+|  UI LAYER (independently themed, auto-configures per project)       |
+|  Next.js 14 / React 18 / OpenSeadragon / SVG Annotations           |
+|  WSI Viewer | Heatmap Overlay | Panels | Dark Mode | PDF Export     |
++=====================================================================+
+        |  HTTP/SSE  |  DZI Tiles  |  Annotations CRUD
+        v            v             v
++=====================================================================+
+|  EVIDENCE LAYER (model-agnostic -- operates on any embedding space) |
+|  FastAPI Backend / PostgreSQL / FAISS                               |
+|  Attention Heatmaps | Similar Cases | Outlier Detection |           |
+|  Few-Shot Classifier | Semantic Search | Agentic Workflow           |
++=====================================================================+
+        |  embeddings (N x D)   |  attention weights (N,)
+        v                       v
++=====================================================================+
+|  CLASSIFICATION LAYER (pluggable -- any attention MIL model)        |
+|  Contract: input (N x D) -> prediction (float) + attention (N,)    |
+|  [TransMIL]  [CLAM]  [ABMIL]  [Custom MIL]   <- register via YAML |
++=====================================================================+
+        |  patch embeddings (N x D)
+        v
++=====================================================================+
+|  FOUNDATION MODEL LAYER (swappable -- any patch embedding model)    |
+|  Contract: image (224x224x3) -> embedding (D-dim vector)            |
+|  [Path Foundation]  [UNI]  [CONCH]  [Virchow]  [DINOv2]  [Custom]  |
+|                                                  <- register via YAML|
++=====================================================================+
+        |  224x224 patches
+        v
++=====================================================================+
+|  DATA LAYER (format-agnostic slide storage)                         |
+|  WSI Files (.svs/.tiff/.ndpi) | Embeddings (.npy) | PostgreSQL 16  |
++=====================================================================+
+```
+
+### Detailed Component Diagram
 
 ```mermaid
 graph TB
-    subgraph "Frontend (Next.js 14)"
+    subgraph "UI Layer"
         UI[React UI - Port 3002]
         OSD[OpenSeadragon WSI Viewer]
         GRID[Patch Grid Overlay]
@@ -139,34 +212,43 @@ graph TB
         API_CLIENT[API Client - api.ts]
     end
 
-    subgraph "Backend (FastAPI - Port 8003)"
+    subgraph "Evidence Layer (FastAPI - Port 8003)"
         API[REST API - main.py]
-        AGENT[Agent Workflow - workflow.py]
-        CHAT[Chat Manager - chat.py]
-        DB_MOD[Database Module - database.py]
-        PROJ[Project Registry - projects.py]
-        BATCH[Batch Tasks - batch_tasks.py]
-        BEMBED[Batch Embed - batch_embed_tasks.py]
-        REPORT[Report Tasks - report_tasks.py]
-        PDF[PDF Export - pdf_export.py]
-        META[Slide Metadata - slide_metadata.py]
+        AGENT[Agent Workflow]
+        CHAT[Chat Manager]
+        DB_MOD[Database Module]
+        PROJ[Project Registry - YAML driven]
+        BATCH[Batch Tasks]
+        BEMBED[Batch Embed]
+        REPORT[Report Tasks]
+        PDF[PDF Export]
     end
 
-    subgraph "ML Models"
-        PF[Path Foundation - 384-dim embeddings]
-        MG[MedGemma 4B - Report Generation]
-        MS[MedSigLIP - Semantic Search]
-        TM[TransMIL x5 - MIL Classification]
-        FAISS[FAISS Index - Similarity Search]
-        LR[LogisticRegression - Few-Shot Classifier]
+    subgraph "Classification Layer (Pluggable)"
+        TM[TransMIL x5]
+        CLAM_SLOT["[CLAM slot]"]
+        ABMIL_SLOT["[ABMIL slot]"]
+        CUSTOM_MIL["[Custom MIL slot]"]
+        FAISS[FAISS Index]
+        LR[LogisticRegression - Few-Shot]
     end
 
-    subgraph "Storage"
+    subgraph "Foundation Model Layer (Swappable)"
+        PF["Path Foundation (demo)"]
+        UNI_SLOT["[UNI slot]"]
+        CONCH_SLOT["[CONCH slot]"]
+        CUSTOM_FM["[Custom model slot]"]
+        VLM["Vision-Language Model (Semantic Search)"]
+        LLM["Language Model (Reports)"]
+    end
+
+    subgraph "Data Layer"
         PG[(PostgreSQL 16<br/>Schema v5)]
-        EMB[/Embeddings .npy<br/>Level 0 + Level 1/]
+        EMB[/Embeddings .npy<br/>N x D vectors/]
         WSI_FILES[/WSI Files .svs/]
         MODELS[/Model Checkpoints/]
         HCACHE[/Heatmap Cache .png/]
+        YAML[/projects.yaml<br/>Configuration/]
     end
 
     UI --> API_CLIENT
@@ -181,24 +263,24 @@ graph TB
     API --> BEMBED
     API --> REPORT
     API --> PDF
-    AGENT --> MG
-    AGENT --> MS
+    AGENT --> VLM
     AGENT --> TM
     AGENT --> FAISS
     API --> PF
-    API --> MG
-    API --> MS
+    API --> VLM
+    API --> LLM
     API --> TM
     API --> FAISS
     API --> LR
     DB_MOD --> PG
+    PROJ --> YAML
     PROJ --> PG
     PF --> EMB
     TM --> EMB
     API --> WSI_FILES
     TM --> MODELS
-    MG --> MODELS
-    MS --> MODELS
+    LLM --> MODELS
+    VLM --> MODELS
     API --> HCACHE
 ```
 
@@ -330,13 +412,35 @@ For public access without opening firewall ports, Tailscale Funnel provides zero
 
 ---
 
-# 3. Foundation Models
+# 3. Foundation Model Layer
 
-## 3.1 Path Foundation (Google)
+The foundation model layer is the bottom of the abstraction stack. It converts 224x224 pixel tissue patches into fixed-dimensional embedding vectors. The platform imposes a single contract on foundation models: **input a patch image, output a D-dimensional vector.** Everything above this layer -- classification, retrieval, outlier detection, few-shot learning -- operates on the embedding vectors and is agnostic to which model produced them.
+
+Foundation models are registered in `config/projects.yaml` under `foundation_models`. To add a new foundation model, specify its name, embedding dimension, and description. Then re-embed your slides with the new model and update project configurations to reference it. No backend code changes are required.
+
+```yaml
+foundation_models:
+  path_foundation:
+    name: "Path Foundation"
+    embedding_dim: 384
+  uni:
+    name: "UNI"
+    embedding_dim: 1024
+  virchow:
+    name: "Virchow"
+    embedding_dim: 768
+  your_custom_model:
+    name: "Institutional Fine-Tuned ViT"
+    embedding_dim: 512
+```
+
+The demo deployment uses three Google HAI-DEF models. The following subsections document their specifications as reference implementations.
+
+## 3.1 Path Foundation (Google) -- Demo Foundation Model
 
 ### Overview
 
-Path Foundation is Google's histopathology foundation model, based on a DINOv2-style self-supervised learning architecture trained on millions of pathology images. It produces dense 384-dimensional feature vectors from 224x224 pixel tissue patches. In Enso Atlas, these embeddings serve as the universal tissue representation for:
+Path Foundation is Google's histopathology foundation model, based on a DINOv2-style self-supervised learning architecture trained on millions of pathology images. It produces dense 384-dimensional feature vectors from 224x224 pixel tissue patches. In the demo configuration, these embeddings serve as the universal tissue representation for:
 
 1. TransMIL slide-level classification (5 models)
 2. FAISS similar-case retrieval (slide-mean cosine similarity)
@@ -383,11 +487,11 @@ For a typical ovarian cancer slide (~80,000 x 40,000 pixels at level 0), this pr
 
 Path Foundation uses TensorFlow, which does not support NVIDIA Blackwell GPUs (compute capability sm_121). The system runs Path Foundation on CPU, which is acceptable because embeddings are pre-computed offline. On-demand embedding is supported for new slides via background tasks with progress tracking.
 
-## 3.2 MedGemma 4B
+## 3.2 MedGemma 4B -- Demo Report Generator
 
 ### Overview
 
-MedGemma is Google's medical language model, a 4-billion parameter instruction-tuned variant of Gemma optimized for medical text generation. In Enso Atlas, MedGemma generates structured clinical reports from model predictions and evidence patches.
+The reporting layer accepts any LLM that can produce structured JSON from a clinical prompt. The demo uses MedGemma, Google's medical language model, a 4-billion parameter instruction-tuned variant of Gemma optimized for medical text generation. Alternative LLMs (Llama 3 Med, BioMistral, or proprietary clinical LLMs) can be substituted by implementing the same prompt/response contract. A template-based fallback ensures reports are always available even without any LLM.
 
 ### Architecture Specifications
 
@@ -432,11 +536,11 @@ MedGemma is Google's medical language model, a 4-billion parameter instruction-t
 }
 ```
 
-## 3.3 MedSigLIP
+## 3.3 MedSigLIP -- Demo Vision-Language Model
 
 ### Overview
 
-MedSigLIP is Google's medical vision-language model based on the SigLIP architecture. It enables semantic search over tissue patches using natural language queries -- a capability unique to Enso Atlas among pathology AI platforms.
+The semantic search layer accepts any vision-language model that can encode both text and images into a shared embedding space. The demo uses MedSigLIP, Google's medical vision-language model based on the SigLIP architecture. Alternative models (BiomedCLIP, PLIP, OpenCLIP fine-tuned on pathology data) can be substituted. Semantic search is an optional feature toggle -- projects can disable it entirely if no vision-language model is available.
 
 ### Architecture Specifications
 
@@ -462,11 +566,28 @@ MedSigLIP shares GPU with MedGemma. At fp16, SigLIP requires ~800 MB alongside M
 
 ---
 
-# 4. TransMIL Architecture
+# 4. Classification Layer
 
-## 4.1 Transformer-Based Multiple Instance Learning
+The classification layer sits above the foundation model layer and consumes embedding vectors. It imposes a single contract: **input N x D embeddings, output a scalar prediction and N attention weights.** The attention weights are critical -- they power the heatmap overlays, evidence patch selection, and interpretability tools. Any MIL architecture that produces per-patch attention scores is compatible.
 
-TransMIL extends the MIL paradigm with Transformer self-attention, enabling the model to capture inter-patch relationships and spatial context. Attention signals provide the interpretability critical for clinical adoption.
+Classification models are registered in `config/projects.yaml` under `classification_models`. Each entry specifies a model directory (containing the checkpoint), display metadata (name, AUC, labels), and compatible foundation model. Multiple classification models can be assigned to a single project for ensemble analysis.
+
+```yaml
+classification_models:
+  your_model:
+    model_dir: "transmil_your_task"           # Directory under outputs/
+    display_name: "Your Prediction Task"
+    auc: 0.85                                 # Displayed in UI
+    positive_label: "Positive"
+    negative_label: "Negative"
+    compatible_foundation: "path_foundation"   # Must match embedding_dim
+```
+
+The demo deployment uses TransMIL. The following subsections document it as the reference classification architecture.
+
+## 4.1 TransMIL -- Demo Classification Architecture
+
+TransMIL extends the MIL paradigm with Transformer self-attention, enabling the model to capture inter-patch relationships and spatial context. Attention signals provide the interpretability critical for clinical adoption. Other compatible architectures include CLAM (Clustering-constrained Attention MIL), ABMIL (Attention-Based MIL), and DSMIL (Dual-Stream MIL) -- any architecture that outputs per-patch attention weights integrates directly.
 
 ## 4.2 Architecture Details
 
@@ -485,21 +606,21 @@ graph TD
     TRANS2 -.->|"Attention Weights"| ATTN["Attention Map<br/>(N weights)"]
 ```
 
-### Hyperparameters
+### Hyperparameters (Demo Configuration)
 
-| Parameter | Value |
-|---|---|
-| Input Dimension | 384 (Path Foundation) |
-| Hidden Dimension | 512 |
-| Number of Classes | 1 (binary with sigmoid) |
-| Attention Heads | 8 |
-| Transformer Layers | 2 |
-| Dropout | 0.1 (inference) / 0.25 (training) |
-| Total Parameters | ~3.2M |
+| Parameter | Value | Configurable |
+|---|---|---|
+| Input Dimension | 384 (matches Path Foundation) | Auto-adapts to foundation model embedding_dim |
+| Hidden Dimension | 512 | Via `--hidden_dim` training arg |
+| Number of Classes | 1 (binary with sigmoid) | Per training configuration |
+| Attention Heads | 8 | Via `--num_heads` training arg |
+| Transformer Layers | 2 | Via `--num_layers` training arg |
+| Dropout | 0.1 (inference) / 0.25 (training) | Via `--dropout` training arg |
+| Total Parameters | ~3.2M | Varies with hidden_dim/layers |
 
 ## 4.3 Multi-Model Inference
 
-Five specialized TransMIL models are trained for different prediction targets:
+The platform supports any number of classification models per project. The demo includes five specialized TransMIL models trained for different prediction targets:
 
 | Model ID | Display Name | Category | AUC | Training Slides |
 |---|---|---|---|---|
@@ -1137,6 +1258,10 @@ The API client (`frontend/src/lib/api.ts`) implements:
 
 # 9. Config-Driven Project System
 
+The project system is the architectural heart of Enso Atlas. It is the mechanism by which the platform achieves model-agnosticism and multi-cancer support without code changes. Every deployment decision -- which foundation model to use, which classification heads to run, what labels to display, which features to enable -- is encoded in a single YAML file.
+
+This design means a hospital can go from "we have a trained model and some slides" to "fully deployed clinical decision support tool" by editing a configuration file and restarting the server. No Python, no TypeScript, no Docker rebuilds.
+
 ## 9.1 YAML Schema
 
 Projects are defined in `config/projects.yaml`:
@@ -1195,11 +1320,28 @@ The `ProjectRegistry` class loads and manages project configurations with Postgr
 
 ## 9.3 Adding a New Cancer Type
 
-1. Add project definition to `config/projects.yaml`
-2. Prepare training data in dataset directories
-3. Run embedding pipeline: `python scripts/embed_level0_pipelined.py`
-4. Train TransMIL model: `python scripts/train_transmil.py`
-5. Restart server -- project auto-loads in frontend switcher
+No code changes required. The entire process is configuration-driven:
+
+1. **Define the project** in `config/projects.yaml` (cancer type, classes, labels, thresholds)
+2. **Add slides** to the configured `slides_dir`
+3. **Generate embeddings:** `python scripts/embed_level0_pipelined.py --slides_dir ... --output_dir ...`
+4. **Train a classification model:** `python scripts/train_transmil.py --embeddings_dir ... --labels_file ...`
+5. **Register the model** under `classification_models` in `projects.yaml`
+6. **Restart the server** -- the new project auto-loads in the frontend project switcher with all labels, models, and features configured
+
+The frontend renders entirely from project metadata: class names, positive/negative labels, model lists, feature availability, and threshold values all derive from the YAML. No frontend code is aware of specific cancer types or model names.
+
+## 9.4 Switching Between Projects
+
+The frontend `ProjectContext` reads available projects from the API and renders a project switcher in the header. When the user switches projects:
+
+1. The slide list re-filters to show only project-assigned slides
+2. The model picker updates to show only project-assigned classification models
+3. Labels, class names, and threshold values update to match the project config
+4. Feature panels show/hide based on project feature toggles
+5. The selected project persists to localStorage across sessions
+
+This means a single Enso Atlas deployment can serve multiple clinical teams working on different cancer types simultaneously.
 
 ---
 
@@ -1207,12 +1349,12 @@ The `ProjectRegistry` class loads and manages project configurations with Postgr
 
 ## 10.1 Outlier Tissue Detector
 
-The outlier detector identifies morphologically unusual tissue patches by measuring each patch's distance from the embedding centroid.
+The outlier detector identifies morphologically unusual tissue patches by measuring each patch's distance from the embedding centroid. It operates on whatever foundation model embeddings are configured for the active project -- no model-specific code.
 
 ### Algorithm
 
 ```
-1. Load Path Foundation embeddings (N x 384) for the slide
+1. Load foundation model embeddings (N x D) for the slide
 2. Compute centroid = mean(embeddings, axis=0)
 3. Compute distances = ||embedding_i - centroid||_2 for all patches
 4. Compute mean_dist, std_dist
@@ -1242,14 +1384,14 @@ The `OutlierDetectorPanel` component:
 
 ## 10.2 Few-Shot Patch Classifier
 
-The few-shot classifier enables pathologists to define custom tissue classes by selecting example patches, then classifies all patches in the slide.
+The few-shot classifier enables pathologists to define custom tissue classes by selecting example patches, then classifies all patches in the slide. It operates on the active project's foundation model embeddings, making it compatible with any registered foundation model.
 
 ### Algorithm
 
 ```
 1. User defines 2+ classes with example patch indices
    (via text input "1,2,3,10-20" or spatial click selection on viewer)
-2. Load Path Foundation embeddings for example patches
+2. Load foundation model embeddings for example patches
 3. Train LogisticRegression(max_iter=1000) on example embeddings
 4. Predict all N patches in the slide
 5. Compute per-class probabilities
@@ -2935,7 +3077,8 @@ Exact inner product search on L2-normalized mean embeddings (cosine similarity).
 |---|---|---|---|
 | 1.0.0 | 2025-02-06 | Enso Labs | Initial specification |
 | 2.0.0 | 2025-02-10 | Enso Labs | Complete revamp: added outlier detector, few-shot classifier, patch grid overlay, canvas-based overlays, annotation system (SVG + PostgreSQL), batch embedding, heatmap caching, coverage-based alignment, real-time scale bar, resizable panels, dark mode, Mac mini feasibility, Tailscale Funnel, schema v5, 80+ API endpoints, updated architecture diagrams, all current features |
+| 2.1.0 | 2025-02-10 | Enso Labs | Reframed as modular platform architecture: added abstraction layer diagrams (foundation/classification/evidence/UI), emphasized plug-and-play model system, reframed HAI-DEF models as demo configuration rather than core value, added comprehensive Hospital Deployment Guide (13.1-13.10), strengthened config-driven project system documentation |
 
 ---
 
-*This document covers approximately 30,000 lines of Python backend code and 15,000 lines of TypeScript frontend code comprising the Enso Atlas platform.*
+*Enso Atlas is approximately 30,000 lines of Python backend code and 15,000 lines of TypeScript frontend code. It is not a model demo -- it is the platform that makes pathology AI deployable.*
