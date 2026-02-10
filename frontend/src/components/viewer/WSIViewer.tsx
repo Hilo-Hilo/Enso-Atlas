@@ -152,6 +152,8 @@ export function WSIViewer({
   const [showHeatmap, setShowHeatmap] = useState(true); // Default to showing heatmap
   const [heatmapOnly, setHeatmapOnly] = useState(false); // Hide pathology, show only attention
   const [showGrid, setShowGrid] = useState(false);
+  const [gridOpacity, setGridOpacity] = useState(0.3);
+  const [gridColor, setGridColor] = useState("#00ffff"); // cyan default
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [heatmapOpacity, setHeatmapOpacity] = useState(0.6);
   const [zoom, setZoom] = useState(1);
@@ -445,15 +447,28 @@ export function WSIViewer({
     }
   }, [heatmapOnly, isReady]);
 
-  // Draw 224px patch grid overlay on a canvas
+  // Store grid settings in refs so the draw function never gets recreated
+  const showGridRef = useRef(showGrid);
+  useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
+  const gridOpacityRef = useRef(gridOpacity);
+  useEffect(() => { gridOpacityRef.current = gridOpacity; }, [gridOpacity]);
+  const gridColorRef = useRef(gridColor);
+  useEffect(() => { gridColorRef.current = gridColor; }, [gridColor]);
+  // Force grid redraw when settings change
+  const gridRedrawRef = useRef<(() => void) | null>(null);
+  useEffect(() => { gridRedrawRef.current?.(); }, [showGrid, gridOpacity, gridColor]);
+
+  // Draw 224px patch grid overlay on a canvas using requestAnimationFrame
   useEffect(() => {
     const viewer = viewerRef.current;
     const canvas = gridCanvasRef.current;
     if (!viewer || !canvas || !isReady) return;
 
     const PATCH = 224;
+    let rafId = 0;
 
     const draw = () => {
+      rafId = 0;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
@@ -468,7 +483,7 @@ export function WSIViewer({
       }
 
       ctx.clearRect(0, 0, w, h);
-      if (!showGrid) return;
+      if (!showGridRef.current) return;
 
       const tiledImage = viewer.world.getItemAt(0);
       if (!tiledImage) return;
@@ -488,7 +503,13 @@ export function WSIViewer({
       const minY = Math.max(0, Math.floor(topLeftImg.y / PATCH) * PATCH);
       const maxY = Math.min(imgH, Math.ceil(bottomRightImg.y / PATCH) * PATCH);
 
-      ctx.strokeStyle = "rgba(0, 255, 255, 0.3)";
+      // Parse hex color to RGB for rgba string
+      const hex = gridColorRef.current;
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+
+      ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${gridOpacityRef.current})`;
       ctx.lineWidth = 0.5;
       ctx.beginPath();
 
@@ -515,18 +536,27 @@ export function WSIViewer({
       ctx.stroke();
     };
 
-    draw();
-    viewer.addHandler("animation", draw);
-    viewer.addHandler("resize", draw);
+    // Throttle via requestAnimationFrame — only one draw per frame
+    const scheduleRedraw = () => {
+      if (!rafId) {
+        rafId = requestAnimationFrame(draw);
+      }
+    };
+
+    draw(); // initial
+    gridRedrawRef.current = draw; // allow external triggers
+    viewer.addHandler("animation", scheduleRedraw);
+    viewer.addHandler("resize", scheduleRedraw);
 
     return () => {
-      viewer.removeHandler("animation", draw);
-      viewer.removeHandler("resize", draw);
-      // Clear canvas on cleanup
+      gridRedrawRef.current = null;
+      viewer.removeHandler("animation", scheduleRedraw);
+      viewer.removeHandler("resize", scheduleRedraw);
+      if (rafId) cancelAnimationFrame(rafId);
       const ctx = canvas.getContext("2d");
       if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
     };
-  }, [isReady, showGrid]);
+  }, [isReady]);
 
   // Helper: convert screen pixel position to image coordinates
   const screenToImageCoords = useCallback((screenX: number, screenY: number): { x: number; y: number } | null => {
@@ -1391,6 +1421,39 @@ export function WSIViewer({
                 size="sm"
               />
             </div>
+
+            {showGrid && (
+              <div className="pt-1.5 space-y-1.5 animate-fade-in">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-2xs text-gray-400">Opacity</span>
+                  <div className="flex items-center gap-1.5 flex-1">
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={1}
+                      step={0.05}
+                      value={gridOpacity}
+                      onChange={(e) => setGridOpacity(Number(e.target.value))}
+                      className="flex-1 h-1 accent-cyan-400"
+                    />
+                    <span className="text-2xs text-gray-400 w-7 text-right">{Math.round(gridOpacity * 100)}%</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-2xs text-gray-400">Color</span>
+                  <div className="flex items-center gap-1.5">
+                    {["#00ffff", "#ffffff", "#ff0000", "#00ff00", "#ffff00"].map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setGridColor(c)}
+                        className={`w-4 h-4 rounded-full border-2 transition-all ${gridColor === c ? "border-white scale-110" : "border-gray-500 hover:border-gray-300"}`}
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {heatmap && showHeatmapPanel && showHeatmap && (
               <div className="pt-2 border-t border-gray-100 animate-fade-in">
