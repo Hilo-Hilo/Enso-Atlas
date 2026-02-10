@@ -503,6 +503,23 @@ export function WSIViewer({
       const minY = Math.max(0, Math.floor(topLeftImg.y / PATCH) * PATCH);
       const maxY = Math.min(imgH, Math.ceil(bottomRightImg.y / PATCH) * PATCH);
 
+      // Clip drawing to the slide image bounds so grid does not extend outside
+      const imgTopLeftVP = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(0, 0));
+      const imgBotRightVP = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(imgW, imgH));
+      const imgTopLeftPx = viewer.viewport.pixelFromPoint(imgTopLeftVP);
+      const imgBotRightPx = viewer.viewport.pixelFromPoint(imgBotRightVP);
+      const clipX = Math.max(0, imgTopLeftPx.x);
+      const clipY = Math.max(0, imgTopLeftPx.y);
+      const clipW = Math.min(w, imgBotRightPx.x) - clipX;
+      const clipH = Math.min(h, imgBotRightPx.y) - clipY;
+
+      if (clipW <= 0 || clipH <= 0) return; // slide not visible
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(clipX, clipY, clipW, clipH);
+      ctx.clip();
+
       // Parse hex color to RGB for rgba string
       const hex = gridColorRef.current;
       const r = parseInt(hex.slice(1, 3), 16);
@@ -534,6 +551,7 @@ export function WSIViewer({
       }
 
       ctx.stroke();
+      ctx.restore();
     };
 
     // Throttle via requestAnimationFrame — only one draw per frame
@@ -1208,7 +1226,7 @@ export function WSIViewer({
         "relative bg-navy-900 rounded-xl overflow-hidden shadow-clinical-lg border border-navy-700",
         className
       )}
-      style={{ cursor: activeAnnotationTool !== "pointer" ? "crosshair" : "default" }}
+      style={{ cursor: (activeAnnotationTool !== "pointer" || patchSelectionMode) ? "crosshair" : "default" }}
     >
       {/* Viewer Container */}
       <div
@@ -1222,16 +1240,16 @@ export function WSIViewer({
         ref={patchCanvasRef}
         className="absolute inset-0 w-full h-full"
         style={{
-          pointerEvents: patchSelectionMode ? "auto" : "none",
-          cursor: patchSelectionMode ? "crosshair" : "default",
+          pointerEvents: "none",
+          zIndex: 1,
         }}
       />
 
-      {/* Patch grid overlay canvas */}
+      {/* Patch grid overlay canvas — z-index 1 so it stays below UI overlays */}
       <canvas
         ref={gridCanvasRef}
-        className="absolute top-0 left-0 w-full h-full z-10"
-        style={{ pointerEvents: "none" }}
+        className="absolute top-0 left-0 w-full h-full"
+        style={{ pointerEvents: "none", zIndex: 1 }}
       />
 
       {/* Selection mode indicator */}
