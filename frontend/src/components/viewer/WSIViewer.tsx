@@ -170,6 +170,12 @@ export function WSIViewer({
     activeToolRef.current = activeTool;
   }, [activeTool]);
 
+  // Store patchSelectionMode in ref so the primary click handler can check it
+  const patchSelectionModeRef = useRef(patchSelectionMode);
+  useEffect(() => {
+    patchSelectionModeRef.current = patchSelectionMode;
+  }, [patchSelectionMode]);
+
   // Annotation drawing state
   const svgOverlayRef = useRef<SVGSVGElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -311,6 +317,8 @@ export function WSIViewer({
 
     // Use ref for click handler to avoid recreating viewer when tool/callback changes
     viewer.addHandler("canvas-click", (event: OpenSeadragon.CanvasClickEvent) => {
+      // Let the patch selection handler take priority when active
+      if (patchSelectionModeRef.current) return;
       if (onRegionClickRef.current && event.quick && activeToolRef.current === "crosshair") {
         const tiledImage = viewer.world.getItemAt(0);
         if (tiledImage) {
@@ -467,24 +475,25 @@ export function WSIViewer({
     return () => observer.disconnect();
   }, [isReady]);
 
-  // Update heatmap opacity via the tiled image layer
+  // Unified effect for heatmap opacity AND pathology tile visibility.
+  // Merging these ensures any toggle change (showHeatmap, heatmapOnly)
+  // immediately updates both layers without requiring an opacity slider nudge.
   useEffect(() => {
+    // Update heatmap layer opacity
     if (heatmapTiledImageRef.current && heatmapLoaded) {
       const targetOpacity = showHeatmap ? heatmapOpacity : 0;
       heatmapTiledImageRef.current.setOpacity(targetOpacity);
     }
-  }, [showHeatmap, heatmapOpacity, heatmapLoaded]);
 
-  // Hide/show main pathology tiles when heatmapOnly changes
-  useEffect(() => {
+    // Update main pathology tile visibility
     const viewer = viewerRef.current;
-    if (!viewer || !isReady) return;
-    
-    const tiledImage = viewer.world.getItemAt(0);
-    if (tiledImage) {
-      tiledImage.setOpacity(heatmapOnly ? 0 : 1);
+    if (viewer && isReady) {
+      const tiledImage = viewer.world.getItemAt(0);
+      if (tiledImage) {
+        tiledImage.setOpacity(heatmapOnly ? 0 : 1);
+      }
     }
-  }, [heatmapOnly, isReady]);
+  }, [showHeatmap, heatmapOpacity, heatmapLoaded, heatmapOnly, isReady]);
 
   // Store grid settings in refs so the draw function never gets recreated
   const showGridRef = useRef(showGrid);
