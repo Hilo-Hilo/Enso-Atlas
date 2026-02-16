@@ -42,6 +42,7 @@ import {
   type AsyncBatchTaskStatus,
   type AvailableModelDetail,
 } from "@/lib/api";
+import { cleanSlideName, cleanSlideId, deduplicateSlides } from "@/lib/slideUtils";
 import type {
   SlideInfo,
   BatchAnalysisResult,
@@ -122,30 +123,33 @@ export function BatchAnalysisPanel({
 
   // Fetch available models from project
   useEffect(() => {
-    if (!currentProject.id || currentProject.id === "default") return;
     const fetchModels = async () => {
-      try {
-        const details = await getProjectAvailableModels(currentProject.id);
-        if (details.length > 0) {
-          setApiModelDetails(details);
-          // Auto-select primary model
-          const primaryId = currentProject.prediction_target;
-          if (primaryId && details.some((d) => d.id === primaryId)) {
-            setSelectedModelIds([primaryId]);
-          } else {
-            setSelectedModelIds([details[0].id]);
+      // Try API first (unless using default project)
+      if (currentProject.id && currentProject.id !== "default") {
+        try {
+          const details = await getProjectAvailableModels(currentProject.id);
+          if (details.length > 0) {
+            setApiModelDetails(details);
+            // Auto-select primary model
+            const primaryId = currentProject.prediction_target;
+            if (primaryId && details.some((d) => d.id === primaryId)) {
+              setSelectedModelIds([primaryId]);
+            } else {
+              setSelectedModelIds([details[0].id]);
+            }
+            return;
           }
-          return;
+        } catch {
+          // ignore API error, fall through to defaults
         }
-      } catch {
-        // ignore
       }
-      // Fallback: select first model
-      if (AVAILABLE_MODELS.length > 0) {
+      // Fallback: select first hardcoded model
+      if (AVAILABLE_MODELS.length > 0 && selectedModelIds.length === 0) {
         setSelectedModelIds([AVAILABLE_MODELS[0].id]);
       }
     };
     fetchModels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject.id, currentProject.prediction_target]);
 
   // Cleanup polling on unmount
@@ -159,19 +163,29 @@ export function BatchAnalysisPanel({
 
   // Load slides on mount
   useEffect(() => {
+    let cancelled = false;
     const loadSlides = async () => {
       setIsLoadingSlides(true);
+      setError(null);
       try {
         const response = await getSlides();
-        setSlides(response.slides);
+        if (!cancelled) {
+          // Deduplicate slides and filter out test files
+          setSlides(deduplicateSlides(response.slides));
+        }
       } catch (err) {
         console.error("Failed to load slides:", err);
-        setError("Failed to load slides");
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load slides. Check backend connection.");
+        }
       } finally {
-        setIsLoadingSlides(false);
+        if (!cancelled) {
+          setIsLoadingSlides(false);
+        }
       }
     };
     loadSlides();
+    return () => { cancelled = true; };
   }, []);
 
   // Handle select all / deselect all
@@ -460,8 +474,8 @@ export function BatchAnalysisPanel({
                   </span>
                 </div>
                 {progress.currentSlide && (
-                  <p className="text-xs text-clinical-600 dark:text-clinical-400 truncate">
-                    Current: {progress.currentSlide.slice(0, 30)}...
+                  <p className="text-xs text-clinical-600 dark:text-clinical-400 truncate" title={progress.currentSlide}>
+                    Current: {cleanSlideId(progress.currentSlide)}
                   </p>
                 )}
               </div>
@@ -711,8 +725,8 @@ export function BatchAnalysisPanel({
                     <Square className="h-4 w-4 text-gray-400 shrink-0" />
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {slide.id}
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={slide.id}>
+                      {cleanSlideId(slide.id)}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
                       {slide.numPatches?.toLocaleString() || "?"} patches
@@ -1052,8 +1066,9 @@ function ResultRow({
           <button
             onClick={onClick}
             className="text-left hover:text-clinical-600 font-mono text-xs"
+            title={result.slideId}
           >
-            {result.slideId.slice(0, 12)}...
+            {cleanSlideId(result.slideId)}
           </button>
         </td>
         <td colSpan={3} className="px-2 py-2 text-red-600 dark:text-red-400 text-xs">
@@ -1091,8 +1106,8 @@ function ResultRow({
         </td>
       )}
       <td className="px-2 py-2">
-        <span className="font-mono text-xs hover:text-clinical-600 dark:text-gray-300">
-          {result.slideId.slice(0, 12)}...
+        <span className="font-mono text-xs hover:text-clinical-600 dark:text-gray-300" title={result.slideId}>
+          {cleanSlideId(result.slideId)}
         </span>
       </td>
       <td className="px-2 py-2">

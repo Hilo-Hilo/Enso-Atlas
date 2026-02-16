@@ -109,8 +109,8 @@ def main():
         model_path = "google/siglip-so400m-patch14-384"
     
     print(f"Loading MedSigLIP from {model_path}")
-    # Force CPU - Blackwell sm_121 causes hangs with SigLIP on CUDA
-    device = torch.device("cpu")
+    # Use CUDA when available (RunPod H200), fallback to CPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     
     processor = SiglipImageProcessor.from_pretrained(model_path)

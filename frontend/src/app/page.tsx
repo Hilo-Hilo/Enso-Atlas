@@ -30,6 +30,7 @@ import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
 import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords } from "@/lib/api";
+import { deduplicateSlides } from "@/lib/slideUtils";
 import { useProject } from "@/contexts/ProjectContext";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import type { PanelImperativeHandle } from "react-resizable-panels";
@@ -501,7 +502,8 @@ function HomePage() {
     setSlideListError(null);
     try {
       const response = await getSlides({ projectId: currentProject.id });
-      setSlideList(response.slides);
+      // Deduplicate slides (remove non-UUID duplicates) and filter test files
+      setSlideList(deduplicateSlides(response.slides));
     } catch (err) {
       console.error("Failed to load slide list:", err);
       const isNetworkError = err instanceof TypeError || (err instanceof Error && (err.message.includes("fetch") || err.message.includes("network") || err.message.includes("timeout")));
@@ -908,10 +910,11 @@ function HomePage() {
       
       // Refresh slide list to update hasLevel0Embeddings status
       const response = await getSlides({ projectId: currentProject.id });
-      setSlideList(response.slides);
+      const dedupedSlides = deduplicateSlides(response.slides);
+      setSlideList(dedupedSlides);
       
       // Update selected slide with new embedding status
-      const updatedSlide = response.slides.find(s => s.id === selectedSlide.id);
+      const updatedSlide = dedupedSlides.find(s => s.id === selectedSlide.id);
       if (updatedSlide) {
         setSelectedSlide(updatedSlide);
       }

@@ -34,6 +34,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { getSlides, getSlideQC, getThumbnailUrl, renameSlide } from "@/lib/api";
+import { cleanSlideName, deduplicateSlides } from "@/lib/slideUtils";
 import { ANALYSIS_STEPS } from "@/hooks/useAnalysis";
 import type { SlideInfo, SlideQCMetrics, PatientContext } from "@/types";
 
@@ -178,7 +179,8 @@ export function SlideSelector({
     setError(null);
     try {
       const response = await getSlides();
-      setSlides(response.slides);
+      // Deduplicate slides (remove non-UUID duplicates) and filter test files
+      setSlides(deduplicateSlides(response.slides));
       // QC metrics are fetched lazily when a slide is selected (not all 208 at once).
       // This avoids 208 parallel requests that block the sidebar from loading.
     } catch (err) {
@@ -203,6 +205,7 @@ export function SlideSelector({
         (slide) =>
           slide.filename.toLowerCase().includes(query) ||
           slide.id.toLowerCase().includes(query) ||
+          cleanSlideName(slide.filename).toLowerCase().includes(query) ||
           (slide.displayName && slide.displayName.toLowerCase().includes(query))
       );
     }
@@ -398,14 +401,14 @@ export function SlideSelector({
                 className="w-12 h-12 border-clinical-300"
               />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-clinical-900 truncate">
-                  {selectedSlide.displayName || selectedSlide.filename}
+                <p className="text-sm font-semibold text-clinical-900 truncate" title={selectedSlide.filename}>
+                  {selectedSlide.displayName || cleanSlideName(selectedSlide.filename)}
                 </p>
                 {selectedSlide.displayName && (
-                  <p className="text-2xs text-clinical-500 truncate">{selectedSlide.filename}</p>
+                  <p className="text-2xs text-clinical-500 truncate" title={selectedSlide.filename}>{cleanSlideName(selectedSlide.filename)}</p>
                 )}
-                <p className="text-xs text-clinical-600 font-mono">
-                  {selectedSlide.id.slice(0, 12)}...
+                <p className="text-xs text-clinical-600 font-mono" title={selectedSlide.id}>
+                  {cleanSlideName(selectedSlide.id)}
                 </p>
               </div>
               <Check className="h-5 w-5 text-clinical-600 shrink-0" />
@@ -729,13 +732,13 @@ function SlideItem({ slide, isSelected, onClick, qcMetrics }: SlideItemProps) {
       {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <p className="text-sm font-medium text-gray-900 truncate flex-1">
-            {slide.displayName || slide.filename}
+          <p className="text-sm font-medium text-gray-900 truncate flex-1" title={slide.filename}>
+            {slide.displayName || cleanSlideName(slide.filename)}
           </p>
           {qcMetrics && <QCBadge qc={qcMetrics} />}
         </div>
         {slide.displayName && (
-          <p className="text-2xs text-gray-400 truncate">{slide.filename}</p>
+          <p className="text-2xs text-gray-400 truncate" title={slide.filename}>{cleanSlideName(slide.filename)}</p>
         )}
         <div className="flex items-center gap-2 mt-1.5">
           <span className="text-xs text-gray-500 font-mono">
