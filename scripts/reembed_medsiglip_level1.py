@@ -109,13 +109,12 @@ def main():
         model_path = "google/siglip-so400m-patch14-384"
     
     print(f"Loading MedSigLIP from {model_path}")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Force CPU - Blackwell sm_121 causes hangs with SigLIP on CUDA
+    device = torch.device("cpu")
     print(f"Device: {device}")
     
     processor = SiglipImageProcessor.from_pretrained(model_path)
     model = SiglipModel.from_pretrained(model_path).to(device)
-    if device.type == "cuda":
-        model = model.half()
     model.eval()
     
     print(f"Model loaded. Embedding dim: {model.config.vision_config.hidden_size}")
@@ -175,8 +174,6 @@ def main():
             
             inputs = processor(images=pil_images, return_tensors="pt")
             inputs = {k: v.to(device) for k, v in inputs.items()}
-            if device.type == "cuda":
-                inputs = {k: v.half() if v.dtype == torch.float32 else v for k, v in inputs.items()}
             
             with torch.no_grad():
                 features = model.get_image_features(**inputs)
