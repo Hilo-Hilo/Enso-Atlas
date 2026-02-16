@@ -689,7 +689,7 @@ def create_app(
 
         config = MILConfig(
             input_dim=384,
-            hidden_dim=256,
+            hidden_dim=512,
             architecture=mil_arch,
             threshold=mil_threshold,
             threshold_config_path=threshold_cfg_path,
