@@ -3573,16 +3573,25 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
         # Try to use precomputed MedSigLIP patch embeddings if present
         siglip_cache_key = f"{slide_id}_siglip"
+        siglip_coords = None  # Separate coords for level-1 SigLIP patches
         use_siglip_search = True
 
         if siglip_cache_key in slide_siglip_embeddings:
             siglip_embeddings = slide_siglip_embeddings[siglip_cache_key]
+            # Load SigLIP-specific coords if available
+            siglip_coords_path = embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip_coords.npy"
+            if siglip_coords_path.exists():
+                siglip_coords = np.load(siglip_coords_path)
             logger.info(f"Using cached MedSigLIP embeddings for {slide_id}")
         else:
             siglip_cache_path = embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip.npy"
             if siglip_cache_path.exists():
                 siglip_embeddings = np.load(siglip_cache_path)
                 slide_siglip_embeddings[siglip_cache_key] = siglip_embeddings
+                # Load SigLIP-specific coords if available
+                siglip_coords_path = embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip_coords.npy"
+                if siglip_coords_path.exists():
+                    siglip_coords = np.load(siglip_coords_path)
                 logger.info(f"Loaded MedSigLIP embeddings from cache for {slide_id}")
             else:
                 # On-the-fly MedSigLIP embedding: extract patches from WSI and embed
@@ -3651,13 +3660,15 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 logger.warning(f"Could not compute attention weights for semantic search (fallback continues): {e}")
                 attention_weights = None
 
-        # Build metadata
+        # Build metadata - use SigLIP-specific coords if available (level-1 patches
+        # have different coordinates than level-0 PF patches)
         num_patches = len(siglip_embeddings) if siglip_embeddings is not None else len(pf_embeddings)
+        effective_coords = siglip_coords if siglip_coords is not None else coords
         metadata = []
         for i in range(num_patches):
             meta = {"index": i}
-            if coords is not None and i < len(coords):
-                meta["coordinates"] = [int(coords[i][0]), int(coords[i][1])]
+            if effective_coords is not None and i < len(effective_coords):
+                meta["coordinates"] = [int(effective_coords[i][0]), int(effective_coords[i][1])]
             if attention_weights is not None and i < len(attention_weights):
                 meta["attention_weight"] = float(attention_weights[i])
             metadata.append(meta)
