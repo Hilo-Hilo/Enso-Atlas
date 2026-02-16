@@ -135,7 +135,7 @@ def main():
     for svs in slides_dir.glob("*.svs"):
         svs_files[svs.stem] = svs
     
-    batch_size = 64
+    batch_size = 32
     total_start = time.time()
     
     for i, slide_id in enumerate(sorted(slide_ids)):
@@ -164,7 +164,7 @@ def main():
             print(f"  No tissue patches found, skipping")
             continue
         
-        print(f"  Level {level} (downsample {downsample:.1f}x): {len(patches)} tissue patches, {n_skipped} whitespace skipped")
+        print(f"  Level {level} (downsample {downsample:.1f}x): {len(patches)} tissue patches, {n_skipped} whitespace skipped", flush=True)
         
         # Embed in batches
         all_embeddings = []
@@ -193,7 +193,7 @@ def main():
         np.save(coords_cache, coords)
         
         elapsed = time.time() - start
-        print(f"  Saved: {embeddings.shape} in {elapsed:.1f}s")
+        print(f"  Saved: {embeddings.shape} in {elapsed:.1f}s", flush=True)
     
     total_elapsed = time.time() - total_start
     print(f"\nDone! Total time: {total_elapsed:.1f}s")
