@@ -172,6 +172,7 @@ const tourSteps: Step[] = [
       </div>
     ),
     placement: "right" as const,
+    disableBeacon: true,
     data: {
       icon: <Microscope className="w-6 h-6 text-white" />,
       features: [
@@ -196,6 +197,7 @@ const tourSteps: Step[] = [
       </div>
     ),
     placement: "right" as const,
+    disableBeacon: true,
     data: {
       icon: <Brain className="w-6 h-6 text-white" />,
       features: [
@@ -220,6 +222,7 @@ const tourSteps: Step[] = [
       </div>
     ),
     placement: "left" as const,
+    disableBeacon: true,
     data: {
       icon: <Target className="w-6 h-6 text-white" />,
       features: [
@@ -244,6 +247,7 @@ const tourSteps: Step[] = [
       </div>
     ),
     placement: "left" as const,
+    disableBeacon: true,
     data: {
       icon: <BarChart3 className="w-6 h-6 text-white" />,
       features: [
@@ -268,6 +272,7 @@ const tourSteps: Step[] = [
       </div>
     ),
     placement: "left" as const,
+    disableBeacon: true,
     data: {
       icon: <Layers className="w-6 h-6 text-white" />,
       features: [
@@ -292,6 +297,7 @@ const tourSteps: Step[] = [
       </div>
     ),
     placement: "left" as const,
+    disableBeacon: true,
     data: {
       icon: <Sparkles className="w-6 h-6 text-white" />,
       features: [
@@ -316,6 +322,7 @@ const tourSteps: Step[] = [
       </div>
     ),
     placement: "left" as const,
+    disableBeacon: true,
     data: {
       icon: <FileText className="w-6 h-6 text-white" />,
       features: [
@@ -334,7 +341,9 @@ export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
   useEffect(() => {
     if (isActive) {
       setStepIndex(0);
-      setRun(true);
+      // Small delay so the mock data has time to render targets
+      const timer = setTimeout(() => setRun(true), 300);
+      return () => clearTimeout(timer);
     } else {
       setRun(false);
     }
@@ -346,11 +355,25 @@ export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
 
       if (type === EVENTS.STEP_AFTER) {
         if (action === ACTIONS.NEXT) {
-          setStepIndex(index + 1);
-          onStepChange?.(index + 1);
+          const nextStep = index + 1;
+          setStepIndex(nextStep);
+          onStepChange?.(nextStep);
         } else if (action === ACTIONS.PREV) {
-          setStepIndex(index - 1);
-          onStepChange?.(index - 1);
+          const prevStep = index - 1;
+          setStepIndex(prevStep);
+          onStepChange?.(prevStep);
+        }
+      }
+
+      // Handle target not found — skip to next step
+      if (type === EVENTS.TARGET_NOT_FOUND) {
+        const nextStep = index + 1;
+        if (nextStep < tourSteps.length) {
+          setStepIndex(nextStep);
+          onStepChange?.(nextStep);
+        } else {
+          setRun(false);
+          onClose();
         }
       }
 

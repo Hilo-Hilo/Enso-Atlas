@@ -26,7 +26,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://127.0.0.1:8003/api/:path*', // Proxy to backend running on port 8003
+        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://100.111.126.23:8003'}/api/:path*`, // Proxy to DGX Spark backend via Tailscale
       },
     ]
   },

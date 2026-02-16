@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import nextDynamic from "next/dynamic";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
-import { DemoMode, WelcomeModal } from "@/components/demo";
+import { DemoMode, WelcomeModal, DEMO_SLIDE, DEMO_ANALYSIS_RESULT, DEMO_MULTI_MODEL, DEMO_REPORT, DEMO_QC_METRICS } from "@/components/demo";
 import {
   SlideSelector,
   PredictionPanel,
@@ -211,6 +211,50 @@ function HomePage() {
     setDemoMode((prev) => !prev);
   }, []);
 
+  // Mock analysis result overlay for demo mode (analysisResult is owned by useAnalysis hook)
+  const [demoAnalysisResult, setDemoAnalysisResult] = useState<import("@/types").AnalysisResponse | null>(null);
+
+  // Reference to pre-demo state so we can restore on exit
+  const preDemoState = useRef<{
+    slide: SlideInfo | null;
+    multiModel: MultiModelResponse | null;
+    report: StructuredReport | null;
+    qc: SlideQCMetrics | null;
+  } | null>(null);
+
+  // Inject / clear mock data when demo mode toggles
+  useEffect(() => {
+    if (demoMode) {
+      // Save current state before overwriting
+      preDemoState.current = {
+        slide: selectedSlide,
+        multiModel: multiModelResult,
+        report: agentReport,
+        qc: slideQCMetrics,
+      };
+      // Inject mock data so every tour target has content
+      setSelectedSlide(DEMO_SLIDE);
+      setDemoAnalysisResult(DEMO_ANALYSIS_RESULT);
+      setMultiModelResult(DEMO_MULTI_MODEL);
+      setAgentReport(DEMO_REPORT);
+      setSlideQCMetrics(DEMO_QC_METRICS);
+      setIsCachedResult(false);
+      setCachedResultTimestamp(null);
+    } else {
+      // Clear demo overlay
+      setDemoAnalysisResult(null);
+      if (preDemoState.current) {
+        // Restore previous state
+        setSelectedSlide(preDemoState.current.slide);
+        setMultiModelResult(preDemoState.current.multiModel);
+        setAgentReport(preDemoState.current.report);
+        setSlideQCMetrics(preDemoState.current.qc);
+        preDemoState.current = null;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoMode]);
+
   // Semantic search state
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -308,7 +352,7 @@ function HomePage() {
   const {
     isAnalyzing,
     isGeneratingReport,
-    analysisResult,
+    analysisResult: hookAnalysisResult,
     report: generatedReport,
     error,
     analyze,
@@ -321,6 +365,9 @@ function HomePage() {
     reportProgress,
     reportProgressMessage,
   } = useAnalysis();
+
+  // Effective analysis result: demo overlay takes precedence when active
+  const analysisResult = demoAnalysisResult ?? hookAnalysisResult;
 
   // Report state from agent workflow (AI Assistant). This hydrates the main Clinical Report panel.
   const [agentReport, setAgentReport] = useState<StructuredReport | null>(null);
