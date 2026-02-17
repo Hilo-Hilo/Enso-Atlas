@@ -94,15 +94,28 @@ def embed_slides(slides_dir, output_dir, batch_size=256, max_patches=5000):
     """Embed slides using Path Foundation (TF SavedModel)."""
     import openslide
     import tensorflow as tf
-    import tensorflow_hub as hub
+    from huggingface_hub import snapshot_download
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load Path Foundation
-    print("Loading Path Foundation model...")
-    model_url = "https://www.kaggle.com/models/google/path-foundation/TensorFlow2/path-foundation/1"
-    model = hub.KerasLayer(model_url)
-    print("Model loaded")
+    # Load Path Foundation from HuggingFace (gated model -- needs HF_TOKEN)
+    print("Loading Path Foundation model from HuggingFace...")
+    model_dir = snapshot_download(
+        repo_id="google/path-foundation",
+        allow_patterns=["*.pb", "variables/*", "keras_metadata.pb"],
+    )
+    loaded = tf.saved_model.load(model_dir)
+    infer = loaded.signatures.get("serving_default") or list(loaded.signatures.values())[0]
+    print(f"Model loaded from {model_dir}")
+
+    # Wrap inference in a simple callable
+    class _Model:
+        def __call__(self, x):
+            result = infer(tf.constant(x))
+            # Return the first output tensor (embeddings)
+            key = list(result.keys())[0]
+            return result[key].numpy()
+    model = _Model()
 
     slide_files = sorted(slides_dir.glob("*.svs"))
     print(f"Found {len(slide_files)} slides to embed")
@@ -153,9 +166,8 @@ def embed_slides(slides_dir, output_dir, batch_size=256, max_patches=5000):
                     continue
 
                 batch_array = np.stack(patches).astype(np.float32) / 255.0
-                batch_tensor = tf.constant(batch_array)
-                embeddings = model(batch_tensor)
-                all_embeddings.append(embeddings.numpy())
+                embeddings = model(batch_array)
+                all_embeddings.append(embeddings)
 
             if all_embeddings:
                 all_embeddings = np.concatenate(all_embeddings, axis=0)
