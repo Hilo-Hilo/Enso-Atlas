@@ -12,6 +12,8 @@ const DEFAULT_PROJECT: Project = {
   classes: ["resistant", "sensitive"],
   positive_class: "sensitive",
   description: "Predicts platinum-based chemotherapy sensitivity in high-grade serous ovarian carcinoma",
+  dataset_source: "TCGA",
+  disclaimer: "These predictions are from research models. Model reliability varies by AUC score. Clinical decisions should integrate multiple factors including patient history, other biomarkers, and clinician expertise.",
   models: {
     embedder: "PathFoundation (DINOv2-L)",
     mil_architecture: "TransMIL",

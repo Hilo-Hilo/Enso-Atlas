@@ -598,7 +598,7 @@ export function MultiModelPredictionPanel({
               Multi-Model Ensemble Ready
             </p>
             <p className="text-xs text-gray-500 max-w-[280px] mx-auto leading-relaxed">
-              Run analysis to get predictions from 5 specialized TransMIL models trained on TCGA {cancerTypeLabel.toLowerCase()} data.
+              Run analysis to get predictions from {AVAILABLE_MODELS.length} specialized TransMIL models{currentProject.dataset_source ? ` trained on ${currentProject.dataset_source} ${cancerTypeLabel.toLowerCase()} data` : ""}.
             </p>
           </div>
 
@@ -751,9 +751,7 @@ export function MultiModelPredictionPanel({
           <div className="flex items-start gap-2">
             <Info className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
             <p className="text-xs text-gray-500 leading-relaxed">
-              These predictions are from research models trained on TCGA {cancerTypeLabel.toLowerCase()} data.
-              Model reliability varies by AUC score. Clinical decisions should integrate
-              multiple factors including patient history, other biomarkers, and clinician expertise.
+              {currentProject.disclaimer || `These predictions are from research models. Model reliability varies by AUC score. Clinical decisions should integrate multiple factors including patient history, other biomarkers, and clinician expertise.`}
             </p>
           </div>
         </div>

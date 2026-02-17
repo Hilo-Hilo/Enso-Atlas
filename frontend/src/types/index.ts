@@ -10,6 +10,8 @@ export interface Project {
   classes: string[];  // e.g. ["resistant", "sensitive"]
   positive_class: string;
   description: string;
+  dataset_source?: string;  // e.g. "TCGA" - used in disclaimers
+  disclaimer?: string;      // Custom disclaimer text from YAML config
   models: {
     embedder: string;
     mil_architecture: string;

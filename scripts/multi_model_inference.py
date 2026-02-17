@@ -3,13 +3,8 @@
 Multi-Model Inference for MedGemma Enso Atlas
 
 Loads all trained TransMIL models and runs inference on slide embeddings.
-
-Models available:
-- transmil_v2: Platinum Sensitivity (AUC 0.907)
-- transmil_grade: Tumor Grade High/Low (AUC 0.752)
-- transmil_surv5y: 5-Year Survival (AUC 0.697)
-- transmil_full: 3-Year Survival (AUC 0.645)
-- transmil_surv1y: 1-Year Survival (AUC 0.639)
+Model configurations are loaded from config/projects.yaml when available,
+falling back to built-in defaults.
 """
 
 import json
@@ -27,8 +22,41 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from transmil import TransMIL
 
 
-# Model configurations with metadata
-MODEL_CONFIGS = {
+def _load_model_configs_from_yaml() -> Optional[Dict[str, Dict]]:
+    """Try to load model configs from projects.yaml."""
+    try:
+        import yaml
+        yaml_path = PROJECT_ROOT / "config" / "projects.yaml"
+        if not yaml_path.exists():
+            return None
+        with open(yaml_path) as f:
+            cfg = yaml.safe_load(f)
+        models = cfg.get("classification_models", {})
+        if not models:
+            return None
+        return {
+            mid: {
+                "model_dir": m.get("model_dir", mid),
+                "display_name": m.get("display_name", mid),
+                "description": m.get("description", ""),
+                "auc": m.get("auc", 0.5),
+                "n_slides": m.get("n_slides", 0),
+                "category": m.get("category", "general_pathology"),
+                "positive_label": m.get("positive_label", "Positive"),
+                "negative_label": m.get("negative_label", "Negative"),
+            }
+            for mid, m in models.items()
+        }
+    except Exception as e:
+        print(f"Warning: Could not load YAML config: {e}")
+        return None
+
+
+# Model configurations - loaded from YAML if available, otherwise defaults
+_YAML_CONFIGS = _load_model_configs_from_yaml()
+
+# Built-in fallback configurations
+_DEFAULT_CONFIGS = {
     "platinum_sensitivity": {
         "model_dir": "transmil_v2",
         "display_name": "Platinum Sensitivity",
@@ -79,6 +107,20 @@ MODEL_CONFIGS = {
         "positive_label": "Survived",
         "negative_label": "Deceased",
     },
+}
+
+# Use YAML configs if loaded, otherwise fall back to defaults
+MODEL_CONFIGS = _YAML_CONFIGS if _YAML_CONFIGS else _DEFAULT_CONFIGS
+
+# Temperature scaling per model (> 1.0 softens extreme predictions)
+# Applied as: logit / temperature -> sigmoid
+# This corrects for uncalibrated training on imbalanced datasets
+MODEL_TEMPERATURES = {
+    "platinum_sensitivity": 1.0,  # Well-calibrated (AUC 0.91)
+    "tumor_grade": 1.0,          # Reasonably calibrated (AUC 0.75)
+    "survival_5y": 2.5,          # Very extreme outputs, needs heavy smoothing
+    "survival_3y": 2.0,          # Extreme outputs
+    "survival_1y": 2.5,          # Very extreme outputs
 }
 
 
@@ -236,6 +278,15 @@ class MultiModelInference:
             attention = None
         
         score = score.cpu().item()
+        
+        # Apply temperature scaling to soften extreme predictions
+        # Convert sigmoid output -> logit -> scale -> sigmoid
+        temperature = MODEL_TEMPERATURES.get(model_id, 1.0)
+        if temperature != 1.0 and 0.0 < score < 1.0:
+            import math
+            logit = math.log(score / (1.0 - score))  # inverse sigmoid
+            scaled_logit = logit / temperature
+            score = 1.0 / (1.0 + math.exp(-scaled_logit))  # sigmoid
         
         # Determine label based on threshold
         is_positive = score >= 0.5

@@ -141,6 +141,8 @@ class ProjectConfig:
     classes: List[str] = field(default_factory=lambda: ["resistant", "sensitive"])
     positive_class: str = "sensitive"
     description: str = ""
+    dataset_source: str = ""
+    disclaimer: str = ""
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     models: ModelsConfig = field(default_factory=ModelsConfig)
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
@@ -162,6 +164,8 @@ class ProjectConfig:
             classes=d.get("classes", ["resistant", "sensitive"]),
             positive_class=d.get("positive_class", "sensitive"),
             description=d.get("description", ""),
+            dataset_source=d.get("dataset_source", ""),
+            disclaimer=d.get("disclaimer", ""),
             dataset=DatasetConfig.from_dict(dataset_raw),
             models=ModelsConfig.from_dict(models_raw),
             features=FeaturesConfig.from_dict(features_raw),
@@ -181,6 +185,8 @@ class ProjectConfig:
             "classes": self.classes,
             "positive_class": self.positive_class,
             "description": self.description,
+            "dataset_source": self.dataset_source,
+            "disclaimer": self.disclaimer,
             "foundation_model": self.foundation_model,
             "classification_models": self.classification_models,
             "dataset": {
