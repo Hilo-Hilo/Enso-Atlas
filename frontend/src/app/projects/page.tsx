@@ -937,18 +937,28 @@ export default function ProjectsPage() {
 
         {/* Quick info */}
         {projects.length > 0 && (
-          <div className="mt-8 p-4 bg-blue-50/50 rounded-xl border border-blue-100 text-sm text-blue-800">
-            <div className="flex items-start gap-2">
-              <Settings className="h-4 w-4 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="font-medium">How projects work</p>
-                <ul className="mt-1 space-y-1 text-blue-600 text-xs">
-                  <li>Each project defines a cancer type, prediction classes, and associated models.</li>
-                  <li>Upload slides to a project, then generate embeddings from the Batch tab.</li>
-                  <li>Train MIL models per-project for accurate treatment response prediction.</li>
-                  <li>Switch between projects using the dropdown in the navigation bar.</li>
-                </ul>
+          <div className="mt-8 space-y-3">
+            <div className="p-5 bg-blue-50/50 rounded-xl border border-blue-100 text-sm text-blue-800">
+              <div className="flex items-start gap-3">
+                <Settings className="h-5 w-5 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="font-semibold text-blue-900">How projects work</p>
+                  <ul className="mt-2 space-y-1.5 text-blue-700 text-sm">
+                    <li>Each project defines a cancer type, prediction classes, and associated models.</li>
+                    <li>Upload slides to a project, then generate embeddings from the Batch tab.</li>
+                    <li>Train MIL models per-project for accurate treatment response prediction.</li>
+                    <li>Switch between projects using the dropdown in the navigation bar.</li>
+                  </ul>
+                </div>
               </div>
+            </div>
+            <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 text-sm text-gray-600">
+              <p>
+                <span className="font-medium text-gray-700">Adding new cancer modules:</span>{" "}
+                Full project configuration — including model paths, embedding directories, dataset labels, and MIL checkpoints — is managed via the backend{" "}
+                <code className="px-1.5 py-0.5 bg-gray-100 rounded text-gray-700 font-mono text-xs">config/projects.yaml</code>{" "}
+                file. Projects created through this UI provide basic metadata only; data paths and trained models must be configured server-side.
+              </p>
             </div>
           </div>
         )}
