@@ -588,6 +588,7 @@ def create_app(
     available_slides = []
     slide_labels = {}  # Cache for slide labels (slide_id -> label string)
     db_available = False  # Whether PostgreSQL is connected and populated
+    project_registry: Optional[ProjectRegistry] = None  # Loaded at startup from config/projects.yaml
     # Slide-level mean-embedding FAISS index (cosine similarity)
     slide_mean_index = None  # faiss.IndexFlatIP over L2-normalized mean embeddings
     slide_mean_ids: list[str] = []
@@ -620,7 +621,7 @@ def create_app(
 
     @app.on_event("startup")
     async def load_models():
-        nonlocal classifier, evidence_gen, embedder, medsiglip_embedder, reporter, decision_support, multi_model_inference, available_slides, slide_labels, slides_dir, embeddings_dir, slide_mean_index, slide_mean_ids, slide_mean_meta
+        nonlocal classifier, evidence_gen, embedder, medsiglip_embedder, reporter, decision_support, multi_model_inference, available_slides, slide_labels, slides_dir, embeddings_dir, slide_mean_index, slide_mean_ids, slide_mean_meta, project_registry
 
         from ..config import MILConfig, EvidenceConfig, EmbeddingConfig
         from ..mil.clam import CLAMClassifier, create_classifier
@@ -924,6 +925,7 @@ def create_app(
             _projects_yaml = Path("config/projects.yaml")
             if _projects_yaml.exists():
                 _project_registry = ProjectRegistry(_projects_yaml)
+                project_registry = _project_registry
                 set_project_registry(_project_registry)
                 logger.info(f"Project registry loaded: {list(_project_registry.list_projects().keys())}")
                 # Sync projects to database
@@ -1083,6 +1085,16 @@ def create_app(
                 logger.warning(f"DB query failed, falling back to flat-file scan: {e}")
 
         # ---- Slow fallback: flat-file scan (original implementation) ----
+        # When project_id is given and we have the registry, determine the
+        # correct embeddings and slides directories for that project.
+        _fallback_embeddings_dir = embeddings_dir
+        _fallback_slides_dir = slides_dir
+        if project_id and project_registry:
+            proj_cfg = project_registry.get_project(project_id)
+            if proj_cfg:
+                _fallback_embeddings_dir = Path(proj_cfg.dataset.embeddings_dir)
+                _fallback_slides_dir = Path(proj_cfg.dataset.slides_dir)
+
         slides = []
         labels_path = _data_root / "labels.csv"
         if not labels_path.exists():
@@ -1127,8 +1139,21 @@ def create_app(
                             "patient": patient_ctx,
                         }
 
-        for slide_id in available_slides:
-            emb_path = embeddings_dir / f"{slide_id}.npy"
+        # When filtering by project, only include slides whose embeddings
+        # exist in the project's embeddings directory.
+        if project_id and _fallback_embeddings_dir != embeddings_dir:
+            # Scan the project-specific embeddings directory
+            _project_slide_ids = []
+            if _fallback_embeddings_dir.exists():
+                for f in sorted(_fallback_embeddings_dir.glob("*.npy")):
+                    if not f.name.endswith("_coords.npy"):
+                        _project_slide_ids.append(f.stem)
+            fallback_slide_ids = _project_slide_ids
+        else:
+            fallback_slide_ids = available_slides
+
+        for slide_id in fallback_slide_ids:
+            emb_path = _fallback_embeddings_dir / f"{slide_id}.npy"
             num_patches = None
             if emb_path.exists():
                 try:
@@ -1156,11 +1181,11 @@ def create_app(
                     logger.warning(f"Could not read slide {slide_id}: {e}")
 
             has_level0 = False
-            if embeddings_dir.name == "level0":
-                emb_check = embeddings_dir / f"{slide_id}.npy"
+            if _fallback_embeddings_dir.name == "level0":
+                emb_check = _fallback_embeddings_dir / f"{slide_id}.npy"
                 has_level0 = emb_check.exists()
             else:
-                level0_dir = embeddings_dir / "level0"
+                level0_dir = _fallback_embeddings_dir / "level0"
                 if level0_dir.exists():
                     has_level0 = (level0_dir / f"{slide_id}.npy").exists()
 
@@ -1193,10 +1218,11 @@ def create_app(
         sort_order: Optional[str] = "desc",
         page: int = 1,
         per_page: int = 20,
+        project_id: Optional[str] = Query(None, description="Filter slides by project"),
     ):
         """Search and filter slides with pagination."""
         # Get all slides first (reuse existing logic from list_slides)
-        all_slides = await list_slides()
+        all_slides = await list_slides(project_id=project_id)
         
         # Convert SlideInfo objects to dicts for filtering
         slides_data = [

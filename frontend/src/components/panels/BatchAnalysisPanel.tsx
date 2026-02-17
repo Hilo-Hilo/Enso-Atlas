@@ -168,7 +168,7 @@ export function BatchAnalysisPanel({
       setIsLoadingSlides(true);
       setError(null);
       try {
-        const response = await getSlides();
+        const response = await getSlides({ projectId: currentProject.id });
         if (!cancelled) {
           // Deduplicate slides and filter out test files
           setSlides(deduplicateSlides(response.slides));
@@ -186,7 +186,7 @@ export function BatchAnalysisPanel({
     };
     loadSlides();
     return () => { cancelled = true; };
-  }, []);
+  }, [currentProject.id]);
 
   // Handle select all / deselect all
   const handleSelectAll = useCallback(() => {

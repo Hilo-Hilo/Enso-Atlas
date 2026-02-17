@@ -37,6 +37,7 @@ import { getSlides, getSlideQC, getThumbnailUrl, renameSlide } from "@/lib/api";
 import { cleanSlideName, deduplicateSlides } from "@/lib/slideUtils";
 import { ANALYSIS_STEPS } from "@/hooks/useAnalysis";
 import type { SlideInfo, SlideQCMetrics, PatientContext } from "@/types";
+import { useProject } from "@/contexts/ProjectContext";
 
 interface SlideSelectorProps {
   selectedModels: string[];
@@ -165,6 +166,7 @@ export function SlideSelector({
   embeddingProgress = null,
   embeddingStatus,
 }: SlideSelectorProps) {
+  const { currentProject } = useProject();
   const [slides, setSlides] = useState<SlideInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -178,7 +180,7 @@ export function SlideSelector({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await getSlides();
+      const response = await getSlides({ projectId: currentProject.id });
       // Deduplicate slides (remove non-UUID duplicates) and filter test files
       setSlides(deduplicateSlides(response.slides));
       // QC metrics are fetched lazily when a slide is selected (not all 208 at once).
@@ -192,7 +194,9 @@ export function SlideSelector({
 
   useEffect(() => {
     loadSlides();
-  }, []);
+    // Re-fetch slides when the active project changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject.id]);
 
   // Filter and sort slides
   const filteredSlides = useMemo(() => {
