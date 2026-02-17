@@ -1874,7 +1874,6 @@ function HomePage() {
             "lg:hidden",
             mobilePanelTab === "slides" ? "flex-1 p-3 sm:p-4" : "hidden"
           )}
-          data-demo="slide-selector"
         >
           {renderLeftSidebarContent()}
         </aside>

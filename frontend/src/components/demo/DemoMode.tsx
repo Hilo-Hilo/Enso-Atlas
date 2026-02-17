@@ -183,7 +183,7 @@ const tourSteps: Step[] = [
     },
   },
   {
-    target: '[data-demo="analyze-button"]',
+    target: '[data-demo="slide-selector"] [data-demo="analyze-button"]',
     title: "Run AI Analysis",
     content: (
       <div className="space-y-2">
@@ -221,7 +221,7 @@ const tourSteps: Step[] = [
         </p>
       </div>
     ),
-    placement: "left" as const,
+    placement: "bottom" as const,
     disableBeacon: true,
     data: {
       icon: <Target className="w-6 h-6 text-white" />,
@@ -337,13 +337,38 @@ const tourSteps: Step[] = [
 export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [run, setRun] = useState(false);
+  const retryCountRef = React.useRef(0);
+  const retryTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (isActive) {
       setStepIndex(0);
-      // Small delay so the mock data has time to render targets
-      const timer = setTimeout(() => setRun(true), 300);
-      return () => clearTimeout(timer);
+      retryCountRef.current = 0;
+      // Wait for mock data to render all tour targets before starting
+      const waitForTargets = () => {
+        const allFound = tourSteps.every((step) => {
+          const selector = typeof step.target === "string" ? step.target : "";
+          if (!selector) return true;
+          const el = document.querySelector(selector);
+          if (!el) return false;
+          // Check the element is actually visible (not display:none)
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        });
+        if (allFound) {
+          setRun(true);
+        } else if (retryCountRef.current < 20) {
+          retryCountRef.current += 1;
+          retryTimerRef.current = setTimeout(waitForTargets, 150);
+        } else {
+          // Start anyway after max retries -- some targets may still be missing
+          setRun(true);
+        }
+      };
+      retryTimerRef.current = setTimeout(waitForTargets, 300);
+      return () => {
+        if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      };
     } else {
       setRun(false);
     }
@@ -365,16 +390,35 @@ export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
         }
       }
 
-      // Handle target not found — skip to next step
+      // Handle target not found -- retry a few times before skipping
       if (type === EVENTS.TARGET_NOT_FOUND) {
-        const nextStep = index + 1;
-        if (nextStep < tourSteps.length) {
-          setStepIndex(nextStep);
-          onStepChange?.(nextStep);
-        } else {
-          setRun(false);
-          onClose();
-        }
+        const step = tourSteps[index];
+        const selector = typeof step?.target === "string" ? step.target : "";
+        let attempts = 0;
+        const maxAttempts = 5;
+
+        const retryFind = () => {
+          attempts += 1;
+          const el = selector ? document.querySelector(selector) : null;
+          if (el) {
+            // Target appeared -- re-trigger the current step
+            setRun(false);
+            requestAnimationFrame(() => setRun(true));
+          } else if (attempts < maxAttempts) {
+            setTimeout(retryFind, 300);
+          } else {
+            // Give up and skip to next step
+            const nextStep = index + 1;
+            if (nextStep < tourSteps.length) {
+              setStepIndex(nextStep);
+              onStepChange?.(nextStep);
+            } else {
+              setRun(false);
+              onClose();
+            }
+          }
+        };
+        setTimeout(retryFind, 300);
       }
 
       if (
@@ -406,6 +450,7 @@ export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
       tooltipComponent={CustomTooltip}
       floaterProps={{
         disableAnimation: false,
+        offset: 16,
       }}
       styles={{
         options: {
