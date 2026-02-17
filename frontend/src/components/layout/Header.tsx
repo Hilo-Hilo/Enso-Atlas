@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Logo } from "@/components/ui/Logo";
 import { DemoToggle } from "@/components/demo";
@@ -15,7 +14,6 @@ import {
   HelpCircle,
   Activity,
   User,
-  Building2,
   ChevronDown,
   Keyboard,
   Stethoscope,
@@ -26,10 +24,10 @@ import {
   X,
   Menu,
   FolderOpen,
+  MoreHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useProject } from "@/contexts/ProjectContext";
-import type { Project } from "@/types";
 
 export type UserViewMode = "oncologist" | "pathologist" | "batch";
 
@@ -48,12 +46,12 @@ interface HeaderProps {
 }
 
 // Disconnection Banner Component
-function DisconnectionBanner({ 
-  onReconnect, 
+function DisconnectionBanner({
+  onReconnect,
   onDismiss,
-  isReconnecting 
-}: { 
-  onReconnect?: () => void; 
+  isReconnecting,
+}: {
+  onReconnect?: () => void;
   onDismiss: () => void;
   isReconnecting: boolean;
 }) {
@@ -172,7 +170,6 @@ function ProjectSwitcher() {
   }, [isOpen]);
 
   if (projects.length <= 1) {
-    // Single project — hide the switcher entirely since there is nothing to switch
     return null;
   }
 
@@ -183,7 +180,7 @@ function ProjectSwitcher() {
         className="flex items-center gap-2 px-3 py-1.5 bg-navy-800/50 hover:bg-navy-700/50 rounded-lg border border-navy-700/30 transition-colors"
       >
         <Layers className="h-4 w-4 text-clinical-400" />
-        <span className="text-sm text-gray-300 font-medium truncate max-w-[80px] lg:max-w-[120px] xl:max-w-[160px]">
+        <span className="text-sm text-gray-300 font-medium truncate max-w-[200px] lg:max-w-[280px]">
           {currentProject.name}
         </span>
         <ChevronDown className={cn("h-3.5 w-3.5 text-gray-400 transition-transform", isOpen && "rotate-180")} />
@@ -223,11 +220,72 @@ function ProjectSwitcher() {
   );
 }
 
+// Overflow menu for utility actions
+function UtilityOverflowMenu({
+  onOpenStatus,
+  onOpenShortcuts,
+  onOpenDocs,
+  onOpenSettings,
+}: {
+  onOpenStatus: () => void;
+  onOpenShortcuts?: () => void;
+  onOpenDocs: () => void;
+  onOpenSettings: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [isOpen]);
+
+  const items = [
+    { icon: Activity, label: "System Status", onClick: onOpenStatus },
+    { icon: Keyboard, label: "Keyboard Shortcuts", onClick: onOpenShortcuts },
+    { icon: HelpCircle, label: "Documentation", onClick: onOpenDocs },
+    { icon: Settings, label: "Settings", onClick: onOpenSettings },
+  ];
+
+  return (
+    <div ref={menuRef} className="relative hidden lg:block">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="p-2 text-gray-400 hover:text-white hover:bg-navy-700/50 rounded-lg border border-navy-700/30 transition-all duration-150"
+        title="More options"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full right-0 mt-1 w-52 bg-white rounded-lg shadow-xl z-50 overflow-hidden py-1">
+          {items.map(({ icon: Icon, label, onClick }) => (
+            <button
+              key={label}
+              onClick={() => {
+                setIsOpen(false);
+                onClick?.();
+              }}
+              className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <Icon className="h-4 w-4 text-gray-500" />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Header({
   isConnected = false,
   isProcessing = false,
-  version = "0.1.0",
-  institutionName = "Enso Labs",
   userName,
   onOpenShortcuts,
   viewMode = "oncologist",
@@ -280,6 +338,11 @@ export function Header({
 
   const showDisconnectionBanner = !isConnected && !bannerDismissed;
 
+  // Connection status tooltip text
+  const connectionStatusText = isConnected
+    ? "Connected - Backend Service"
+    : "Disconnected - Backend Service";
+
   return (
     <>
       {/* Disconnection Banner */}
@@ -292,7 +355,7 @@ export function Header({
       )}
 
       <header className="h-14 sm:h-16 bg-gradient-to-r from-navy-900 via-navy-900 to-navy-800 border-b border-navy-700/50 px-3 sm:px-4 lg:px-6 flex items-center justify-between shrink-0 shadow-lg">
-        {/* Left: Logo and Branding */}
+        {/* Left: Logo and Navigation */}
         <div className="flex items-center gap-2 sm:gap-4">
           {/* Mobile Menu Button */}
           <button
@@ -306,25 +369,15 @@ export function Header({
           <div className="flex items-center gap-2 sm:gap-3">
             <Logo size="md" variant="full" className="hidden sm:flex" />
             <Logo size="sm" variant="mark" className="sm:hidden" />
-            <span className="text-xs text-navy-100 font-mono bg-navy-800/80 px-1.5 sm:px-2 py-0.5 rounded-full border border-navy-700/50 hidden xl:inline-flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-clinical-400 animate-pulse" />
-              v{version}
-            </span>
           </div>
 
           {/* Divider */}
           <div className="h-8 w-px bg-gradient-to-b from-transparent via-navy-600 to-transparent mx-1 sm:mx-2 hidden md:block" />
 
-          {/* Institution Context - Desktop (xl+ only) */}
-          <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 bg-navy-800/50 rounded-lg border border-navy-700/30">
-            <Building2 className="h-4 w-4 text-clinical-400" />
-            <span className="text-sm text-gray-300 font-medium truncate max-w-[160px]">{institutionName}</span>
-          </div>
-
           {/* Project Switcher */}
           <ProjectSwitcher />
 
-          {/* Slide Manager Link - Desktop (icon-only at lg) */}
+          {/* Slide Manager Link */}
           <Link
             href="/slides"
             className="hidden lg:flex items-center gap-2 px-2 xl:px-3 py-1.5 bg-navy-800/50 hover:bg-navy-700/50 rounded-lg border border-navy-700/30 transition-colors"
@@ -334,7 +387,7 @@ export function Header({
             <span className="text-sm text-gray-300 font-medium hidden xl:inline">Slides</span>
           </Link>
 
-          {/* Project Management Link - Desktop (icon-only at lg) */}
+          {/* Project Management Link */}
           <Link
             href="/projects"
             className="hidden lg:flex items-center gap-2 px-2 xl:px-3 py-1.5 bg-navy-800/50 hover:bg-navy-700/50 rounded-lg border border-navy-700/30 transition-colors"
@@ -347,7 +400,7 @@ export function Header({
           {/* Divider */}
           <div className="h-8 w-px bg-gradient-to-b from-transparent via-navy-600 to-transparent mx-2 hidden xl:block" />
 
-          {/* View Mode Toggle - Desktop only (icon-only at lg, labels at 2xl) */}
+          {/* View Mode Toggle - Desktop only */}
           {onViewModeChange && (
             <div className="hidden lg:flex items-center bg-navy-800/80 rounded-xl p-1 border border-navy-700/30 shadow-inner">
               <button
@@ -390,24 +443,31 @@ export function Header({
           )}
         </div>
 
-        {/* Center: Status Indicators - Desktop only */}
+        {/* Center: Processing indicator only */}
         <div className="hidden lg:flex items-center gap-4 xl:gap-6">
-          {/* Backend Connection Status */}
+          {isProcessing && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-clinical-600/20 rounded-lg border border-clinical-500/30">
+              <div className="flex items-center gap-1.5">
+                <div className="flex gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-clinical-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <div className="w-1.5 h-1.5 rounded-full bg-clinical-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <div className="w-1.5 h-1.5 rounded-full bg-clinical-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+                <span className="text-xs text-clinical-300 font-medium">Processing</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Actions and User */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Connection status dot - always visible, just a dot with tooltip */}
           <button
             onClick={() => setStatusOpen(true)}
-            className={cn(
-              "flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-lg border transition-all",
-              isConnected
-                ? "bg-navy-800/50 border-navy-700/30 hover:bg-navy-700/50"
-                : "bg-red-900/50 border-red-700/50 hover:bg-red-800/50 animate-pulse"
-            )}
+            className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-navy-700/50 transition-all"
+            title={connectionStatusText}
           >
-            <div
-              className={cn(
-                "relative flex h-2.5 w-2.5",
-                isConnected ? "text-status-positive" : "text-status-negative"
-              )}
-            >
+            <div className="relative flex h-2.5 w-2.5">
               {isConnected && (
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-positive opacity-75" />
               )}
@@ -416,58 +476,6 @@ export function Header({
                 isConnected ? "bg-status-positive" : "bg-status-negative"
               )} />
             </div>
-            <div className="hidden xl:flex flex-col">
-              <span className={cn(
-                "text-xs font-medium flex items-center gap-1",
-                isConnected ? "text-status-positive" : "text-red-400"
-              )}>
-                {isConnected ? "Connected" : (
-                  <>
-                    <AlertTriangle className="h-3 w-3" />
-                    Disconnected
-                  </>
-                )}
-              </span>
-              <span className="text-2xs text-gray-500">Backend Service</span>
-            </div>
-          </button>
-
-          {/* Processing Status */}
-          {isProcessing && (
-            <>
-              <div className="h-6 w-px bg-navy-700" />
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-clinical-600/20 rounded-lg border border-clinical-500/30">
-                <div className="flex items-center gap-1.5">
-                  <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-clinical-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <div className="w-1.5 h-1.5 rounded-full bg-clinical-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <div className="w-1.5 h-1.5 rounded-full bg-clinical-400 animate-bounce" style={{ animationDelay: "300ms" }} />
-                  </div>
-                  <span className="text-xs text-clinical-300 font-medium">Processing</span>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Right: Actions and User */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Mobile: Compact status indicator */}
-          <button
-            onClick={() => setStatusOpen(true)}
-            className={cn(
-              "lg:hidden flex items-center justify-center w-8 h-8 rounded-lg border transition-all",
-              isConnected
-                ? "bg-navy-800/50 border-navy-700/30"
-                : "bg-red-900/50 border-red-700/50 animate-pulse"
-            )}
-          >
-            <div
-              className={cn(
-                "w-2.5 h-2.5 rounded-full",
-                isConnected ? "bg-status-positive" : "bg-status-negative"
-              )}
-            />
           </button>
 
           {/* Demo Mode Toggle */}
@@ -477,50 +485,13 @@ export function Header({
             </div>
           )}
 
-          {/* Research Mode Warning - Desktop */}
-          <Badge variant="warning" size="sm" className="font-semibold shadow-sm hidden xl:inline-flex">
-            Research Only
-          </Badge>
-
-          {/* Action Buttons - Responsive grouping */}
-          <div className="hidden lg:flex items-center gap-0.5 bg-navy-800/50 rounded-lg p-1 border border-navy-700/30">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="p-2 text-gray-400 hover:text-white hover:bg-navy-700 rounded-md transition-all duration-150 hidden sm:inline-flex"
-              title="System Status"
-              onClick={() => setStatusOpen(true)}
-            >
-              <Activity className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="p-2 text-gray-400 hover:text-white hover:bg-navy-700 rounded-md transition-all duration-150"
-              title="Keyboard Shortcuts (?)"
-              onClick={onOpenShortcuts}
-            >
-              <Keyboard className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="p-2 text-gray-400 hover:text-white hover:bg-navy-700 rounded-md transition-all duration-150 hidden md:inline-flex"
-              title="Documentation"
-              onClick={handleOpenDocs}
-            >
-              <HelpCircle className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="p-2 text-gray-400 hover:text-white hover:bg-navy-700 rounded-md transition-all duration-150 hidden md:inline-flex"
-              title="Settings"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings className="h-4 w-4" />
-            </Button>
-          </div>
+          {/* Utility overflow menu (replaces 4 individual icon buttons) */}
+          <UtilityOverflowMenu
+            onOpenStatus={() => setStatusOpen(true)}
+            onOpenShortcuts={onOpenShortcuts}
+            onOpenDocs={handleOpenDocs}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
 
           {/* Divider - Desktop only */}
           <div className="h-8 w-px bg-gradient-to-b from-transparent via-navy-600 to-transparent hidden lg:block" />
@@ -590,14 +561,6 @@ export function Header({
           onClose={() => setMobileMenuOpen(false)}
         />
 
-        {/* Institution */}
-        <div className="p-4 border-b border-navy-700/50">
-          <div className="flex items-center gap-2 text-gray-300">
-            <Building2 className="h-4 w-4 text-clinical-400" />
-            <span className="text-sm font-medium">{institutionName}</span>
-          </div>
-        </div>
-
         {/* Navigation Links */}
         <div className="p-4 border-b border-navy-700/50 space-y-1">
           <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wide">Navigation</p>
@@ -660,13 +623,6 @@ export function Header({
               <DemoToggle isActive={demoMode} onToggle={onDemoModeToggle} />
             </div>
           )}
-        </div>
-
-        {/* Research Warning */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-navy-700/50">
-          <Badge variant="warning" size="sm" className="w-full justify-center font-semibold">
-            For Research Use Only
-          </Badge>
         </div>
       </div>
 

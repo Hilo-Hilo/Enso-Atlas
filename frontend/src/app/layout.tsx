@@ -4,6 +4,7 @@ import "./globals.css";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ToastProvider } from "@/components/ui";
 import { ProjectProvider } from "@/contexts/ProjectContext";
+import { DisclaimerBanner } from "@/components/layout/DisclaimerBanner";
 
 const inter = Inter({
   subsets: ["latin"],
