@@ -62,25 +62,48 @@ function ModelCardSkeleton() {
 function detectSurvivalContradictions(predictions: ModelPrediction[]): string[] {
   const contradictions: string[] = [];
 
+  const isSurvivalModel = (p: ModelPrediction): boolean => {
+    const haystack = `${p.modelId} ${p.modelName}`.toLowerCase();
+    return /survival|\d+\s*[- ]?year/.test(haystack);
+  };
+
+  const parseYears = (name: string): number | null => {
+    const m = name.match(/(\d+)\s*[- ]?[Yy]ear/);
+    return m ? parseInt(m[1], 10) : null;
+  };
+
+  const isDeceasedLike = (p: ModelPrediction): boolean => {
+    const label = (p.label || "").toLowerCase();
+    if (/(deceased|dead|poor|unfavorable|non-?surviv)/.test(label)) return true;
+    if (/(surviv|alive|favorable|good)/.test(label)) return false;
+    return p.score < 0.5;
+  };
+
+  const isSurvivedLike = (p: ModelPrediction): boolean => {
+    const label = (p.label || "").toLowerCase();
+    if (/(surviv|alive|favorable|good)/.test(label)) return true;
+    if (/(deceased|dead|poor|unfavorable|non-?surviv)/.test(label)) return false;
+    return p.score >= 0.5;
+  };
+
   // Extract survival models and sort by timeframe
   const survivalModels = predictions
-    .filter((p) => p.modelId.match(/survival/i))
+    .filter(isSurvivalModel)
     .map((p) => {
-      const yearMatch = p.modelName.match(/(\d+)[- ]?[Yy]ear/);
-      return yearMatch ? { years: parseInt(yearMatch[1]), prediction: p } : null;
+      const years = parseYears(p.modelName);
+      return years !== null ? { years, prediction: p } : null;
     })
     .filter((x): x is { years: number; prediction: ModelPrediction } => x !== null)
     .sort((a, b) => a.years - b.years);
 
-  // Check logical consistency: if dead at year N, must be dead at year M > N
+  // Logical consistency: if dead at year N, cannot be alive at year M > N
   for (let i = 0; i < survivalModels.length; i++) {
     for (let j = i + 1; j < survivalModels.length; j++) {
       const shorter = survivalModels[i];
       const longer = survivalModels[j];
-      // If shorter-term predicts deceased but longer-term predicts survived
-      if (shorter.prediction.score < 0.5 && longer.prediction.score >= 0.5) {
+      if (isDeceasedLike(shorter.prediction) && isSurvivedLike(longer.prediction)) {
         contradictions.push(
-          `${shorter.prediction.modelName} predicts poor survival, but ${longer.prediction.modelName} predicts favorable outcome`
+          `${shorter.prediction.modelName} predicts deceased, but ${longer.prediction.modelName} predicts survived`
         );
       }
     }
