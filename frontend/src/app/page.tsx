@@ -1789,20 +1789,7 @@ function HomePage() {
           onRetry={retryReport}
         />
 
-      {/* AI Assistant */}
-      <div data-demo="ai-assistant">
-        <AIAssistantPanel
-          slideId={selectedSlide?.id ?? null}
-          clinicalContext=""
-          onAnalysisComplete={(rawAgentReport) => {
-            // Normalize and hydrate the main Clinical Report panel with the agent-generated report
-            const normalized = normalizeAgentReport(rawAgentReport as unknown as Record<string, unknown>);
-            if (normalized) {
-              setAgentReport(normalized);
-            }
-          }}
-        />
-      </div>
+      {/* AI Assistant -- removed (chat feature not functional enough for demo) */}
       </div>
     </>
   );
