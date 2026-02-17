@@ -28,6 +28,16 @@ foundation_models:
 
 # Global classification model definitions (referenced by projects)
 classification_models:
+  breast_stage:
+    model_dir: "brca_transmil_stage"
+    display_name: "Tumor Stage"
+    description: "Predicts pathologic stage (early vs advanced)"
+    auc: 0.0
+    n_slides: 0
+    category: "breast_cancer"
+    positive_label: "Advanced (III/IV)"
+    negative_label: "Early (I/II)"
+    compatible_foundation: "path_foundation"
   platinum_sensitivity:
     model_dir: "transmil_v2"
     display_name: "Platinum Sensitivity"
@@ -80,6 +90,38 @@ classification_models:
     compatible_foundation: "path_foundation"
 
 projects:
+  breast-stage:
+    name: "Breast Cancer - Stage Classification"
+    cancer_type: Breast Cancer
+    prediction_target: tumor_stage
+    classes: ["early", "advanced"]
+    positive_class: advanced
+    description: "Predicts pathologic stage (early I/II vs advanced III/IV) in invasive breast carcinoma"
+    dataset_source: "TCGA"
+    disclaimer: >-
+      These predictions are from research models. Model reliability varies by
+      AUC score. Clinical decisions should integrate multiple factors including
+      patient history, other biomarkers, and clinician expertise.
+    foundation_model: path_foundation
+    dataset:
+      slides_dir: data/brca/slides
+      embeddings_dir: data/brca/embeddings
+      labels_file: data/brca/stage_labels.json
+      label_column: tumor_stage
+    models:
+      embedder: path-foundation
+      mil_architecture: transmil
+      mil_checkpoint: outputs/brca_transmil_stage/best_model.pt
+      report_generator: medgemma-4b
+      semantic_search: medsiglip
+    classification_models:
+      - breast_stage
+    features:
+      medgemma_reports: true
+      medsiglip_search: false
+      semantic_search: false
+    threshold: 0.5
+
   ovarian-platinum:
     name: "Ovarian Cancer - Platinum Sensitivity"
     cancer_type: Ovarian Cancer
