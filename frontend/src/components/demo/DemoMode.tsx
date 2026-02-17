@@ -457,7 +457,7 @@ export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
           zIndex: 10000,
           arrowColor: "#fff",
           backgroundColor: "#fff",
-          overlayColor: "rgba(15, 23, 42, 0.45)",
+          overlayColor: "rgba(15, 23, 42, 0.15)",
           primaryColor: "#0ea5e9",
           spotlightShadow: "0 0 20px rgba(14, 165, 233, 0.5)",
         },
