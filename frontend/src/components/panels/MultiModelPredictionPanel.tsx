@@ -64,11 +64,11 @@ function detectSurvivalContradictions(predictions: ModelPrediction[]): string[] 
 
   const isSurvivalModel = (p: ModelPrediction): boolean => {
     const haystack = `${p.modelId} ${p.modelName}`.toLowerCase();
-    return /survival|\d+\s*[- ]?year/.test(haystack);
+    return /survival|\d+\s*[-_ ]?(year|yr)\b/.test(haystack);
   };
 
   const parseYears = (name: string): number | null => {
-    const m = name.match(/(\d+)\s*[- ]?[Yy]ear/);
+    const m = name.match(/(\d+)\s*[-_ ]?(?:[Yy]ear|[Yy]r)\b/);
     return m ? parseInt(m[1], 10) : null;
   };
 
