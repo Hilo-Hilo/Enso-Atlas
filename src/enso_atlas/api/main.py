@@ -1612,9 +1612,21 @@ def create_app(
         if classifier is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
 
+        # Resolve project-specific embeddings directory
+        _batch_embeddings_dir = embeddings_dir
+        if hasattr(request, 'project_id') and request.project_id and project_registry:
+            proj_cfg = project_registry.get_project(request.project_id)
+            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
+                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
+                if not proj_emb_dir.is_absolute():
+                    proj_emb_dir = _data_root.parent / proj_emb_dir
+                if proj_emb_dir.exists():
+                    _batch_embeddings_dir = proj_emb_dir
+                    logger.info(f"analyze_batch: Using project embeddings dir: {_batch_embeddings_dir}")
+
         results = []
         for slide_id in request.slide_ids:
-            emb_path = embeddings_dir / f"{slide_id}.npy"
+            emb_path = _batch_embeddings_dir / f"{slide_id}.npy"
 
             if not emb_path.exists():
                 # Record failed slide
