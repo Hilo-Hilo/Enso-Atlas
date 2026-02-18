@@ -4367,6 +4367,25 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             headers={"Content-Disposition": f"inline; filename={slide_id}.dzi"}
         )
 
+    @app.head("/api/slides/{slide_id}/dzi")
+    async def head_dzi_descriptor(
+        slide_id: str,
+        project_id: Optional[str] = Query(None, description="Optional project id to resolve project-specific WSI paths"),
+    ):
+        """HEAD preflight for DZI availability (used by frontend WSI pre-check)."""
+        result = get_slide_and_dz(slide_id, project_id=project_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="WSI not found")
+
+        from fastapi.responses import Response
+        return Response(
+            status_code=200,
+            headers={
+                "Content-Type": "application/xml",
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+
     @app.get("/api/slides/{slide_id}/dzi_files/{level}/{tile_spec}")
     async def get_dzi_tile(
         slide_id: str,
