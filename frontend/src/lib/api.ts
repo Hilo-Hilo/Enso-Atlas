@@ -2817,13 +2817,17 @@ export interface AvailableModelDetail {
 
 /**
  * Fetch available classification models for a project from the API.
- * This is the config-driven replacement for the hardcoded AVAILABLE_MODELS list.
+ * Returns an empty list when no projectId is provided to avoid accidental global-model leakage.
  */
 export async function getProjectAvailableModels(
   projectId: string
 ): Promise<AvailableModelDetail[]> {
+  if (!projectId || projectId === "default") {
+    return [];
+  }
+
   const resp = await fetchApi<{ models: BackendAvailableModel[] }>(
-    `/api/models${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`
+    `/api/models?project_id=${encodeURIComponent(projectId)}`
   );
   if (resp && typeof resp === "object" && "models" in resp) {
     return resp.models.map((m) => ({

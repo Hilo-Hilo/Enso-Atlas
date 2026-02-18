@@ -22,7 +22,6 @@ if (typeof window !== "undefined") {
 import { cn } from "@/lib/utils";
 import { Toggle } from "@/components/ui/Toggle";
 import { Slider } from "@/components/ui/Slider";
-import { useProject } from "@/contexts/ProjectContext";
 import {
   Layers,
   Maximize2,
@@ -36,9 +35,6 @@ import {
   ImageIcon,
 } from "lucide-react";
 import type { PatchCoordinates, HeatmapData, Annotation, PatchOverlay } from "@/types";
-
-// Heatmap model options - project-aware fallback metadata
-import { getProjectFallbackModels } from "@/components/panels/ModelPicker";
 
 // Viewer control interface for keyboard shortcuts
 export interface WSIViewerControls {
@@ -59,7 +55,47 @@ const CLASS_COLOR_HEX = [
   "#8b5cf6", "#ec4899", "#06b6d4", "#f97316",
 ];
 
+const DEFAULT_PATCH_SIZE_PX = 224;
+
+interface HeatmapOverlayMeta {
+  imageWidth: number;
+  imageHeight: number;
+  coverageWidth: number;
+  coverageHeight: number;
+  patchWidthPx: number;
+  patchHeightPx: number;
+}
+
 type AnnotationTool = "pointer" | "circle" | "rectangle" | "freehand" | "point";
+
+function parsePositiveHeaderInt(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function getImageDimensionsFromBlob(blob: Blob): Promise<{ width: number; height: number }> {
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(blob);
+    const dims = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return dims;
+  }
+
+  return await new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = (err) => {
+      URL.revokeObjectURL(url);
+      reject(err);
+    };
+    img.src = url;
+  });
+}
 
 interface WSIViewerProps {
   slideId: string;
@@ -129,8 +165,10 @@ export function WSIViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerShellRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
+  const slideTiledImageRef = useRef<any>(null);
   const heatmapOverlayRef = useRef<HTMLElement | null>(null);
   const heatmapTiledImageRef = useRef<any>(null);
+  const heatmapMetaRef = useRef<HeatmapOverlayMeta | null>(null);
   const patchCanvasRef = useRef<HTMLCanvasElement>(null);
   
   // Store callbacks in refs so they don't trigger viewer recreation
@@ -157,6 +195,7 @@ export function WSIViewer({
   const [gridOpacity, setGridOpacity] = useState(0.3);
   const [gridColor, setGridColor] = useState("#00ffff"); // cyan default
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const gridRedrawRef = useRef<(() => void) | null>(null);
   const [heatmapOpacity, setHeatmapOpacity] = useState(0.6);
   const [zoom, setZoom] = useState(1);
   const [showToolbar, setShowToolbar] = useState(true);
@@ -165,13 +204,6 @@ export function WSIViewer({
   const [heatmapLoaded, setHeatmapLoaded] = useState(false);
   const [heatmapError, setHeatmapError] = useState(false);
   const heatmapImageUrl = heatmap?.imageUrl;
-
-  const { currentProject } = useProject();
-  const fallbackHeatmapModels = React.useMemo(
-    () => getProjectFallbackModels(currentProject).map((model) => ({ id: model.id, name: model.displayName })),
-    [currentProject]
-  );
-  const heatmapModelOptions = availableModels.length > 0 ? availableModels : fallbackHeatmapModels;
   
   // Store activeTool in ref for click handler
   const activeToolRef = useRef(activeTool);
@@ -190,6 +222,30 @@ export function WSIViewer({
   useEffect(() => {
     patchSelectionModeRef.current = patchSelectionMode;
   }, [patchSelectionMode]);
+
+  const getSlideTiledImage = useCallback(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return null;
+
+    if (slideTiledImageRef.current) {
+      const idx = viewer.world.getIndexOfItem(slideTiledImageRef.current);
+      if (idx >= 0) {
+        return slideTiledImageRef.current;
+      }
+    }
+
+    // Fallback: return first world item that's not the heatmap layer
+    const count = viewer.world.getItemCount();
+    for (let i = 0; i < count; i++) {
+      const item = viewer.world.getItemAt(i);
+      if (item && item !== heatmapTiledImageRef.current) {
+        slideTiledImageRef.current = item;
+        return item;
+      }
+    }
+
+    return null;
+  }, []);
 
   // Annotation drawing state
   const svgOverlayRef = useRef<SVGSVGElement | null>(null);
@@ -365,6 +421,7 @@ export function WSIViewer({
     });
 
     viewer.addHandler("open", () => {
+      slideTiledImageRef.current = viewer.world.getItemAt(0) || null;
       setIsReady(true);
       setLoadError(null);
     });
@@ -399,7 +456,7 @@ export function WSIViewer({
       // Let the patch selection handler take priority when active
       if (patchSelectionModeRef.current) return;
       if (onRegionClickRef.current && event.quick && activeToolRef.current === "crosshair") {
-        const tiledImage = viewer.world.getItemAt(0);
+        const tiledImage = getSlideTiledImage();
         if (tiledImage) {
           const viewportPoint = viewer.viewport.pointFromPixel(event.position);
           const imagePoint =
@@ -425,16 +482,18 @@ export function WSIViewer({
         viewerRef.current.destroy();
         viewerRef.current = null;
       }
+      slideTiledImageRef.current = null;
+      heatmapMetaRef.current = null;
       setIsReady(false);
     };
-  }, [dziUrl, slideId, hasWsi]); // Removed onRegionClick and activeTool - they use refs now
+  }, [dziUrl, slideId, hasWsi, getSlideTiledImage]); // Removed onRegionClick and activeTool - they use refs now
 
   // Navigate to target coordinates when they change
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !isReady || !targetCoordinates) return;
 
-    const tiledImage = viewer.world.getItemAt(0);
+    const tiledImage = getSlideTiledImage();
     if (!tiledImage) return;
 
     // Convert image coordinates to viewport coordinates
@@ -456,7 +515,7 @@ export function WSIViewer({
     // Pan and zoom to the target location
     viewer.viewport.panTo(viewportPoint, false);
     viewer.viewport.zoomTo(clampedZoom, viewportPoint, false);
-  }, [targetCoordinates, isReady]);
+  }, [targetCoordinates, isReady, getSlideTiledImage]);
 
   // Handle heatmap overlay using OSD's SimpleImage layer (not HTML overlay).
   // HTML overlays drift at high zoom due to sub-pixel CSS rounding.
@@ -466,88 +525,159 @@ export function WSIViewer({
     const viewer = viewerRef.current;
     if (!viewer || !isReady || !heatmapImageUrl) return;
 
-    // Reset loaded flag so the opacity effect re-fires when the new image loads.
-    // Without this, switching models leaves heatmapLoaded=true (stale from the
-    // previous model), so setHeatmapLoaded(true) in the success callback is a
-    // no-op and the opacity effect never re-runs for the new image.
-    setHeatmapLoaded(false);
+    let cancelled = false;
+    let localObjectUrl: string | null = null;
 
-    // Remove existing heatmap tiled image if present
-    if (heatmapTiledImageRef.current) {
-      try {
-        viewer.world.removeItem(heatmapTiledImageRef.current);
-      } catch (err) {
-        // Ignore
-      }
-      heatmapTiledImageRef.current = null;
-    }
-
-    // Get the slide's bounds so the heatmap aligns exactly
-    const slideImage = viewer.world.getItemAt(0);
-    if (!slideImage) {
-      console.warn("No slide image found for heatmap overlay");
-      return;
-    }
-    const bounds = slideImage.getBounds(false);
-
-    // Compute heatmap coverage: the patch grid covers ceil(dim/224)*224 pixels,
-    // which may exceed actual slide dimensions. Scale heatmap width accordingly.
-    const PATCH_SIZE = 224;
-    const contentSize = slideImage.getContentSize();
-    const coverageW = Math.ceil(contentSize.x / PATCH_SIZE) * PATCH_SIZE;
-    const heatmapWidth = bounds.width * (coverageW / contentSize.x);
-
-    // Add heatmap as a simple image layer (rendered in OSD's tile pipeline)
-    viewer.addSimpleImage({
-      url: heatmapImageUrl,
-      x: bounds.x,
-      y: bounds.y,
-      width: heatmapWidth,
-      opacity: 0, // Start hidden, update via showHeatmap effect
-      success: (event: any) => {
-        heatmapTiledImageRef.current = event.item;
-        // Apply pixelated rendering for discrete patch squares
-        try {
-          // Try direct canvas access
-          const canvas = event.item?._drawer?.canvas;
-          if (canvas) {
-            canvas.style.imageRendering = "pixelated";
-            canvas.style.imageRendering = "crisp-edges";
-            // Disable image smoothing on the 2d context
-            const ctx = canvas.getContext("2d");
-            if (ctx) ctx.imageSmoothingEnabled = false;
-          }
-          // Also try OSD drawer-level smoothing
-          if (event.item?._drawer) {
-            try { event.item._drawer.setImageSmoothingEnabled(false); } catch (_e) { /* not available */ }
-          }
-        } catch (_e) { /* best effort */ }
-        // Apply correct opacity immediately so the heatmap is visible right away.
-        // Use refs to get current values (closure captures stale state).
-        const targetOpacity = showHeatmapRef.current ? heatmapOpacityRef.current : 0;
-        event.item.setOpacity(targetOpacity);
-        setHeatmapLoaded(true);
-        setHeatmapError(false);
-        console.log("Heatmap added as tiled image layer");
-      },
-      error: () => {
-        setHeatmapError(true);
-        setHeatmapLoaded(false);
-        console.error("Failed to load heatmap image:", heatmapImageUrl);
-      },
-    });
-
-    return () => {
-      if (heatmapTiledImageRef.current && viewerRef.current) {
+    const clearHeatmapLayer = () => {
+      if (!viewerRef.current) return;
+      if (heatmapTiledImageRef.current) {
         try {
           viewerRef.current.world.removeItem(heatmapTiledImageRef.current);
-        } catch (err) {
-          // Ignore
+        } catch {
+          // ignore
         }
-        heatmapTiledImageRef.current = null;
+      }
+      heatmapTiledImageRef.current = null;
+      setHeatmapLoaded(false);
+    };
+
+    setHeatmapLoaded(false);
+    setHeatmapError(false);
+    clearHeatmapLayer();
+
+    const loadHeatmap = async () => {
+      const slideImage = getSlideTiledImage();
+      if (!slideImage) {
+        console.warn("No slide image found for heatmap overlay");
+        return;
+      }
+
+      const bounds = slideImage.getBounds(false);
+      const contentSize = slideImage.getContentSize();
+
+      let response: Response;
+      try {
+        response = await fetch(heatmapImageUrl, { method: "GET" });
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to fetch heatmap image:", heatmapImageUrl, err);
+          setHeatmapError(true);
+          setHeatmapLoaded(false);
+        }
+        return;
+      }
+
+      if (!response.ok) {
+        if (!cancelled) {
+          console.error("Heatmap fetch returned non-OK status:", response.status);
+          setHeatmapError(true);
+          setHeatmapLoaded(false);
+        }
+        return;
+      }
+
+      const headerCoverageW = parsePositiveHeaderInt(response.headers.get("X-Coverage-Width"));
+      const headerCoverageH = parsePositiveHeaderInt(response.headers.get("X-Coverage-Height"));
+
+      const blob = await response.blob();
+      if (cancelled) return;
+
+      let imageDims: { width: number; height: number };
+      try {
+        imageDims = await getImageDimensionsFromBlob(blob);
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to decode heatmap image dimensions", err);
+          setHeatmapError(true);
+          setHeatmapLoaded(false);
+        }
+        return;
+      }
+
+      const fallbackCoverageW = Math.ceil(contentSize.x / DEFAULT_PATCH_SIZE_PX) * DEFAULT_PATCH_SIZE_PX;
+      const fallbackCoverageH = Math.ceil(contentSize.y / DEFAULT_PATCH_SIZE_PX) * DEFAULT_PATCH_SIZE_PX;
+      const coverageW = headerCoverageW ?? fallbackCoverageW;
+      const coverageH = headerCoverageH ?? fallbackCoverageH;
+
+      const patchWidthPx = imageDims.width > 0 ? coverageW / imageDims.width : DEFAULT_PATCH_SIZE_PX;
+      const patchHeightPx = imageDims.height > 0 ? coverageH / imageDims.height : DEFAULT_PATCH_SIZE_PX;
+
+      heatmapMetaRef.current = {
+        imageWidth: imageDims.width,
+        imageHeight: imageDims.height,
+        coverageWidth: coverageW,
+        coverageHeight: coverageH,
+        patchWidthPx,
+        patchHeightPx,
+      };
+      gridRedrawRef.current?.();
+
+      localObjectUrl = URL.createObjectURL(blob);
+
+      const widthScale = bounds.width / contentSize.x;
+      const heightScale = bounds.height / contentSize.y;
+      const heatmapWorldWidth = coverageW * widthScale;
+      const heatmapWorldHeight = coverageH * heightScale;
+
+      viewer.addSimpleImage({
+        url: localObjectUrl,
+        x: bounds.x,
+        y: bounds.y,
+        width: heatmapWorldWidth,
+        height: heatmapWorldHeight,
+        index: viewer.world.getItemCount(),
+        opacity: 0, // Start hidden, update via showHeatmap effect
+        success: (event: any) => {
+          if (cancelled) {
+            try { viewer.world.removeItem(event.item); } catch { /* ignore */ }
+            return;
+          }
+
+          heatmapTiledImageRef.current = event.item;
+
+          // Apply pixelated rendering for discrete patch squares
+          try {
+            const canvas = event.item?._drawer?.canvas;
+            if (canvas) {
+              canvas.style.imageRendering = "pixelated";
+              canvas.style.imageRendering = "crisp-edges";
+              const ctx = canvas.getContext("2d");
+              if (ctx) ctx.imageSmoothingEnabled = false;
+            }
+            if (event.item?._drawer) {
+              try { event.item._drawer.setImageSmoothingEnabled(false); } catch { /* ignore */ }
+            }
+          } catch {
+            // best effort
+          }
+
+          const targetOpacity = showHeatmapRef.current ? heatmapOpacityRef.current : 0;
+          event.item.setOpacity(targetOpacity);
+          setHeatmapLoaded(true);
+          setHeatmapError(false);
+        },
+        error: () => {
+          if (!cancelled) {
+            setHeatmapError(true);
+            setHeatmapLoaded(false);
+            console.error("Failed to load heatmap image:", heatmapImageUrl);
+          }
+        },
+      });
+    };
+
+    loadHeatmap();
+
+    return () => {
+      cancelled = true;
+      clearHeatmapLayer();
+      heatmapMetaRef.current = null;
+      gridRedrawRef.current?.();
+      if (localObjectUrl) {
+        URL.revokeObjectURL(localObjectUrl);
       }
     };
-  }, [heatmapImageUrl, isReady]);
+  }, [heatmapImageUrl, isReady, getSlideTiledImage]);
 
   // Force pixelated rendering on all OSD canvas elements for discrete heatmap patches
   useEffect(() => {
@@ -582,12 +712,12 @@ export function WSIViewer({
     // Update main pathology tile visibility
     const viewer = viewerRef.current;
     if (viewer && isReady) {
-      const tiledImage = viewer.world.getItemAt(0);
+      const tiledImage = getSlideTiledImage();
       if (tiledImage) {
         tiledImage.setOpacity(heatmapOnly ? 0 : 1);
       }
     }
-  }, [showHeatmap, heatmapOpacity, heatmapLoaded, heatmapOnly, isReady]);
+  }, [showHeatmap, heatmapOpacity, heatmapLoaded, heatmapOnly, isReady, getSlideTiledImage]);
 
   // Store grid settings in refs so the draw function never gets recreated
   const showGridRef = useRef(showGrid);
@@ -597,16 +727,15 @@ export function WSIViewer({
   const gridColorRef = useRef(gridColor);
   useEffect(() => { gridColorRef.current = gridColor; }, [gridColor]);
   // Force grid redraw when settings change
-  const gridRedrawRef = useRef<(() => void) | null>(null);
   useEffect(() => { gridRedrawRef.current?.(); }, [showGrid, gridOpacity, gridColor]);
 
-  // Draw 224px patch grid overlay on a canvas using requestAnimationFrame
+  // Draw patch grid overlay on a canvas using requestAnimationFrame.
+  // Uses heatmap metadata patch size when available to keep exact alignment.
   useEffect(() => {
     const viewer = viewerRef.current;
     const canvas = gridCanvasRef.current;
     if (!viewer || !canvas || !isReady) return;
 
-    const PATCH = 224;
     let rafId = 0;
 
     const draw = () => {
@@ -627,12 +756,18 @@ export function WSIViewer({
       ctx.clearRect(0, 0, w, h);
       if (!showGridRef.current) return;
 
-      const tiledImage = viewer.world.getItemAt(0);
+      const tiledImage = getSlideTiledImage();
       if (!tiledImage) return;
 
       const contentSize = tiledImage.getContentSize();
       const imgW = contentSize.x;
       const imgH = contentSize.y;
+
+      // Keep grid transform in lock-step with the active heatmap geometry.
+      // If metadata is unavailable, fall back to 224-level0 patches.
+      const heatmapMeta = heatmapMetaRef.current;
+      const patchX = heatmapMeta?.patchWidthPx ?? DEFAULT_PATCH_SIZE_PX;
+      const patchY = heatmapMeta?.patchHeightPx ?? DEFAULT_PATCH_SIZE_PX;
 
       // Determine visible image-coordinate bounds
       const topLeftVP = viewer.viewport.pointFromPixel(new OpenSeadragon.Point(0, 0));
@@ -640,10 +775,10 @@ export function WSIViewer({
       const topLeftImg = tiledImage.viewportToImageCoordinates(topLeftVP);
       const bottomRightImg = tiledImage.viewportToImageCoordinates(bottomRightVP);
 
-      const minX = Math.max(0, Math.floor(topLeftImg.x / PATCH) * PATCH);
-      const maxX = Math.min(imgW, Math.ceil(bottomRightImg.x / PATCH) * PATCH);
-      const minY = Math.max(0, Math.floor(topLeftImg.y / PATCH) * PATCH);
-      const maxY = Math.min(imgH, Math.ceil(bottomRightImg.y / PATCH) * PATCH);
+      const minX = Math.max(0, Math.floor(topLeftImg.x / patchX) * patchX);
+      const maxX = Math.min(imgW, Math.ceil(bottomRightImg.x / patchX) * patchX);
+      const minY = Math.max(0, Math.floor(topLeftImg.y / patchY) * patchY);
+      const maxY = Math.min(imgH, Math.ceil(bottomRightImg.y / patchY) * patchY);
 
       // Clip drawing to the slide image bounds so grid does not extend outside
       const imgTopLeftVP = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(0, 0));
@@ -673,7 +808,7 @@ export function WSIViewer({
       ctx.beginPath();
 
       // Vertical lines
-      for (let ix = minX; ix <= maxX; ix += PATCH) {
+      for (let ix = minX; ix <= maxX + 1e-6; ix += patchX) {
         const vpTop = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(ix, minY));
         const vpBot = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(ix, maxY));
         const sTop = viewer.viewport.pixelFromPoint(vpTop);
@@ -683,7 +818,7 @@ export function WSIViewer({
       }
 
       // Horizontal lines
-      for (let iy = minY; iy <= maxY; iy += PATCH) {
+      for (let iy = minY; iy <= maxY + 1e-6; iy += patchY) {
         const vpLeft = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(minX, iy));
         const vpRight = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(maxX, iy));
         const sLeft = viewer.viewport.pixelFromPoint(vpLeft);
@@ -716,13 +851,13 @@ export function WSIViewer({
       const ctx = canvas.getContext("2d");
       if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
     };
-  }, [isReady]);
+  }, [isReady, getSlideTiledImage]);
 
   // Helper: convert screen pixel position to image coordinates
   const screenToImageCoords = useCallback((screenX: number, screenY: number): { x: number; y: number } | null => {
     const viewer = viewerRef.current;
     if (!viewer) return null;
-    const tiledImage = viewer.world.getItemAt(0);
+    const tiledImage = getSlideTiledImage();
     if (!tiledImage) return null;
     const containerEl = containerRef.current;
     if (!containerEl) return null;
@@ -731,7 +866,7 @@ export function WSIViewer({
     const viewportPoint = viewer.viewport.pointFromPixel(pixelPoint);
     const imagePoint = tiledImage.viewportToImageCoordinates(viewportPoint);
     return { x: Math.round(imagePoint.x), y: Math.round(imagePoint.y) };
-  }, []);
+  }, [getSlideTiledImage]);
 
   // Keep mouse navigation enabled so users can always pan/zoom.
   // Drawing temporarily disables navigation only while dragging.
@@ -866,12 +1001,12 @@ export function WSIViewer({
   const imageToScreenCoords = useCallback((imgX: number, imgY: number): { x: number; y: number } | null => {
     const viewer = viewerRef.current;
     if (!viewer) return null;
-    const tiledImage = viewer.world.getItemAt(0);
+    const tiledImage = getSlideTiledImage();
     if (!tiledImage) return null;
     const viewportPoint = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(imgX, imgY));
     const pixelPoint = viewer.viewport.pixelFromPoint(viewportPoint);
     return { x: pixelPoint.x, y: pixelPoint.y };
-  }, []);
+  }, [getSlideTiledImage]);
 
   // Force SVG annotation re-render on zoom/pan (throttled to avoid lag).
   // Only uses the animation-end event, not every animation frame, since
@@ -922,7 +1057,7 @@ export function WSIViewer({
       const container = containerRef.current;
       if (!container) return;
 
-      const tiledImage = viewer.world.getItemAt(0);
+      const tiledImage = getSlideTiledImage();
       if (!tiledImage) return;
 
       const cw = container.clientWidth;
@@ -1000,7 +1135,7 @@ export function WSIViewer({
       const ctx = canvas.getContext("2d");
       if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
     };
-  }, [patchOverlay, isReady]);
+  }, [patchOverlay, isReady, getSlideTiledImage]);
 
   // Handle click for patch selection mode.
   // Disables OSD panning while active so clicks are not consumed as drag gestures.
@@ -1017,7 +1152,7 @@ export function WSIViewer({
     const handler = (event: OpenSeadragon.CanvasClickEvent) => {
       if (!onPatchSelectedRef.current || !patchCoordinates) return;
 
-      const tiledImage = viewer.world.getItemAt(0);
+      const tiledImage = getSlideTiledImage();
       if (!tiledImage) return;
 
       const viewportPoint = viewer.viewport.pointFromPixel(event.position);
@@ -1077,7 +1212,7 @@ export function WSIViewer({
         (viewerRef.current as any).panVertical = true;
       }
     };
-  }, [isReady, patchSelectionMode, patchCoordinates]);
+  }, [isReady, patchSelectionMode, patchCoordinates, getSlideTiledImage]);
 
   // Render an annotation as SVG element
   const renderAnnotationSVG = useCallback((ann: Annotation, isSelected: boolean) => {
@@ -1237,23 +1372,32 @@ export function WSIViewer({
   }, [isReady, onControlsReady]);
 
   const scaleInfo = getScaleBarInfo();
+  const modelOptions = availableModels.filter(
+    (model, index, arr) => arr.findIndex((m) => m.id === model.id) === index
+  );
+  const modelSelectValue = heatmapModel ?? modelOptions[0]?.id ?? "";
 
   // Model selector component
   const ModelSelector = () => (
     <div className="mb-3">
       <label className="text-xs text-gray-500 mb-1.5 block">Model</label>
       <select
-        value={heatmapModel ?? (heatmapModelOptions[0]?.id || currentProject.prediction_target || "primary_prediction")}
+        value={modelSelectValue}
         onChange={(e) => {
-          onHeatmapModelChange?.(e.target.value);
+          onHeatmapModelChange?.(e.target.value || null);
         }}
-        className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-md text-gray-700 focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:border-transparent"
+        disabled={modelOptions.length === 0}
+        className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-md text-gray-700 focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
       >
-        {heatmapModelOptions.map((model) => (
-          <option key={model.id} value={model.id}>
-            {model.name}
-          </option>
-        ))}
+        {modelOptions.length === 0 ? (
+          <option value="">No project models available</option>
+        ) : (
+          modelOptions.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.name}
+            </option>
+          ))
+        )}
       </select>
     </div>
   );

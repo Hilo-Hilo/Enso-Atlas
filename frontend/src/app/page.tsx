@@ -29,7 +29,7 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
-import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords, getProjectAvailableModels } from "@/lib/api";
+import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords, getProjectAvailableModels, type AvailableModelDetail } from "@/lib/api";
 import { deduplicateSlides } from "@/lib/slideUtils";
 import { useProject } from "@/contexts/ProjectContext";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
@@ -39,7 +39,6 @@ import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, 
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui";
 import { ChevronLeft, ChevronRight, Layers, BarChart3, X } from "lucide-react";
-import { AVAILABLE_MODELS } from "@/components/panels/ModelPicker";
 
 // ResizableLayout removed - using react-resizable-panels directly
 
@@ -131,6 +130,61 @@ function SidebarToggle({
       )}
     </button>
   );
+}
+
+function humanizeModelId(modelId: string): string {
+  return modelId
+    .replace(/[\-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function buildProjectFallbackAvailableModels(currentProject: {
+  prediction_target?: string;
+  cancer_type?: string;
+  positive_class?: string;
+  classes?: string[];
+}): import("@/types").AvailableModel[] {
+  const primaryId = currentProject.prediction_target;
+  if (!primaryId) return [];
+
+  const positiveLabel =
+    currentProject.positive_class ||
+    currentProject.classes?.[1] ||
+    "Positive";
+  const negativeLabel =
+    currentProject.classes?.find((c) => c !== positiveLabel) ||
+    currentProject.classes?.[0] ||
+    "Negative";
+
+  return [
+    {
+      id: primaryId,
+      name: humanizeModelId(primaryId),
+      description: `Primary ${currentProject.cancer_type || "project"} model`,
+      auc: 0,
+      nSlides: 0,
+      category: "project_specific",
+      positiveLabel,
+      negativeLabel,
+      available: true,
+    },
+  ];
+}
+
+function mapDetailToAvailableModel(
+  detail: AvailableModelDetail
+): import("@/types").AvailableModel {
+  return {
+    id: detail.id,
+    name: detail.displayName,
+    description: detail.description,
+    auc: detail.auc ?? 0,
+    nSlides: 0,
+    category: detail.category,
+    positiveLabel: detail.positiveLabel ?? "Positive",
+    negativeLabel: detail.negativeLabel ?? "Negative",
+    available: true,
+  };
 }
 
 export default function HomePageWrapper() {
@@ -274,16 +328,10 @@ function HomePage() {
 
   // Slide QC metrics state
   const [slideQCMetrics, setSlideQCMetrics] = useState<SlideQCMetrics | null>(null);
-  const [selectedModels, setSelectedModels] = useState<string[]>(() => 
-    AVAILABLE_MODELS.length >= 2 
-      ? AVAILABLE_MODELS.slice(0, 2).map(m => m.id)
-      : AVAILABLE_MODELS.slice(0, 2).map((m) => m.id)
-  );
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [resolutionLevel, setResolutionLevel] = useState<number>(1); // 0 = full res, 1 = downsampled
   const [forceReembed, setForceReembed] = useState(false);
-  const [heatmapModel, setHeatmapModel] = useState<string | null>(() => 
-    AVAILABLE_MODELS.length > 0 ? AVAILABLE_MODELS[0].id : "treatment_response"
-  );
+  const [heatmapModel, setHeatmapModel] = useState<string | null>(null);
   const [heatmapLevel, setHeatmapLevel] = useState<number>(2); // 0-4, default 2 (512px)
   const [heatmapAlphaPower, setHeatmapAlphaPower] = useState<number>(0.7); // 0.1-1.5, controls low-attention visibility
   // Debounce alpha power so heatmap only re-fetches after user stops sliding
@@ -302,8 +350,25 @@ function HomePage() {
   const [isCachedResult, setIsCachedResult] = useState(false);
   const [cachedResultTimestamp, setCachedResultTimestamp] = useState<string | null>(null);
 
-  // Project-specific available models for MultiModelPredictionPanel preview
+  // Project-specific available models for preview + heatmap controls
   const [projectAvailableModels, setProjectAvailableModels] = useState<import("@/types").AvailableModel[]>([]);
+  const fallbackProjectModels = useMemo(
+    () =>
+      buildProjectFallbackAvailableModels({
+        prediction_target: currentProject.prediction_target,
+        cancer_type: currentProject.cancer_type,
+        positive_class: currentProject.positive_class,
+        classes: currentProject.classes,
+      }),
+    [
+      currentProject.prediction_target,
+      currentProject.cancer_type,
+      currentProject.positive_class,
+      currentProject.classes,
+    ]
+  );
+  const scopedProjectModels =
+    projectAvailableModels.length > 0 ? projectAvailableModels : fallbackProjectModels;
 
   // Embedding progress state for better UX during long operations
   const [embeddingProgress, setEmbeddingProgress] = useState<{
@@ -514,9 +579,11 @@ function HomePage() {
     fetchSlideList();
   }, [fetchSlideList]);
 
-  // Reset selected models and clear cached results when project changes
+  // Reset model-dependent state and rehydrate project-scoped models on project change
   useEffect(() => {
-    // Reset selected models to empty (ModelPicker will populate based on new project)
+    let cancelled = false;
+
+    // Reset selected models to empty (ModelPicker will repopulate from project-scoped models)
     setSelectedModels([]);
     // Clear any cached analysis results from previous project
     setMultiModelResult(null);
@@ -527,35 +594,49 @@ function HomePage() {
     // Clear selected slide
     setSelectedSlide(null);
     setSlideIndex(0);
-    // Clear heatmap model selection
-    setHeatmapModel(null);
-    
-    // Fetch project-specific available models for preview
-    if (currentProject.id && currentProject.id !== "default") {
-      getProjectAvailableModels(currentProject.id)
-        .then((models) => {
-          const mapped = models.map(m => ({
-            id: m.id,
-            name: m.displayName,
-            description: m.description,
-            auc: m.auc ?? 0,
-            nSlides: 0,  // Not available from this endpoint
-            category: m.category,
-            positiveLabel: m.positiveLabel ?? "Positive",
-            negativeLabel: m.negativeLabel ?? "Negative",
-            available: true,
-          }));
+    // Clear current project model cache while refetching
+    setProjectAvailableModels([]);
+    setHeatmapModel(fallbackProjectModels[0]?.id ?? currentProject.prediction_target ?? null);
+
+    const fetchProjectModels = async () => {
+      if (!currentProject.id || currentProject.id === "default") {
+        return;
+      }
+
+      try {
+        const details = await getProjectAvailableModels(currentProject.id);
+        if (cancelled) return;
+
+        if (details.length > 0) {
+          const mapped = details.map(mapDetailToAvailableModel);
           setProjectAvailableModels(mapped);
-          // Keep heatmap model project-scoped: default to first model for this project.
-          setHeatmapModel(mapped[0]?.id ?? null);
-        })
-        .catch((err) => {
+          setHeatmapModel(mapped[0]?.id ?? fallbackProjectModels[0]?.id ?? currentProject.prediction_target ?? null);
+          return;
+        }
+      } catch (err) {
+        if (!cancelled) {
           console.warn("Failed to fetch project models for preview:", err);
-          setProjectAvailableModels([]);
-          setHeatmapModel(currentProject.prediction_target ?? null);
-        });
-    }
-  }, [currentProject.id, clearResults]);
+        }
+      }
+
+      if (!cancelled) {
+        // Keep safe project-derived fallback, never global hardcoded catalog
+        setProjectAvailableModels([]);
+        setHeatmapModel(fallbackProjectModels[0]?.id ?? currentProject.prediction_target ?? null);
+      }
+    };
+
+    fetchProjectModels();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentProject.id,
+    currentProject.prediction_target,
+    fallbackProjectModels,
+    clearResults,
+  ]);
 
   // Auto-select slide from URL query params (e.g. /?slide=TCGA-... from Slide Manager)
   useEffect(() => {
@@ -745,43 +826,50 @@ function HomePage() {
 
       // If cached results exist, build a MultiModelResponse from them
       if (cachedResult && cachedResult.count > 0) {
-        // Build model metadata lookup from project-specific available models
-        // Fall back to static AVAILABLE_MODELS if fetch fails
+        // Build model metadata lookup from scoped project models only
         const MODEL_META: Record<string, {
           name: string; category: string;
           auc: number; posLabel: string; negLabel: string; desc: string;
         }> = {};
-        
-        // Try to get project-specific models for accurate metadata
-        try {
-          const projectModels = await getProjectAvailableModels(currentProject.id);
-          for (const m of projectModels) {
-            MODEL_META[m.id] = {
-              name: m.displayName,
-              category: m.category,
-              auc: m.auc ?? 0,
-              posLabel: m.positiveLabel ?? "Positive",
-              negLabel: m.negativeLabel ?? "Negative",
-              desc: m.description ?? "",
-            };
-          }
-        } catch (err) {
-          console.warn("Failed to fetch project models for metadata, using fallback:", err);
+
+        for (const model of scopedProjectModels) {
+          MODEL_META[model.id] = {
+            name: model.name,
+            category: model.category,
+            auc: model.auc ?? 0,
+            posLabel: model.positiveLabel ?? "Positive",
+            negLabel: model.negativeLabel ?? "Negative",
+            desc: model.description ?? "",
+          };
         }
-        
-        // Fallback to static AVAILABLE_MODELS for any missing models
-        for (const m of AVAILABLE_MODELS) {
-          if (!MODEL_META[m.id]) {
-            MODEL_META[m.id] = {
-              name: m.displayName,
-              category: m.category,
-              auc: m.auc ?? 0,
-              posLabel: m.positiveLabel ?? "Positive",
-              negLabel: m.negativeLabel ?? "Negative",
-              desc: m.description ?? "",
-            };
+
+        // Try to refresh with latest project-scoped metadata if available
+        if (currentProject.id && currentProject.id !== "default") {
+          try {
+            const projectModels = await getProjectAvailableModels(currentProject.id);
+            for (const model of projectModels) {
+              MODEL_META[model.id] = {
+                name: model.displayName,
+                category: model.category,
+                auc: model.auc ?? 0,
+                posLabel: model.positiveLabel ?? "Positive",
+                negLabel: model.negativeLabel ?? "Negative",
+                desc: model.description ?? "",
+              };
+            }
+          } catch (err) {
+            console.warn("Failed to refresh project model metadata:", err);
           }
         }
+
+        const projectPositiveLabel =
+          currentProject.positive_class ||
+          currentProject.classes?.[1] ||
+          "Positive";
+        const projectNegativeLabel =
+          currentProject.classes?.find((c) => c !== projectPositiveLabel) ||
+          currentProject.classes?.[0] ||
+          "Negative";
 
         const predictions: Record<string, import("@/types").ModelPrediction> = {};
         const cancerSpecific: import("@/types").ModelPrediction[] = [];
@@ -790,16 +878,18 @@ function HomePage() {
 
         for (const r of cachedResult.results) {
           const meta = MODEL_META[r.model_id];
-          const category = meta?.category ?? "general_pathology";
+          const category =
+            meta?.category ||
+            (r.model_id === currentProject.prediction_target ? "project_specific" : "general_pathology");
 
           const pred: import("@/types").ModelPrediction = {
             modelId: r.model_id,
-            modelName: meta?.name ?? r.model_id.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+            modelName: meta?.name ?? humanizeModelId(r.model_id),
             category,
             score: r.score,
             label: r.label,
-            positiveLabel: meta?.posLabel ?? "Positive",
-            negativeLabel: meta?.negLabel ?? "Negative",
+            positiveLabel: meta?.posLabel ?? projectPositiveLabel,
+            negativeLabel: meta?.negLabel ?? projectNegativeLabel,
             confidence: r.confidence,
             auc: meta?.auc ?? 0,
             nTrainingSlides: 0,
@@ -837,7 +927,15 @@ function HomePage() {
         }).catch(() => {});  // Silent -- cached multi-model results already shown
       }
     },
-    [clearResults, analyze, currentProject.id]
+    [
+      clearResults,
+      analyze,
+      scopedProjectModels,
+      currentProject.id,
+      currentProject.prediction_target,
+      currentProject.positive_class,
+      currentProject.classes,
+    ]
   );
 
   // Handle semantic search
@@ -861,7 +959,7 @@ function HomePage() {
         setIsSearching(false);
       }
     },
-    [selectedSlide]
+    [selectedSlide, currentProject.id]
   );
 
   // Handle visual search (find similar patches)
@@ -1080,8 +1178,19 @@ function HomePage() {
         startTime: prev?.startTime ?? Date.now()
       }));
 
-      // Then run multi-model analysis with the correct level
-      const result = await analyzeSlideMultiModel(selectedSlide.id, selectedModels, false, resolutionLevel, forceRefresh, currentProject.id);
+      // Then run multi-model analysis with project-scoped model defaults
+      const modelIdsForAnalysis = selectedModels.length > 0
+        ? selectedModels
+        : scopedProjectModels.map((m) => m.id);
+
+      const result = await analyzeSlideMultiModel(
+        selectedSlide.id,
+        modelIdsForAnalysis.length > 0 ? modelIdsForAnalysis : undefined,
+        false,
+        resolutionLevel,
+        forceRefresh,
+        currentProject.id
+      );
       setMultiModelResult(result);
       
       // Success toast
@@ -1140,7 +1249,7 @@ function HomePage() {
       setIsAnalyzingMultiModel(false);
       setEmbeddingProgress(null);
     }
-  }, [selectedSlide, selectedModels, resolutionLevel, forceReembed, toast]);
+  }, [selectedSlide, selectedModels, scopedProjectModels, resolutionLevel, forceReembed, toast, currentProject.id]);
   // Handle analyze button
   const handleAnalyze = useCallback(async () => {
     if (!selectedSlide) return;
@@ -1648,7 +1757,7 @@ function HomePage() {
   
   // Build heatmap data with selected model
   const effectiveHeatmapModel =
-    heatmapModel ?? projectAvailableModels[0]?.id ?? currentProject?.prediction_target ?? null;
+    heatmapModel ?? scopedProjectModels[0]?.id ?? currentProject?.prediction_target ?? null;
 
   const heatmapData = selectedSlide && effectiveHeatmapModel ? {
     imageUrl: getHeatmapUrl(selectedSlide.id, effectiveHeatmapModel, heatmapLevel, debouncedAlphaPower, currentProject?.id),
@@ -1781,7 +1890,7 @@ function HomePage() {
           isCached={isCachedResult}
           cachedAt={cachedResultTimestamp}
           onReanalyze={selectedSlide ? handleReanalyze : undefined}
-          availableModels={projectAvailableModels.length > 0 ? projectAvailableModels : undefined}
+          availableModels={scopedProjectModels.length > 0 ? scopedProjectModels : undefined}
         />
       </div>
 
@@ -2055,7 +2164,7 @@ function HomePage() {
                 heatmapAlphaPower={heatmapAlphaPower}
                 onHeatmapAlphaPowerChange={setHeatmapAlphaPower}
                 onHeatmapModelChange={setHeatmapModel}
-                availableModels={projectAvailableModels.length > 0 ? projectAvailableModels.map(m => ({ id: m.id, name: m.name })) : []}
+                availableModels={scopedProjectModels.map((m) => ({ id: m.id, name: m.name }))}
                 onControlsReady={(controls) => { viewerControlsRef.current = controls; }}
                 onZoomChange={setViewerZoom}
                 annotations={annotations}
