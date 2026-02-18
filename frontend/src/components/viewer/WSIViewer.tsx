@@ -22,6 +22,7 @@ if (typeof window !== "undefined") {
 import { cn } from "@/lib/utils";
 import { Toggle } from "@/components/ui/Toggle";
 import { Slider } from "@/components/ui/Slider";
+import { useProject } from "@/contexts/ProjectContext";
 import {
   Layers,
   Maximize2,
@@ -36,9 +37,8 @@ import {
 } from "lucide-react";
 import type { PatchCoordinates, HeatmapData, Annotation, PatchOverlay } from "@/types";
 
-// Heatmap model options - derived from shared model config
-import { AVAILABLE_MODELS } from "@/components/panels/ModelPicker";
-const HEATMAP_MODELS = AVAILABLE_MODELS.map((m) => ({ id: m.id, name: m.displayName }));
+// Heatmap model options - project-aware fallback metadata
+import { getProjectFallbackModels } from "@/components/panels/ModelPicker";
 
 // Viewer control interface for keyboard shortcuts
 export interface WSIViewerControls {
@@ -165,6 +165,13 @@ export function WSIViewer({
   const [heatmapLoaded, setHeatmapLoaded] = useState(false);
   const [heatmapError, setHeatmapError] = useState(false);
   const heatmapImageUrl = heatmap?.imageUrl;
+
+  const { currentProject } = useProject();
+  const fallbackHeatmapModels = React.useMemo(
+    () => getProjectFallbackModels(currentProject).map((model) => ({ id: model.id, name: model.displayName })),
+    [currentProject]
+  );
+  const heatmapModelOptions = availableModels.length > 0 ? availableModels : fallbackHeatmapModels;
   
   // Store activeTool in ref for click handler
   const activeToolRef = useRef(activeTool);
@@ -1236,13 +1243,13 @@ export function WSIViewer({
     <div className="mb-3">
       <label className="text-xs text-gray-500 mb-1.5 block">Model</label>
       <select
-        value={heatmapModel ?? ((availableModels.length > 0 ? availableModels : HEATMAP_MODELS)[0]?.id || "tumor_stage")}
+        value={heatmapModel ?? (heatmapModelOptions[0]?.id || currentProject.prediction_target || "primary_prediction")}
         onChange={(e) => {
           onHeatmapModelChange?.(e.target.value);
         }}
         className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-md text-gray-700 focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:border-transparent"
       >
-        {(availableModels.length > 0 ? availableModels : HEATMAP_MODELS).map((model) => (
+        {heatmapModelOptions.map((model) => (
           <option key={model.id} value={model.id}>
             {model.name}
           </option>

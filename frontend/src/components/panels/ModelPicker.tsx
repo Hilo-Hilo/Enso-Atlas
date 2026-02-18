@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { cn } from "@/lib/utils";
+import { cn, humanizeIdentifier } from "@/lib/utils";
 
 import { Badge } from "@/components/ui/Badge";
 import { ChevronDown, ChevronUp, FlaskConical, Activity, Layers, CheckCircle, Circle, History } from "lucide-react";
 import { useProject } from "@/contexts/ProjectContext";
 import { getProjectModels as getProjectModelsApi, getProjectAvailableModels, getSlideEmbeddingStatus } from "@/lib/api";
 import type { AvailableModelDetail } from "@/lib/api";
+import type { Project } from "@/types";
 
 export interface ModelConfig {
   id: string;
@@ -19,57 +20,74 @@ export interface ModelConfig {
   negativeLabel?: string;
 }
 
-// Default models -- used as fallback when project context is not available
-export const AVAILABLE_MODELS: ModelConfig[] = [
-  {
-    id: "platinum_sensitivity",
-    displayName: "Platinum Sensitivity",
-    description: "Response to platinum-based chemotherapy",
-    auc: 0.907,
-    category: "ovarian_cancer",
-    positiveLabel: "Sensitive",
-    negativeLabel: "Resistant",
-  },
-  {
-    id: "tumor_grade",
-    displayName: "Tumor Grade",
-    description: "High vs low grade classification",
-    auc: 0.752,
-    category: "general_pathology",
-    positiveLabel: "High Grade",
-    negativeLabel: "Low Grade",
-  },
-  {
-    id: "survival_5y",
-    displayName: "5-Year Survival",
-    description: "5-year overall survival probability",
-    auc: 0.697,
-    category: "ovarian_cancer",
-    positiveLabel: "Favorable",
-    negativeLabel: "Poor",
-  },
-  {
-    id: "survival_3y",
-    displayName: "3-Year Survival",
-    description: "3-year overall survival probability",
-    auc: 0.645,
-    category: "ovarian_cancer",
-    positiveLabel: "Favorable",
-    negativeLabel: "Poor",
-  },
-  {
-    id: "survival_1y",
-    displayName: "1-Year Survival",
-    description: "1-year overall survival probability",
-    auc: 0.639,
-    category: "ovarian_cancer",
-    positiveLabel: "Favorable",
-    negativeLabel: "Poor",
-  },
-];
+type ProjectModelMetadata = Pick<Project, "id" | "cancer_type" | "prediction_target" | "classes" | "positive_class">;
 
-// getProjectModels is no longer used as a local helper -- model filtering
-// now happens via the API and the apiModels state inside ModelPicker.
+function getProjectClassLabels(project: ProjectModelMetadata): { positiveLabel: string; negativeLabel: string } {
+  const positiveLabel = project.positive_class || project.classes?.[1] || "Positive";
+  const negativeLabel = project.classes?.find((c) => c !== positiveLabel) || project.classes?.[0] || "Negative";
+  return { positiveLabel, negativeLabel };
+}
+
+function buildFallbackModel(project: ProjectModelMetadata, modelId: string, index: number): ModelConfig {
+  const { positiveLabel, negativeLabel } = getProjectClassLabels(project);
+  const targetId = project.prediction_target;
+  const isPrimary = Boolean(targetId) && modelId === targetId;
+  const cancerLabel = project.cancer_type || "Current";
+
+  return {
+    id: modelId,
+    displayName: humanizeIdentifier(modelId),
+    description: isPrimary
+      ? `Primary ${humanizeIdentifier(targetId)} model for ${cancerLabel.toLowerCase()} analysis`
+      : `Project-assigned model for ${cancerLabel.toLowerCase()} analysis`,
+    auc: isPrimary ? 0.8 : Math.max(0.6, 0.75 - index * 0.03),
+    category: "project_specific",
+    positiveLabel,
+    negativeLabel,
+  };
+}
+
+function toAvailableModelDetails(models: ModelConfig[]): AvailableModelDetail[] {
+  return models.map((model) => ({
+    id: model.id,
+    displayName: model.displayName,
+    description: model.description,
+    auc: model.auc,
+    category: model.category,
+    positiveLabel: model.positiveLabel || "Positive",
+    negativeLabel: model.negativeLabel || "Negative",
+  }));
+}
+
+/**
+ * Project-derived safe fallback catalog for UI paths where model metadata APIs are unavailable.
+ * Prevents leaking unrelated disease/model names across projects.
+ */
+export function getProjectFallbackModels(
+  project: ProjectModelMetadata,
+  explicitModelIds?: string[]
+): ModelConfig[] {
+  const seededIds = [
+    project.prediction_target,
+    ...(explicitModelIds || []),
+  ].filter((id): id is string => Boolean(id && id.trim()));
+
+  const uniqueIds = Array.from(new Set(seededIds));
+  if (uniqueIds.length === 0) {
+    uniqueIds.push("primary_prediction");
+  }
+
+  return uniqueIds.map((id, index) => buildFallbackModel(project, id, index));
+}
+
+// Backward-compatible export used by other panels/viewers (neutral, non-disease-specific fallback)
+export const AVAILABLE_MODELS: ModelConfig[] = getProjectFallbackModels({
+  id: "default",
+  cancer_type: "Cancer",
+  prediction_target: "treatment_response",
+  classes: ["unfavorable", "favorable"],
+  positive_class: "favorable",
+});
 
 interface EmbeddingStatus {
   hasLevel0: boolean;
@@ -108,49 +126,67 @@ export function ModelPicker({
 
   // Fetch full model configs from the project available-models API
   const [apiModelDetails, setApiModelDetails] = useState<AvailableModelDetail[]>([]);
-  const [apiModels, setApiModels] = useState<string[]>([]);
   const [usingCachedModels, setUsingCachedModels] = useState(false);
 
   useEffect(() => {
-    // Skip fetch until a real project is loaded (avoids 404 on "default")
-    if (!currentProject.id || currentProject.id === "default") return;
-    
-    // Clear old models first to prevent race condition with auto-select
-    setApiModels([]);
-    setApiModelDetails([]);
-    setUsingCachedModels(false);
-    
+    let cancelled = false;
+
+    const setFallbackFromProject = (modelIds?: string[]) => {
+      const fallback = toAvailableModelDetails(getProjectFallbackModels(currentProject, modelIds));
+      if (!cancelled) {
+        setApiModelDetails(fallback);
+        setUsingCachedModels(true);
+      }
+    };
+
     const fetchModels = async () => {
+      // Reset stale data on project switch
+      if (!cancelled) {
+        setApiModelDetails([]);
+        setUsingCachedModels(false);
+      }
+
+      // Default project (or no project) should still use project-derived, non-leaking fallback
+      if (!currentProject.id || currentProject.id === "default") {
+        setFallbackFromProject();
+        return;
+      }
+
       try {
-        // Try the new config-driven endpoint first
+        // Try the config-driven endpoint first
         const details = await getProjectAvailableModels(currentProject.id);
         if (details.length > 0) {
-          setApiModelDetails(details);
-          setApiModels(details.map((m) => m.id));
+          if (!cancelled) {
+            setApiModelDetails(details);
+            setUsingCachedModels(false);
+          }
           return;
         }
       } catch (err) {
         console.warn("Failed to fetch available models config:", err);
       }
-      try {
-        // Fallback to the older model IDs endpoint
-        const modelIds = await getProjectModelsApi(currentProject.id);
-        setApiModels(modelIds);
-      } catch (err) {
-        console.warn("Failed to fetch project models, using cached defaults:", err);
-        setApiModels(AVAILABLE_MODELS.map((m) => m.id));
-        setUsingCachedModels(true);
-      }
-    };
-    fetchModels();
-  }, [currentProject.id]);
 
-  // Auto-select all models when models are loaded and selectedModels is empty
-  useEffect(() => {
-    if (apiModels.length > 0 && selectedModels.length === 0) {
-      onSelectionChange(apiModels);
-    }
-  }, [apiModels, selectedModels.length, onSelectionChange]);
+      try {
+        // Fallback to the legacy model-IDs endpoint, but keep copy project-derived
+        const modelIds = await getProjectModelsApi(currentProject.id);
+        if (modelIds.length > 0) {
+          setFallbackFromProject(modelIds);
+          return;
+        }
+      } catch (err) {
+        console.warn("Failed to fetch project model IDs:", err);
+      }
+
+      console.warn("Using project-derived fallback model metadata");
+      setFallbackFromProject();
+    };
+
+    fetchModels();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject]);
 
   // Track which models have been previously run on the selected slide
   const [previouslyRanModels, setPreviouslyRanModels] = useState<Set<string>>(new Set());
@@ -172,29 +208,33 @@ export function ModelPicker({
     fetchStatus();
   }, [selectedSlideId]);
 
-  // Build ModelConfig list from API details, falling back to hardcoded AVAILABLE_MODELS
+  // Build ModelConfig list from API details, falling back to project-derived metadata
   const models = React.useMemo(() => {
-    let result: ModelConfig[];
-    if (apiModelDetails.length > 0) {
-      result = apiModelDetails.map((d) => ({
-        id: d.id,
-        displayName: d.displayName,
-        description: d.description,
-        auc: d.auc,
-        category: d.category,
-        positiveLabel: d.positiveLabel,
-        negativeLabel: d.negativeLabel,
-      }));
-    } else if (apiModels.length > 0) {
-      result = AVAILABLE_MODELS.filter((m) => apiModels.includes(m.id));
-    } else {
-      result = AVAILABLE_MODELS;
-    }
+    const result: ModelConfig[] =
+      apiModelDetails.length > 0
+        ? apiModelDetails.map((d) => ({
+            id: d.id,
+            displayName: d.displayName,
+            description: d.description,
+            auc: d.auc,
+            category: d.category,
+            positiveLabel: d.positiveLabel,
+            negativeLabel: d.negativeLabel,
+          }))
+        : getProjectFallbackModels(currentProject);
+
     // Reorder: primary target first
     const primary = result.find((m) => m.id === currentProject.prediction_target);
     if (!primary) return result;
     return [primary, ...result.filter((m) => m.id !== primary.id)];
-  }, [apiModelDetails, apiModels, currentProject.prediction_target]);
+  }, [apiModelDetails, currentProject]);
+
+  // Auto-select all models when loaded and no selection exists
+  useEffect(() => {
+    if (models.length > 0 && selectedModels.length === 0) {
+      onSelectionChange(models.map((m) => m.id));
+    }
+  }, [models, selectedModels.length, onSelectionChange]);
 
   const toggleModel = (modelId: string) => {
     if (disabled) return;

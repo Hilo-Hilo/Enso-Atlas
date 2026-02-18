@@ -83,3 +83,16 @@ export function getContrastColor(hexColor: string): "black" | "white" {
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return luminance > 0.5 ? "black" : "white";
 }
+
+// Humanize snake_case / kebab-case identifiers for UI labels
+export function humanizeIdentifier(identifier?: string | null): string {
+  if (!identifier) return "Prediction";
+  const normalized = identifier
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return "Prediction";
+
+  return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
+}
