@@ -30,7 +30,7 @@ from collections import deque
 import numpy as np
 from PIL import Image
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks, Query, Request
 from .slide_metadata import SlideMetadataManager, create_metadata_router
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, Response
@@ -4331,12 +4331,13 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             logger.error(f"Failed to load WSI {slide_path}: {e}")
             return None
 
-    @app.get("/api/slides/{slide_id}/dzi")
+    @app.api_route("/api/slides/{slide_id}/dzi", methods=["GET", "HEAD"])
     async def get_dzi_descriptor(
+        request: Request,
         slide_id: str,
         project_id: Optional[str] = Query(None, description="Optional project id to resolve project-specific WSI paths"),
     ):
-        """Get Deep Zoom Image descriptor (XML) for OpenSeadragon."""
+        """Get/HEAD Deep Zoom Image descriptor for OpenSeadragon."""
         result = get_slide_and_dz(slide_id, project_id=project_id)
         if result is None:
             raise HTTPException(
@@ -4346,6 +4347,17 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     "message": f"WSI file not found for slide {slide_id}",
                     "slide_id": slide_id,
                     "has_wsi": False,
+                },
+            )
+
+        # HEAD preflight should only confirm availability
+        if request.method == "HEAD":
+            from fastapi.responses import Response
+            return Response(
+                status_code=200,
+                headers={
+                    "Content-Type": "application/xml",
+                    "Cache-Control": "public, max-age=3600",
                 },
             )
 
@@ -4365,25 +4377,6 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             content=dzi_xml,
             media_type="application/xml",
             headers={"Content-Disposition": f"inline; filename={slide_id}.dzi"}
-        )
-
-    @app.head("/api/slides/{slide_id}/dzi")
-    async def head_dzi_descriptor(
-        slide_id: str,
-        project_id: Optional[str] = Query(None, description="Optional project id to resolve project-specific WSI paths"),
-    ):
-        """HEAD preflight for DZI availability (used by frontend WSI pre-check)."""
-        result = get_slide_and_dz(slide_id, project_id=project_id)
-        if result is None:
-            raise HTTPException(status_code=404, detail="WSI not found")
-
-        from fastapi.responses import Response
-        return Response(
-            status_code=200,
-            headers={
-                "Content-Type": "application/xml",
-                "Cache-Control": "public, max-age=3600",
-            },
         )
 
     @app.get("/api/slides/{slide_id}/dzi_files/{level}/{tile_spec}")
