@@ -98,7 +98,7 @@ class ReportTaskManager:
             "slide_id": slide_id,
             "report_json": {
                 "case_id": slide_id,
-                "task": "Bevacizumab treatment response prediction from H&E histopathology",
+                "task": "Prediction from H&E histopathology",
                 "model_output": {
                     "label": "unknown",
                     "probability": 0.5,

@@ -167,27 +167,29 @@ class ChatManager:
                 )
                 context.predictions = results.get("predictions", {})
                 
-                # Extract top evidence
-                for model_id in ["platinum_sensitivity", "tumor_grade", "survival_5y"]:
-                    if model_id in context.predictions and "attention" in context.predictions[model_id]:
-                        attention = np.array(context.predictions[model_id]["attention"])
-                        top_k = min(8, len(attention))
-                        top_indices = np.argsort(attention)[-top_k:][::-1]
-                        
-                        # Load coordinates
-                        coord_path = self.embeddings_dir / f"{slide_id}_coords.npy"
-                        coords = np.load(coord_path) if coord_path.exists() else None
-                        
-                        for i, idx in enumerate(top_indices):
-                            evidence = {
-                                "rank": i + 1,
-                                "patch_index": int(idx),
-                                "attention_weight": float(attention[idx]),
-                            }
-                            if coords is not None and idx < len(coords):
-                                evidence["coordinates"] = [int(coords[idx][0]), int(coords[idx][1])]
-                            context.top_evidence.append(evidence)
-                        break
+                # Extract top evidence from any model that has attention
+                evidence_models = list(context.predictions.keys())
+                for model_id in evidence_models:
+                    if "attention" not in context.predictions[model_id]:
+                        continue
+                    attention = np.array(context.predictions[model_id]["attention"])
+                    top_k = min(8, len(attention))
+                    top_indices = np.argsort(attention)[-top_k:][::-1]
+                    
+                    # Load coordinates
+                    coord_path = self.embeddings_dir / f"{slide_id}_coords.npy"
+                    coords = np.load(coord_path) if coord_path.exists() else None
+                    
+                    for i, idx in enumerate(top_indices):
+                        evidence = {
+                            "rank": i + 1,
+                            "patch_index": int(idx),
+                            "attention_weight": float(attention[idx]),
+                        }
+                        if coords is not None and idx < len(coords):
+                            evidence["coordinates"] = [int(coords[idx][0]), int(coords[idx][1])]
+                        context.top_evidence.append(evidence)
+                    break
                         
             except Exception as e:
                 logger.warning(f"Multi-model inference failed: {e}")
@@ -237,10 +239,10 @@ class ChatManager:
         """
         q_lower = question.lower()
         
-        # Get primary prediction for context
+        # Get primary prediction for context (prefer treatment models, then any)
         primary_pred = None
-        for model_id in ["platinum_sensitivity", "tumor_grade", "survival_5y"]:
-            if model_id in context.predictions and "error" not in context.predictions.get(model_id, {}):
+        for model_id in list(context.predictions.keys()):
+            if "error" not in context.predictions.get(model_id, {}):
                 primary_pred = context.predictions[model_id]
                 break
         
@@ -298,16 +300,32 @@ Patients with favorable treatment response typically have better outcomes. Howev
         
         # === TREATMENT RESPONSE QUESTIONS ===
         if any(word in q_lower for word in ["treatment", "response", "platinum", "chemo", "sensitive", "resistant"]):
-            if "platinum_sensitivity" in context.predictions:
-                pred = context.predictions["platinum_sensitivity"]
+            # Find the primary treatment response model dynamically
+            treatment_keys = ["platinum_sensitivity", "treatment_response", "bevacizumab_response"]
+            pred = None
+            pred_model_name = "Treatment Response"
+            for key in treatment_keys:
+                if key in context.predictions and "error" not in context.predictions.get(key, {}):
+                    pred = context.predictions[key]
+                    pred_model_name = pred.get("model_name", key.replace("_", " ").title())
+                    break
+            # Fallback to first non-error prediction
+            if pred is None:
+                for v in context.predictions.values():
+                    if "error" not in v:
+                        pred = v
+                        pred_model_name = pred.get("model_name", "Treatment Response")
+                        break
+            
+            if pred is not None:
                 if "error" in pred:
-                    return f"Error in platinum sensitivity model: {pred.get('error')}"
+                    return f"Error in {pred_model_name} model: {pred.get('error')}"
                 
                 score = pred.get("score", 0.5)
                 label = pred.get("label", "unknown")
                 confidence = pred.get("confidence", 0)
                 
-                response = f"**Platinum Sensitivity Prediction:**\n\n"
+                response = f"**{pred_model_name} Prediction:**\n\n"
                 response += f"The model predicts **{label.upper()}** with {score:.1%} probability.\n\n"
                 
                 if confidence > 0.6:
@@ -326,7 +344,7 @@ Patients with favorable treatment response typically have better outcomes. Howev
                 
                 return response
             
-            return "Platinum sensitivity model not available. Please run analysis first."
+            return "Treatment response model not available. Please run analysis first."
         
         # === EVIDENCE / REGION QUESTIONS ===
         if any(word in q_lower for word in ["evidence", "region", "area", "attention", "patch", "show me", "where"]):
@@ -452,7 +470,7 @@ Patients with favorable treatment response typically have better outcomes. Howev
         return """I can help you understand this slide analysis. Try asking about:
 
 • **Prognosis**: "What is the prognosis?"
-• **Treatment response**: "What is the predicted platinum response?"
+• **Treatment response**: "What is the predicted treatment response?"
 • **Evidence regions**: "Show me the high-attention areas"
 • **Similar cases**: "How does this compare to similar cases?"
 • **Reasoning**: "Why was this prediction made?"

@@ -2163,7 +2163,7 @@ def create_app(
             if result["prediction"] == "RESPONDER":
                 clinical_recommendation = (
                     "Model shows high confidence in RESPONDER prediction. "
-                    "Consider proceeding with bevacizumab treatment evaluation."
+                    "Consider proceeding with treatment evaluation based on clinical context."
                 )
             else:
                 clinical_recommendation = (
@@ -2520,6 +2520,13 @@ def create_app(
         except Exception as e:
             logger.warning(f"Could not compute quality metrics: {e}")
 
+        # Look up cancer type from project config (used by both decision support and MedGemma)
+        cancer_type = "Cancer"  # Default fallback
+        if request.project_id and project_registry:
+            proj_cfg = project_registry.get_project(request.project_id)
+            if proj_cfg:
+                cancer_type = proj_cfg.cancer_type if hasattr(proj_cfg, 'cancer_type') else proj_cfg.get("cancer_type", "Cancer")
+
         # Generate clinical decision support
         decision_support_data = None
         if decision_support is not None:
@@ -2530,6 +2537,7 @@ def create_app(
                     similar_cases=similar_cases,
                     quality_metrics=quality_metrics,
                     patient_context=patient_ctx,
+                    cancer_type=cancer_type,
                 )
                 decision_support_data = decision_support.to_dict(ds_output)
                 logger.info(f"Generated decision support for {slide_id}: risk_level={ds_output.risk_level.value}")
@@ -2545,13 +2553,6 @@ def create_app(
                     timeout_s = 120.0
                 # Allow generous timeout for CPU inference (120s gen + 60s buffer)
                 timeout_s = max(10.0, float(timeout_s) + 60.0)
-
-                # Look up cancer type from project config
-                cancer_type = "Cancer"  # Default fallback
-                if request.project_id and project_registry:
-                    proj_cfg = project_registry.get_project(request.project_id)
-                    if proj_cfg:
-                        cancer_type = proj_cfg.get("cancer_type", proj_cfg.get("display_name", "Cancer"))
 
                 report = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -2625,20 +2626,20 @@ def create_app(
                 ],
             }
             
-            # Significance based on label prediction
+            # Significance based on label prediction (generic - not cancer-type specific)
             significance_templates = {
                 "responder": {
-                    "tumor": "Tumor morphology patterns in this region are associated with better bevacizumab response in the training cohort",
-                    "stroma": "Stromal composition in this area correlates with improved anti-angiogenic therapy outcomes",
+                    "tumor": "Tumor morphology patterns in this region are associated with favorable outcomes in the training cohort",
+                    "stroma": "Stromal composition in this area correlates with improved treatment outcomes",
                     "inflammatory": "Inflammatory infiltrate pattern suggests favorable tumor microenvironment for treatment response",
-                    "necrosis": "Necrotic pattern may indicate pre-existing vascular compromise potentially responsive to anti-angiogenic therapy",
+                    "necrosis": "Necrotic pattern may indicate tissue changes relevant to prognosis",
                     "normal": "Preserved tissue architecture in adjacent regions may indicate better overall tissue health",
                 },
                 "non-responder": {
-                    "tumor": "Tumor morphology in this region shows patterns associated with resistance to anti-angiogenic therapy",
+                    "tumor": "Tumor morphology in this region shows patterns associated with less favorable outcomes",
                     "stroma": "Stromal characteristics suggest possible treatment resistance mechanisms",
-                    "inflammatory": "Inflammatory pattern may indicate tumor microenvironment less responsive to bevacizumab",
-                    "necrosis": "Necrotic patterns in this configuration are associated with poor treatment outcomes",
+                    "inflammatory": "Inflammatory pattern may indicate tumor microenvironment associated with less favorable response",
+                    "necrosis": "Necrotic patterns in this configuration are associated with less favorable outcomes",
                     "normal": "Limited tumor involvement in this area provides context for overall assessment",
                 },
             }
@@ -2673,7 +2674,7 @@ def create_app(
         
         report_json = {
             "case_id": slide_id,
-            "task": "Bevacizumab treatment response prediction from H&E histopathology",
+            "task": f"{cancer_type} prediction from H&E histopathology",
             "patient_context": patient_ctx,
             "model_output": {
                 "label": label,
@@ -2741,9 +2742,9 @@ regions that contributed most significantly to the prediction.
 
 Key morphological features observed in high-attention regions include: {tissue_summary}.
 
-{"RESPONDER INTERPRETATION" if label == "responder" else "NON-RESPONDER INTERPRETATION"}
+{"POSITIVE INTERPRETATION" if label == "responder" else "NEGATIVE INTERPRETATION"}
 ---------------------------------
-{"The morphological patterns identified by the model suggest features associated with favorable response to bevacizumab-based anti-angiogenic therapy in the training cohort. These patterns may include specific tumor architecture, stromal characteristics, or inflammatory infiltrate distributions that have been correlated with treatment response." if label == "responder" else "The morphological patterns identified by the model suggest features associated with reduced response to bevacizumab-based anti-angiogenic therapy in the training cohort. Alternative treatment strategies may warrant consideration pending further clinical evaluation."}
+{"The morphological patterns identified by the model suggest features associated with the positive class in the training cohort. These patterns may include specific tumor architecture, stromal characteristics, or inflammatory infiltrate distributions that have been correlated with the predicted outcome." if label == "responder" else "The morphological patterns identified by the model suggest features associated with the negative class in the training cohort. Further clinical evaluation is recommended to determine appropriate treatment strategies."}
 
 SIMILAR CASES
 -------------
@@ -2954,6 +2955,7 @@ should incorporate all available clinical, pathological, and molecular data."""
                         similar_cases=similar_cases,
                         quality_metrics=quality_metrics,
                         patient_context=patient_ctx,
+                        cancer_type=cancer_type,
                     )
                     decision_support_data = decision_support.to_dict(ds_output)
                 except Exception as e:
@@ -3069,7 +3071,7 @@ should incorporate all available clinical, pathological, and molecular data."""
                 )
                 report_json = _create_template_report(
                     slide_id, label, float(score), evidence_patches, 
-                    similar_cases, patient_ctx, decision_support_data
+                    similar_cases, patient_ctx, decision_support_data, cancer_type
                 )
                 summary_text = _create_template_summary(
                     slide_id, label, float(score), len(embeddings),
@@ -3108,11 +3110,11 @@ should incorporate all available clinical, pathological, and molecular data."""
                 message=f"Report generation failed: {str(e)}"
             )
     
-    def _create_template_report(slide_id, label, score, evidence_patches, similar_cases, patient_ctx, decision_support_data):
+    def _create_template_report(slide_id, label, score, evidence_patches, similar_cases, patient_ctx, decision_support_data, cancer_type="Cancer"):
         """Create a fallback template report."""
         return {
             "case_id": slide_id,
-            "task": "Bevacizumab treatment response prediction from H&E histopathology",
+            "task": f"{cancer_type} prediction from H&E histopathology",
             "patient_context": patient_ctx,
             "model_output": {
                 "label": label,

@@ -15,7 +15,7 @@ import type {
 export const mockSlides: SlideInfo[] = [
   {
     id: "slide-001",
-    filename: "ovarian_sample_001.svs",
+    filename: "sample_001.svs",
     dimensions: { width: 45056, height: 32768 },
     magnification: 40,
     mpp: 0.25,
@@ -24,7 +24,7 @@ export const mockSlides: SlideInfo[] = [
   },
   {
     id: "slide-002",
-    filename: "ovarian_sample_002.svs",
+    filename: "sample_002.svs",
     dimensions: { width: 40960, height: 28672 },
     magnification: 40,
     mpp: 0.25,
@@ -59,7 +59,7 @@ export const mockEvidencePatches: EvidencePatch[] = [
     coordinates: { x: 12500, y: 8750, level: 0, width: 224, height: 224 },
     attentionWeight: 0.92,
     thumbnailUrl: "/api/placeholder/patch",
-    morphologyDescription: "High-grade serous carcinoma with papillary architecture",
+    morphologyDescription: "Tumor tissue with atypical morphology",
   },
   {
     id: "patch-002",
@@ -185,7 +185,7 @@ export const mockReport: StructuredReport = {
       morphologyDescription:
         "Dense lymphocytic infiltrate observed at the tumor-stroma interface, suggesting active immune response.",
       whyThisPatchMatters:
-        "Tumor-infiltrating lymphocytes are a positive prognostic factor associated with platinum-based chemotherapy sensitivity.",
+        "Tumor-infiltrating lymphocytes are a positive prognostic factor associated with treatment sensitivity.",
     },
     {
       patchId: "patch-003",
@@ -193,7 +193,7 @@ export const mockReport: StructuredReport = {
       morphologyDescription:
         "Region shows necrotic debris with surrounding viable tumor cells and inflammatory infiltrate.",
       whyThisPatchMatters:
-        "The pattern of necrosis distribution may indicate tumor microenvironment characteristics relevant to platinum sensitivity.",
+        "The pattern of necrosis distribution may indicate tumor microenvironment characteristics relevant to treatment sensitivity.",
     },
   ],
   similarExamples: [
@@ -222,17 +222,17 @@ export const mockReport: StructuredReport = {
 
 Case ID: slide-001
 Analysis Date: ${new Date().toLocaleDateString()}
-Task: Platinum Sensitivity Prediction
+Task: Treatment Response Prediction
 
 PREDICTION:
-The model predicts this case as "Platinum Sensitive" with high confidence (probability: 78%).
+The model predicts this case as "Sensitive" with high confidence (probability: 78%).
 
 KEY FINDINGS:
-The analysis identified several morphological features associated with platinum sensitivity:
+The analysis identified several morphological features associated with treatment sensitivity:
 
 1. Prominent papillary architecture with high-grade nuclear features in the primary tumor regions
 2. Significant tumor-infiltrating lymphocyte presence at the tumor-stromal interface
-3. Characteristic necrosis pattern that may indicate tumor microenvironment susceptibility to platinum-based chemotherapy
+3. Characteristic necrosis pattern that may indicate tumor microenvironment susceptibility to treatment
 
 SUPPORTING EVIDENCE:
 The model identified 6 high-attention regions that contributed most to this prediction. The top 3 evidence patches showed morphological patterns including papillary carcinoma architecture, immune infiltration, and necrosis distribution that align with sensitive cases in the reference cohort.

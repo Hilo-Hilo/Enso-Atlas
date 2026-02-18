@@ -118,42 +118,99 @@ class DecisionSupportOutput:
 
 class ClinicalDecisionSupport:
     """
-    Clinical decision support engine for platinum-based therapy response prediction.
+    Clinical decision support engine for treatment response prediction.
     
     Generates actionable guidance based on:
     - Model prediction and confidence
     - Slide quality metrics
     - Similar case outcomes
-    - NCCN clinical guidelines for ovarian cancer
+    - Cancer-type-specific clinical guidelines
     """
     
-    # NCCN ovarian cancer guideline references
-    NCCN_GUIDELINES = {
-        "platinum_sensitive": {
-            "source": "NCCN Guidelines for Ovarian Cancer",
-            "section": "Recurrent Disease - Platinum-Sensitive",
-            "recommendation": "Consider platinum-based combination therapy for platinum-sensitive recurrence (>6 months since last platinum therapy)",
-            "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1453"
+    # NCCN guideline references by cancer type
+    NCCN_GUIDELINES_BY_CANCER = {
+        "ovarian_cancer": {
+            "positive": {
+                "source": "NCCN Guidelines for Ovarian Cancer",
+                "section": "Recurrent Disease - Platinum-Sensitive",
+                "recommendation": "Consider platinum-based combination therapy for platinum-sensitive recurrence (>6 months since last platinum therapy)",
+                "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1453"
+            },
+            "negative": {
+                "source": "NCCN Guidelines for Ovarian Cancer", 
+                "section": "Recurrent Disease - Platinum-Resistant",
+                "recommendation": "Consider non-platinum single agents, targeted therapy, or clinical trial enrollment for platinum-resistant disease (<6 months)",
+                "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1453"
+            },
+            "molecular_testing": {
+                "source": "NCCN Guidelines for Ovarian Cancer",
+                "section": "Principles of Pathology Review",
+                "recommendation": "Germline and somatic testing for BRCA1/2, HRD status recommended for treatment planning",
+                "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1453"
+            },
+            "targeted_therapy": {
+                "source": "NCCN Guidelines for Ovarian Cancer",
+                "section": "Systemic Therapy for Recurrent Disease",
+                "recommendation": "Bevacizumab may be added to chemotherapy in platinum-sensitive or platinum-resistant settings",
+                "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1453"
+            }
         },
-        "platinum_resistant": {
-            "source": "NCCN Guidelines for Ovarian Cancer", 
-            "section": "Recurrent Disease - Platinum-Resistant",
-            "recommendation": "Consider non-platinum single agents, targeted therapy, or clinical trial enrollment for platinum-resistant disease (<6 months)",
-            "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1453"
+        "lung_cancer": {
+            "positive": {
+                "source": "NCCN Guidelines for Non-Small Cell Lung Cancer",
+                "section": "Treatment of Stage III/IV Disease",
+                "recommendation": "Consider systemic therapy based on stage, molecular profile, and performance status",
+                "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1450"
+            },
+            "negative": {
+                "source": "NCCN Guidelines for Non-Small Cell Lung Cancer",
+                "section": "Treatment of Stage I/II Disease",
+                "recommendation": "Consider surgical resection with or without adjuvant therapy for early-stage disease",
+                "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1450"
+            },
+            "molecular_testing": {
+                "source": "NCCN Guidelines for Non-Small Cell Lung Cancer",
+                "section": "Principles of Molecular and Biomarker Analysis",
+                "recommendation": "Broad molecular profiling (EGFR, ALK, ROS1, BRAF, KRAS, PD-L1) recommended for advanced disease",
+                "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1450"
+            },
+            "targeted_therapy": {
+                "source": "NCCN Guidelines for Non-Small Cell Lung Cancer",
+                "section": "Targeted Therapy",
+                "recommendation": "Targeted therapy selection based on actionable mutations (EGFR, ALK, ROS1, BRAF, MET, RET, NTRK, KRAS G12C)",
+                "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1450"
+            }
         },
-        "molecular_testing": {
-            "source": "NCCN Guidelines for Ovarian Cancer",
-            "section": "Principles of Pathology Review",
-            "recommendation": "Germline and somatic testing for BRCA1/2, HRD status recommended for treatment planning",
-            "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1453"
-        },
-        "bevacizumab": {
-            "source": "NCCN Guidelines for Ovarian Cancer",
-            "section": "Systemic Therapy for Recurrent Disease",
-            "recommendation": "Bevacizumab may be added to chemotherapy in platinum-sensitive or platinum-resistant settings",
-            "url": "https://www.nccn.org/guidelines/guidelines-detail?category=1&id=1453"
+        "default": {
+            "positive": {
+                "source": "NCCN Guidelines",
+                "section": "Treatment Recommendations",
+                "recommendation": "Consider treatment options based on pathological staging and molecular profile",
+                "url": "https://www.nccn.org/guidelines"
+            },
+            "negative": {
+                "source": "NCCN Guidelines",
+                "section": "Treatment Recommendations",
+                "recommendation": "Review staging and consider alternative treatment approaches",
+                "url": "https://www.nccn.org/guidelines"
+            },
+            "molecular_testing": {
+                "source": "NCCN Guidelines",
+                "section": "Biomarker Testing",
+                "recommendation": "Molecular profiling may identify additional treatment options",
+                "url": "https://www.nccn.org/guidelines"
+            },
+            "targeted_therapy": {
+                "source": "NCCN Guidelines",
+                "section": "Targeted Therapy",
+                "recommendation": "Consider targeted therapy if actionable mutations are identified",
+                "url": "https://www.nccn.org/guidelines"
+            }
         }
     }
+    
+    # Legacy mapping for backwards compatibility
+    NCCN_GUIDELINES = NCCN_GUIDELINES_BY_CANCER["ovarian_cancer"]
     
     # Confidence thresholds
     HIGH_CONFIDENCE_THRESHOLD = 0.8
@@ -244,18 +301,21 @@ class ClinicalDecisionSupport:
         prediction: str,
         risk_level: RiskLevel,
         confidence_score: float,
-        similar_outcomes: SimilarCaseOutcomes
+        similar_outcomes: SimilarCaseOutcomes,
+        cancer_type: str = "default",
     ) -> tuple[str, List[str]]:
         """Generate primary recommendation and supporting rationale."""
         
         is_responder = "responder" in prediction.lower() and "non" not in prediction.lower()
+        # Also check for positive class indicators
+        is_positive = is_responder or any(x in prediction.lower() for x in ["positive", "sensitive", "favorable", "high"])
         
         rationale = []
         
         if risk_level == RiskLevel.HIGH_CONFIDENCE:
-            if is_responder:
+            if is_positive:
                 recommendation = (
-                    "Morphological patterns suggest favorable response to platinum-based therapy. "
+                    "Morphological patterns suggest favorable treatment response. "
                     "Consider in context of complete clinical evaluation."
                 )
                 rationale = [
@@ -269,7 +329,7 @@ class ClinicalDecisionSupport:
                     )
             else:
                 recommendation = (
-                    "Morphological patterns suggest potential platinum resistance. "
+                    "Morphological patterns suggest potential treatment resistance. "
                     "Consider alternative regimens or molecular profiling for targeted options."
                 )
                 rationale = [
@@ -325,24 +385,26 @@ class ClinicalDecisionSupport:
         self,
         prediction: str,
         risk_level: RiskLevel,
-        quality: QualityFactors
+        quality: QualityFactors,
+        cancer_type: str = "default",
     ) -> List[str]:
         """Generate alternative considerations for clinical discussion."""
         alternatives = []
         
         is_responder = "responder" in prediction.lower() and "non" not in prediction.lower()
+        is_positive = is_responder or any(x in prediction.lower() for x in ["positive", "sensitive", "favorable"])
         
         if risk_level in [RiskLevel.MODERATE_CONFIDENCE, RiskLevel.LOW_CONFIDENCE]:
             alternatives.append(
                 "Consider clinical trial enrollment if eligible"
             )
         
-        if not is_responder or risk_level != RiskLevel.HIGH_CONFIDENCE:
+        if not is_positive or risk_level != RiskLevel.HIGH_CONFIDENCE:
             alternatives.append(
-                "Molecular profiling (BRCA1/2, HRD) may identify targeted therapy options"
+                "Molecular profiling may identify targeted therapy options"
             )
         
-        if is_responder and risk_level == RiskLevel.HIGH_CONFIDENCE:
+        if is_positive and risk_level == RiskLevel.HIGH_CONFIDENCE:
             alternatives.append(
                 "Monitor closely for early signs of resistance during treatment"
             )
@@ -352,9 +414,9 @@ class ClinicalDecisionSupport:
                 "Consider re-evaluation with higher quality tissue section if available"
             )
         
-        if not is_responder:
+        if not is_positive:
             alternatives.append(
-                "Per NCCN guidelines, platinum-resistant disease may benefit from non-platinum agents"
+                "Per NCCN guidelines, treatment-resistant disease may benefit from alternative agents or targeted therapy"
             )
         
         return alternatives
@@ -362,23 +424,37 @@ class ClinicalDecisionSupport:
     def _get_guideline_references(
         self,
         prediction: str,
-        risk_level: RiskLevel
+        risk_level: RiskLevel,
+        cancer_type: str = "default"
     ) -> List[Dict[str, str]]:
-        """Get relevant NCCN guideline references."""
+        """Get relevant NCCN guideline references based on cancer type."""
         references = []
         
-        is_responder = "responder" in prediction.lower() and "non" not in prediction.lower()
-        
-        if is_responder:
-            references.append(self.NCCN_GUIDELINES["platinum_sensitive"])
+        # Normalize cancer type for lookup
+        cancer_key = cancer_type.lower().replace(" ", "_").replace("-", "_")
+        if "ovarian" in cancer_key:
+            cancer_key = "ovarian_cancer"
+        elif "lung" in cancer_key:
+            cancer_key = "lung_cancer"
         else:
-            references.append(self.NCCN_GUIDELINES["platinum_resistant"])
+            cancer_key = "default"
+        
+        guidelines = self.NCCN_GUIDELINES_BY_CANCER.get(cancer_key, self.NCCN_GUIDELINES_BY_CANCER["default"])
+        
+        is_responder = "responder" in prediction.lower() and "non" not in prediction.lower()
+        # Also check for positive class indicators like "advanced", "sensitive", etc.
+        is_positive = is_responder or any(x in prediction.lower() for x in ["positive", "sensitive", "advanced", "high"])
+        
+        if is_positive:
+            references.append(guidelines["positive"])
+        else:
+            references.append(guidelines["negative"])
         
         # Always recommend molecular testing
-        references.append(self.NCCN_GUIDELINES["molecular_testing"])
+        references.append(guidelines["molecular_testing"])
         
-        # Add bevacizumab reference if relevant
-        references.append(self.NCCN_GUIDELINES["bevacizumab"])
+        # Add targeted therapy reference
+        references.append(guidelines["targeted_therapy"])
         
         return references
     
@@ -422,20 +498,32 @@ class ClinicalDecisionSupport:
         self,
         prediction: str,
         risk_level: RiskLevel,
-        quality: QualityFactors
+        quality: QualityFactors,
+        cancer_type: str = "default",
     ) -> List[str]:
         """Generate suggested additional workup."""
         workup = []
         
         is_responder = "responder" in prediction.lower() and "non" not in prediction.lower()
+        is_positive = is_responder or any(x in prediction.lower() for x in ["positive", "sensitive", "favorable"])
+        
+        # Normalize cancer type for specific recommendations
+        cancer_key = cancer_type.lower().replace(" ", "_").replace("-", "_")
+        is_ovarian = "ovarian" in cancer_key
+        is_lung = "lung" in cancer_key
         
         # Always recommend certain baseline evaluations
         if risk_level != RiskLevel.HIGH_CONFIDENCE:
-            workup.append("Molecular profiling for BRCA1/2 mutations and HRD status")
+            if is_ovarian:
+                workup.append("Molecular profiling for BRCA1/2 mutations and HRD status")
+            elif is_lung:
+                workup.append("Broad molecular profiling (EGFR, ALK, ROS1, BRAF, KRAS, PD-L1)")
+            else:
+                workup.append("Molecular profiling to identify actionable mutations")
         
-        if not is_responder:
+        if not is_positive:
             workup.append("Consider tissue-based biomarker testing for targeted therapy eligibility")
-            workup.append("Review treatment history and platinum-free interval")
+            workup.append("Review treatment history and prior therapy intervals")
         
         if risk_level in [RiskLevel.LOW_CONFIDENCE, RiskLevel.INCONCLUSIVE]:
             workup.append("Multidisciplinary tumor board review recommended")
@@ -444,7 +532,13 @@ class ClinicalDecisionSupport:
         if quality.quality_concerns:
             workup.append("Re-section and re-analyze if higher quality tissue available")
         
-        workup.append("Correlate with imaging findings and tumor markers (CA-125)")
+        # Cancer-type-specific tumor markers
+        if is_ovarian:
+            workup.append("Correlate with imaging findings and tumor markers (CA-125)")
+        elif is_lung:
+            workup.append("Correlate with imaging findings and relevant biomarkers")
+        else:
+            workup.append("Correlate with imaging findings and relevant tumor markers")
         
         return workup
     
@@ -480,7 +574,8 @@ class ClinicalDecisionSupport:
         score: float,
         similar_cases: List[Dict[str, Any]],
         quality_metrics: Optional[Dict[str, Any]] = None,
-        patient_context: Optional[Dict[str, Any]] = None
+        patient_context: Optional[Dict[str, Any]] = None,
+        cancer_type: str = "default"
     ) -> DecisionSupportOutput:
         """
         Generate comprehensive clinical decision support.
@@ -491,6 +586,7 @@ class ClinicalDecisionSupport:
             similar_cases: List of similar case dictionaries
             quality_metrics: Optional slide quality metrics
             patient_context: Optional patient clinical context
+            cancer_type: Cancer type for guideline lookup (e.g., "Ovarian Cancer", "Lung Cancer")
             
         Returns:
             DecisionSupportOutput with structured recommendations
@@ -516,20 +612,20 @@ class ClinicalDecisionSupport:
         
         # Generate recommendations
         primary_rec, rationale = self._generate_primary_recommendation(
-            prediction, risk_level, confidence_score, similar_outcomes
+            prediction, risk_level, confidence_score, similar_outcomes, cancer_type
         )
         
         alternatives = self._generate_alternative_considerations(
-            prediction, risk_level, quality
+            prediction, risk_level, quality, cancer_type
         )
         
-        guideline_refs = self._get_guideline_references(prediction, risk_level)
+        guideline_refs = self._get_guideline_references(prediction, risk_level, cancer_type)
         
         uncertainty = self._generate_uncertainty_statement(
             confidence_level, confidence_score, quality
         )
         
-        workup = self._generate_suggested_workup(prediction, risk_level, quality)
+        workup = self._generate_suggested_workup(prediction, risk_level, quality, cancer_type)
         
         interpretation = self._generate_interpretation_note(
             prediction, confidence_score, similar_outcomes

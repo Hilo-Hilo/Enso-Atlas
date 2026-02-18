@@ -770,9 +770,10 @@ class AgentWorkflow:
         label = "unknown"
         score = 0.0
         if state.predictions:
+            # Prefer the project's primary model, then common treatment keys
             preferred_keys = [
-                "bevacizumab_response",
                 "treatment_response",
+                "bevacizumab_response",
                 "platinum_sensitivity",
             ]
             pred = None
@@ -926,13 +927,29 @@ class AgentWorkflow:
         
         # Check for treatment response questions
         if any(word in q_lower for word in ["response", "treatment", "platinum", "sensitive", "resistant", "chemo"]):
-            if "platinum_sensitivity" in state.predictions:
-                pred = state.predictions["platinum_sensitivity"]
+            # Find the primary treatment response model (project-aware)
+            treatment_keys = ["platinum_sensitivity", "treatment_response", "bevacizumab_response"]
+            pred = None
+            pred_model_name = "treatment response"
+            for key in treatment_keys:
+                if key in state.predictions and "error" not in state.predictions[key]:
+                    pred = state.predictions[key]
+                    pred_model_name = pred.get("model_name", key.replace("_", " ").title())
+                    break
+            # Fallback: use first non-error prediction
+            if pred is None:
+                for v in state.predictions.values():
+                    if "error" not in v:
+                        pred = v
+                        pred_model_name = pred.get("model_name", "treatment response")
+                        break
+            
+            if pred is not None:
                 score = pred.get("score", 0.5)
                 label = pred.get("label", "unknown")
                 confidence = pred.get("confidence", 0)
                 
-                response = f"Based on the platinum sensitivity model, the predicted response is **{label.upper()}** "
+                response = f"Based on the {pred_model_name} model, the predicted response is **{label.upper()}** "
                 response += f"with a probability of {score:.1%}.\n\n"
                 
                 if confidence > 0.6:
@@ -947,18 +964,18 @@ class AgentWorkflow:
                     resp_count = sum(1 for c in state.similar_cases if c.get("label") == "responder")
                     non_resp = len(state.similar_cases) - resp_count
                     response += f"\nAmong {len(state.similar_cases)} morphologically similar cases:\n"
-                    response += f"• {resp_count} were platinum responders\n"
+                    response += f"• {resp_count} were responders\n"
                     response += f"• {non_resp} were non-responders\n"
                     
-                    if resp_count > non_resp and label == "responder":
+                    if resp_count > non_resp and "responder" in label.lower():
                         response += "\nThis aligns with the model prediction."
-                    elif resp_count < non_resp and label == "non-responder":
+                    elif resp_count < non_resp and "non" in label.lower():
                         response += "\nThis aligns with the model prediction."
                     else:
                         response += "\nNote: Similar cases show mixed outcomes."
                 
                 return response
-            return "Platinum sensitivity model not available for this analysis."
+            return "Treatment response model not available for this analysis."
         
         # Check for why/reasoning questions
         if any(word in q_lower for word in ["why", "reason", "explain", "how did"]):
@@ -1046,39 +1063,54 @@ class AgentWorkflow:
         
         # Check for alternative treatment questions
         if any(word in q_lower for word in ["alternative", "other treatment", "instead", "option"]):
-            if "platinum_sensitivity" in state.predictions:
-                pred = state.predictions["platinum_sensitivity"]
-                if pred.get("label") == "non-responder":
-                    return """For predicted platinum-resistant cases, alternative strategies may include:
+            # Find any treatment response prediction
+            treatment_pred = None
+            for key in ["platinum_sensitivity", "treatment_response", "bevacizumab_response"]:
+                if key in state.predictions and "error" not in state.predictions[key]:
+                    treatment_pred = state.predictions[key]
+                    break
+            if treatment_pred is None:
+                for v in state.predictions.values():
+                    if "error" not in v:
+                        treatment_pred = v
+                        break
+            
+            if treatment_pred is not None:
+                label = treatment_pred.get("label", "unknown").lower()
+                is_negative = "non" in label or "resistant" in label or "negative" in label or "poor" in label
+                
+                if is_negative:
+                    return """For predicted treatment-resistant cases, alternative strategies may include:
 
-**First-line alternatives:**
-• PARP inhibitors (if BRCA mutation or HRD positive)
-• Bevacizumab-containing regimens
-• Weekly paclitaxel
-
-**Second-line options:**
-• Pegylated liposomal doxorubicin
-• Topotecan
-• Gemcitabine
+**Consider:**
+• Targeted therapy based on molecular profiling results
+• Immunotherapy if eligible based on biomarker status
+• Clinical trial enrollment
+• Alternative chemotherapy regimens
 
 Treatment decisions should be made by the multidisciplinary tumor board considering:
-• BRCA/HRD status
+• Molecular profiling results
 • Prior treatment history
 • Performance status
-• Patient preferences"""
+• Patient preferences
+
+⚠️ This is a research tool — consult with the clinical team for treatment planning."""
                 else:
-                    return """For predicted platinum-sensitive cases, standard platinum-based chemotherapy remains the recommended approach:
+                    return """For predicted treatment-responsive cases, standard therapy may be appropriate:
 
-**Standard regimens:**
-• Carboplatin + Paclitaxel (most common)
-• Carboplatin + Docetaxel
-• Cisplatin-based regimens (selected cases)
+**Consider:**
+• Standard-of-care chemotherapy regimen for this cancer type
+• Maintenance therapy based on molecular profile
+• Regular monitoring for treatment response
 
-Consider adding maintenance therapy:
-• PARP inhibitors (if BRCA/HRD positive)
-• Bevacizumab maintenance
+Treatment decisions should incorporate:
+• Molecular profiling results
+• Clinical staging
+• Patient factors and preferences
 
-The prediction suggests favorable response to platinum agents."""
+The prediction suggests favorable treatment response based on morphological patterns.
+
+⚠️ This is a research tool — consult with the clinical team for treatment planning."""
             return "Run analysis first to get treatment recommendations."
         
         # Check for confidence questions
@@ -1112,17 +1144,30 @@ The prediction suggests favorable response to platinum agents."""
         if any(word in q_lower for word in ["differential", "diagnos", "possibilities"]):
             response = "**Differential Considerations Based on Analysis:**\n\n"
             
-            if "platinum_sensitivity" in state.predictions:
-                pred = state.predictions["platinum_sensitivity"]
-                if pred.get("label") == "non-responder":
-                    response += "The morphological patterns suggest potential platinum resistance. Consider:\n\n"
+            # Find any treatment prediction for context
+            treatment_pred = None
+            for key in ["platinum_sensitivity", "treatment_response", "bevacizumab_response"]:
+                if key in state.predictions and "error" not in state.predictions[key]:
+                    treatment_pred = state.predictions[key]
+                    break
+            if treatment_pred is None:
+                for v in state.predictions.values():
+                    if "error" not in v:
+                        treatment_pred = v
+                        break
+            
+            if treatment_pred is not None:
+                label = treatment_pred.get("label", "unknown").lower()
+                is_negative = "non" in label or "resistant" in label or "negative" in label or "poor" in label
+                if is_negative:
+                    response += "The morphological patterns suggest potential treatment resistance. Consider:\n\n"
                     response += "• **Intrinsic resistance**: Pre-existing molecular alterations\n"
                     response += "• **High tumor heterogeneity**: Mixed cell populations\n"
                     response += "• **Mesenchymal features**: EMT-related patterns\n"
                 else:
-                    response += "The morphological patterns suggest platinum sensitivity. Features include:\n\n"
+                    response += "The morphological patterns suggest treatment sensitivity. Features include:\n\n"
                     response += "• **Homogeneous tumor architecture**: Consistent cellular patterns\n"
-                    response += "• **Classic HGSOC morphology**: Typical high-grade features\n"
+                    response += "• **Typical cancer morphology**: Characteristic histological features\n"
             
             if state.similar_cases:
                 response += f"\n**Historical Context:**\n"
@@ -1135,7 +1180,7 @@ The prediction suggests favorable response to platinum agents."""
         # Default response with helpful suggestions
         return """I can help you understand this analysis. Try asking about:
 
-• **Treatment response**: "What is the predicted platinum response?"
+• **Treatment response**: "What is the predicted treatment response?"
 • **Reasoning**: "Why was this prediction made?"
 • **Evidence regions**: "Show me the high-attention areas"
 • **Similar cases**: "How does this compare to similar cases?"
