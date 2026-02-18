@@ -1,19 +1,98 @@
 #!/usr/bin/env python3
 """
 Setup TCGA-LUAD project for Enso Atlas.
-Downloads slide metadata, matches with clinical data, generates labels.
-Uses tumor stage (early vs advanced) as primary endpoint.
+
+Downloads slide metadata, matches with clinical data, and generates labels.
+Primary endpoint: tumor stage (early vs advanced).
 Secondary endpoints: 3-year and 5-year survival.
+
+By default this script writes to the project-scoped dataset root for
+`lung-stage` from config/projects.yaml (data/projects/lung-stage).
 """
 
+from __future__ import annotations
+
+import argparse
 import json
-import sys
 from pathlib import Path
+
 import requests
+import yaml
 
 GDC_FILES_URL = "https://api.gdc.cancer.gov/files"
 GDC_CASES_URL = "https://api.gdc.cancer.gov/cases"
-OUTPUT_DIR = Path(__file__).parent.parent / "data" / "luad"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PROJECT_ID = "lung-stage"
+DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "projects.yaml"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Prepare LUAD project metadata/labels")
+    parser.add_argument(
+        "--project-id",
+        default=DEFAULT_PROJECT_ID,
+        help=f"Project ID in projects.yaml (default: {DEFAULT_PROJECT_ID})",
+    )
+    parser.add_argument(
+        "--projects-config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help="Path to config/projects.yaml",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Override output directory (defaults to dataset root from project config)",
+    )
+    parser.add_argument(
+        "--allow-non-modular-output",
+        action="store_true",
+        help="Allow output outside data/projects/<project_id> (not recommended)",
+    )
+    return parser.parse_args()
+
+
+def _resolve_repo_relative(path_str: str) -> Path:
+    p = Path(path_str)
+    return p if p.is_absolute() else (REPO_ROOT / p)
+
+
+def resolve_output_dir(
+    project_id: str,
+    projects_config: Path,
+    output_override: Path | None,
+) -> Path:
+    """Resolve output root from CLI override or project config."""
+    if output_override is not None:
+        return output_override if output_override.is_absolute() else (REPO_ROOT / output_override)
+
+    if projects_config.exists():
+        with open(projects_config, "r") as f:
+            raw = yaml.safe_load(f) or {}
+        proj = (raw.get("projects") or {}).get(project_id)
+        if proj:
+            dataset = proj.get("dataset") or {}
+            labels_file = dataset.get("labels_file")
+            if labels_file:
+                return _resolve_repo_relative(labels_file).parent
+            slides_dir = dataset.get("slides_dir")
+            if slides_dir:
+                return _resolve_repo_relative(slides_dir).parent
+
+    # Fallback for projects not yet in config
+    return REPO_ROOT / "data" / "projects" / project_id
+
+
+def validate_modular_output_dir(project_id: str, output_dir: Path) -> None:
+    """Fail fast if output path violates per-project modular layout."""
+    expected_root = (REPO_ROOT / "data" / "projects" / project_id).resolve()
+    out = output_dir.resolve()
+    if out != expected_root:
+        raise ValueError(
+            f"Output directory {out} is not project-scoped for '{project_id}'. "
+            f"Expected: {expected_root}"
+        )
 
 
 def get_all_luad_slides():
@@ -54,10 +133,12 @@ def get_all_luad_slides():
 
 def get_clinical_data():
     """Get clinical data: vital status, days_to_death, tumor stage."""
-    filters = json.dumps({
-        "op": "=",
-        "content": {"field": "project.project_id", "value": "TCGA-LUAD"},
-    })
+    filters = json.dumps(
+        {
+            "op": "=",
+            "content": {"field": "project.project_id", "value": "TCGA-LUAD"},
+        }
+    )
 
     all_cases = []
     offset = 0
@@ -130,7 +211,13 @@ def compute_survival_labels(cases, years=5):
 
 
 def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    args = parse_args()
+    output_dir = resolve_output_dir(args.project_id, args.projects_config, args.output_dir)
+    if not args.allow_non_modular_output:
+        validate_modular_output_dir(args.project_id, output_dir)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Using output directory: {output_dir}")
 
     # Get all slides
     slides = get_all_luad_slides()
@@ -155,7 +242,10 @@ def main():
 
     pos = sum(v == 1 for v in stage_labels.values())
     neg = sum(v == 0 for v in stage_labels.values())
-    print(f"\nStage labels: {len(stage_labels)} cases ({neg} early, {pos} advanced, {100*pos/max(len(stage_labels),1):.0f}% advanced)")
+    print(
+        f"\nStage labels: {len(stage_labels)} cases "
+        f"({neg} early, {pos} advanced, {100*pos/max(len(stage_labels),1):.0f}% advanced)"
+    )
 
     pos3 = sum(v == 1 for v in surv3y_labels.values())
     neg3 = sum(v == 0 for v in surv3y_labels.values())
@@ -203,8 +293,11 @@ def main():
         pos_count = sum(v == 1 for v in slide_labels.values())
         neg_count = sum(v == 0 for v in slide_labels.values())
         total = len(slide_labels)
-        print(f"  {label_name}: {total} slides ({pos_count} pos, {neg_count} neg, {100*pos_count/max(total,1):.0f}% pos)")
-        with open(OUTPUT_DIR / filename, "w") as f:
+        print(
+            f"  {label_name}: {total} slides "
+            f"({pos_count} pos, {neg_count} neg, {100*pos_count/max(total,1):.0f}% pos)"
+        )
+        with open(output_dir / filename, "w") as f:
             json.dump(slide_labels, f, indent=2)
         return total
 
@@ -214,20 +307,23 @@ def main():
     save_labels(surv3y_labels, "survival_3y_labels.json", "3Y survival")
 
     # Save download manifest
-    manifest = [{"id": s["file_id"], "filename": s["file_name"], "size_mb": round(s["file_size"]/1e6)} for s in selected_slides]
-    with open(OUTPUT_DIR / "download_manifest.json", "w") as f:
+    manifest = [
+        {"id": s["file_id"], "filename": s["file_name"], "size_mb": round(s["file_size"] / 1e6)}
+        for s in selected_slides
+    ]
+    with open(output_dir / "download_manifest.json", "w") as f:
         json.dump(manifest, f, indent=2)
 
-    with open(OUTPUT_DIR / "file_ids.txt", "w") as f:
+    with open(output_dir / "file_ids.txt", "w") as f:
         for s in selected_slides:
             f.write(s["file_id"] + "\n")
 
-    print(f"\nOutputs in {OUTPUT_DIR}")
+    print(f"\nOutputs in {output_dir}")
     print(f"  download_manifest.json ({len(manifest)} files)")
-    print(f"  file_ids.txt (for gdc-client)")
-    print(f"  stage_labels.json")
-    print(f"  survival_5y_labels.json")
-    print(f"  survival_3y_labels.json")
+    print("  file_ids.txt (for gdc-client)")
+    print("  stage_labels.json")
+    print("  survival_5y_labels.json")
+    print("  survival_3y_labels.json")
 
 
 if __name__ == "__main__":

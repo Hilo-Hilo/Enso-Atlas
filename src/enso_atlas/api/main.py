@@ -602,44 +602,68 @@ def create_app(
     # Directories (may be updated at startup if we fall back to demo data)
     # Data root is always "data/" regardless of embeddings subdirectory (e.g. data/embeddings/level0)
     _data_root: Path = Path("data")
-    slides_dir: Path = _data_root / 'slides'
+    slides_dir: Path = _data_root / "slides"
+
+    def _resolve_dataset_path(path_str: str | Path) -> Path:
+        """Resolve a dataset path from config (repo-relative or absolute)."""
+        p = Path(path_str)
+        if p.is_absolute():
+            return p
+        return _data_root.parent / p
+
+    def _project_labels_path(project_id: Optional[str]) -> Path | None:
+        """Resolve the configured labels file for a project, if available."""
+        if not project_id or not project_registry:
+            return None
+        proj_cfg = project_registry.get_project(project_id)
+        if not proj_cfg or not getattr(proj_cfg, "dataset", None):
+            return None
+        try:
+            return _resolve_dataset_path(proj_cfg.dataset.labels_file)
+        except Exception:
+            return None
 
     def resolve_slide_path(slide_id: str, project_id: Optional[str] = None) -> Path | None:
         """Resolve slide file path across possible slide directories.
 
-        If project_id is provided, prioritize that project's configured slides_dir.
+        For project-scoped requests (`project_id` provided), resolve strictly from
+        that project's configured `dataset.slides_dir` to prevent cross-project
+        leakage.
         """
         candidates_dirs: list[Path] = []
 
-        # 1) Project-specific directory first (if provided)
+        # 1) Strict project-specific lookup (if project exists)
         if project_id and project_registry:
             proj_cfg = project_registry.get_project(project_id)
-            if proj_cfg:
+            if proj_cfg and getattr(proj_cfg, "dataset", None):
                 try:
-                    candidates_dirs.append(Path(proj_cfg.dataset.slides_dir))
+                    candidates_dirs = [_resolve_dataset_path(proj_cfg.dataset.slides_dir)]
+                except Exception:
+                    candidates_dirs = []
+
+        # 2) Global/default lookup only when not project-scoped
+        if not candidates_dirs:
+            candidates_dirs.extend(
+                [
+                    slides_dir,
+                    _data_root / "tcga_full" / "slides",
+                    _data_root / "ovarian_bev" / "slides",
+                    _data_root / "demo" / "slides",
+                    _data_root / "slides",
+                ]
+            )
+
+            # 3) Any project-configured slides dirs as a final fallback (global mode)
+            if project_registry:
+                try:
+                    for _pid, _cfg in project_registry.list_projects().items():
+                        p = _resolve_dataset_path(_cfg.dataset.slides_dir)
+                        if p not in candidates_dirs:
+                            candidates_dirs.append(p)
                 except Exception:
                     pass
 
-        # 2) Global/default common locations
-        candidates_dirs.extend([
-            slides_dir,
-            _data_root / 'tcga_full' / 'slides',
-            _data_root / 'ovarian_bev' / 'slides',
-            _data_root / 'demo' / 'slides',
-            _data_root / 'slides',
-        ])
-
-        # 3) Any project-configured slides dirs as a final fallback
-        if project_registry:
-            try:
-                for _pid, _cfg in project_registry.list_projects().items():
-                    p = Path(_cfg.dataset.slides_dir)
-                    if p not in candidates_dirs:
-                        candidates_dirs.append(p)
-            except Exception:
-                pass
-
-        exts = ['.svs', '.tiff', '.tif', '.ndpi', '.mrxs', '.vms', '.scn']
+        exts = [".svs", ".tiff", ".tif", ".ndpi", ".mrxs", ".vms", ".scn"]
         for d in candidates_dirs:
             if not d.exists():
                 continue
@@ -1165,53 +1189,70 @@ def create_app(
         _fallback_slides_dir = slides_dir
         if project_id and project_registry:
             proj_cfg = project_registry.get_project(project_id)
-            if proj_cfg:
-                _fallback_embeddings_dir = Path(proj_cfg.dataset.embeddings_dir)
-                _fallback_slides_dir = Path(proj_cfg.dataset.slides_dir)
+            if proj_cfg and getattr(proj_cfg, "dataset", None):
+                _fallback_embeddings_dir = _resolve_dataset_path(proj_cfg.dataset.embeddings_dir)
+                _fallback_slides_dir = _resolve_dataset_path(proj_cfg.dataset.slides_dir)
 
         slides = []
-        labels_path = _data_root / "labels.csv"
-        if not labels_path.exists():
-            labels_path = _data_root / "tcga_full" / "labels.csv"
-        if not labels_path.exists():
-            labels_path = embeddings_dir.parent / "labels.csv"
+        if project_id:
+            labels_path = _project_labels_path(project_id)
+        else:
+            labels_path = _data_root / "labels.csv"
+            if not labels_path.exists():
+                labels_path = _data_root / "tcga_full" / "labels.csv"
+            if not labels_path.exists():
+                labels_path = embeddings_dir.parent / "labels.csv"
+
         slide_data = {}
 
-        if labels_path.exists():
-            import csv
-            with open(labels_path) as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    if "slide_id" in row:
-                        sid = row["slide_id"]
-                        label = row.get("label", "")
-                    else:
-                        slide_file = row.get("slide_file", "")
-                        sid = slide_file.replace(".svs", "").replace(".SVS", "")
-                        response = row.get("treatment_response", "")
-                        label = "1" if response == "responder" else "0" if response == "non-responder" else ""
+        if labels_path and labels_path.exists():
+            if labels_path.suffix.lower() == ".json":
+                try:
+                    with open(labels_path) as f:
+                        labels_json = json.load(f)
+                    if isinstance(labels_json, dict):
+                        for sid, label in labels_json.items():
+                            slide_data[str(sid)] = {
+                                "label": str(label),
+                                "patient": None,
+                            }
+                except Exception as e:
+                    logger.warning(f"Could not parse labels JSON {labels_path}: {e}")
+            else:
+                import csv
+                with open(labels_path) as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if "slide_id" in row:
+                            sid = row["slide_id"]
+                            label = row.get("label", "")
+                        else:
+                            slide_file = row.get("slide_file", "")
+                            sid = slide_file.replace(".svs", "").replace(".SVS", "")
+                            response = row.get("treatment_response", "")
+                            label = "1" if response == "responder" else "0" if response == "non-responder" else ""
 
-                    if sid:
-                        patient_ctx = None
-                        if any(k in row for k in ["age", "sex", "stage", "grade", "prior_treatments", "histology"]):
-                            try:
-                                age_val = row.get("age")
-                                prior_val = row.get("prior_treatments")
-                                patient_ctx = PatientContext(
-                                    age=int(age_val) if age_val else None,
-                                    sex=row.get("sex") or None,
-                                    stage=row.get("stage") or None,
-                                    grade=row.get("grade") or None,
-                                    prior_lines=int(prior_val) if prior_val else None,
-                                    histology=row.get("histology") or None,
-                                )
-                            except (ValueError, TypeError):
-                                patient_ctx = None
+                        if sid:
+                            patient_ctx = None
+                            if any(k in row for k in ["age", "sex", "stage", "grade", "prior_treatments", "histology"]):
+                                try:
+                                    age_val = row.get("age")
+                                    prior_val = row.get("prior_treatments")
+                                    patient_ctx = PatientContext(
+                                        age=int(age_val) if age_val else None,
+                                        sex=row.get("sex") or None,
+                                        stage=row.get("stage") or None,
+                                        grade=row.get("grade") or None,
+                                        prior_lines=int(prior_val) if prior_val else None,
+                                        histology=row.get("histology") or None,
+                                    )
+                                except (ValueError, TypeError):
+                                    patient_ctx = None
 
-                        slide_data[sid] = {
-                            "label": label,
-                            "patient": patient_ctx,
-                        }
+                            slide_data[sid] = {
+                                "label": label,
+                                "patient": patient_ctx,
+                            }
 
         # When filtering by project, only include slides whose embeddings
         # exist in the project's embeddings directory.
@@ -1270,7 +1311,7 @@ def create_app(
                 if level0_dir.exists():
                     has_level0 = (level0_dir / f"{slide_id}.npy").exists()
                 elif project_id and _fallback_embeddings_dir != embeddings_dir:
-                    # Project-specific embeddings dir (e.g. data/luad/embeddings)
+                    # Project-specific embeddings dir (e.g. data/projects/<project>/embeddings)
                     # that isn't named "level0" and has no level0/ subdirectory.
                     # Treat these as level 0 embeddings (full-resolution patches).
                     emb_check = _fallback_embeddings_dir / f"{slide_id}.npy"
@@ -2442,15 +2483,22 @@ def create_app(
             total=len(all_entries),
         )
 
-    def _load_patient_context(slide_id: str) -> Optional[Dict[str, Any]]:
-        """Load patient context from labels.csv for a given slide."""
-        labels_path = _data_root / "labels.csv"
-        if not labels_path.exists():
-            labels_path = embeddings_dir.parent / "labels.csv"
-        if not labels_path.exists():
+    def _load_patient_context(
+        slide_id: str,
+        project_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Load patient context from a project's labels file for a slide."""
+        labels_path = _project_labels_path(project_id)
+        if labels_path is None:
+            labels_path = _data_root / "labels.csv"
+            if not labels_path.exists():
+                labels_path = embeddings_dir.parent / "labels.csv"
+
+        if not labels_path.exists() or labels_path.suffix.lower() != ".csv":
             return None
 
         import csv
+
         with open(labels_path) as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -2556,7 +2604,7 @@ def create_app(
         label = _pos_label if score >= threshold else _neg_label
 
         # Load patient context
-        patient_ctx = _load_patient_context(slide_id)
+        patient_ctx = _load_patient_context(slide_id, project_id=request.project_id)
 
         # Get top evidence patches with coordinates
         top_k = min(8, len(attention))
@@ -2990,7 +3038,7 @@ should incorporate all available clinical, pathological, and molecular data."""
             )
             
             # Load patient context
-            patient_ctx = _load_patient_context(slide_id)
+            patient_ctx = _load_patient_context(slide_id, project_id=project_id)
             
             # Get top evidence patches
             top_k = min(8, len(attention))

@@ -140,9 +140,9 @@ async def create_project(body: CreateProjectRequest):
         "positive_class": body.positive_class,
         "description": body.description,
         "dataset": {
-            "slides_dir": f"data/{body.id}/slides",
-            "embeddings_dir": f"data/{body.id}/embeddings/level0",
-            "labels_file": f"data/{body.id}/labels.csv",
+            "slides_dir": f"data/projects/{body.id}/slides",
+            "embeddings_dir": f"data/projects/{body.id}/embeddings",
+            "labels_file": f"data/projects/{body.id}/labels.csv",
             "label_column": body.prediction_target,
         },
     }
