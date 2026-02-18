@@ -4824,9 +4824,9 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 project_exists = True
             if not project_exists:
                 try:
-                    # Check DB as well
+                    # Check DB as well - only count as existing if there are actual models
                     db_models = await db.get_project_models(project_id)
-                    if db_models is not None:
+                    if db_models:  # Non-empty list means project exists in DB
                         project_exists = True
                 except Exception:
                     pass
