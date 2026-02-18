@@ -25,6 +25,12 @@ from .batch_tasks import batch_task_manager, BatchTaskStatus, BatchTask, BatchSl
 from . import database as db
 from .projects import ProjectRegistry
 from .project_routes import router as project_router, set_registry as set_project_registry
+from .model_scope import (
+    filter_models_for_scope,
+    is_model_allowed_for_scope,
+    resolve_project_model_scope,
+)
+from .heatmap_grid import compute_heatmap_grid_coverage
 from collections import deque
 
 import numpy as np
@@ -6103,8 +6109,6 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         - survival_3y
         - survival_1y
         """
-        import torch
-        
         if multi_model_inference is None:
             raise HTTPException(status_code=503, detail="Multi-model inference not initialized")
         
@@ -6113,6 +6117,24 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 status_code=400, 
                 detail=f"Unknown model: {model_id}. Available: {list(MODEL_CONFIGS.keys())}"
             )
+
+        if project_id:
+            scope = await resolve_project_model_scope(
+                project_id,
+                project_registry=project_registry,
+                get_project_models=db.get_project_models,
+                logger=logger,
+            )
+            if not scope.project_exists:
+                raise HTTPException(status_code=404, detail=f"Unknown project_id: {project_id}")
+            if not is_model_allowed_for_scope(model_id, scope):
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"Model '{model_id}' is not assigned to project '{project_id}'. "
+                        f"Use /api/models?project_id={project_id} to fetch allowed model IDs."
+                    ),
+                )
         
         project_requested = project_id is not None
         _model_heatmap_embeddings_dir = _resolve_project_embeddings_dir(
@@ -6157,6 +6179,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     _slide_dims = (int(_ca[:, 0].max()) + patch_size_c, int(_ca[:, 1].max()) + patch_size_c)
                 else:
                     _slide_dims = (patch_size_c, patch_size_c)
+            _coverage = compute_heatmap_grid_coverage(_slide_dims[0], _slide_dims[1], patch_size=224)
             logger.info(f"Serving cached heatmap for {slide_id}/{model_id}")
             return FileResponse(
                 str(cache_path),
@@ -6166,8 +6189,8 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     "X-Model-Name": MODEL_CONFIGS[model_id]["display_name"],
                     "X-Slide-Width": str(_slide_dims[0]),
                     "X-Slide-Height": str(_slide_dims[1]),
-                    "X-Coverage-Width": str(int(np.ceil(_slide_dims[0] / 224)) * 224),
-                    "X-Coverage-Height": str(int(np.ceil(_slide_dims[1] / 224)) * 224),
+                    "X-Coverage-Width": str(_coverage.coverage_width),
+                    "X-Coverage-Height": str(_coverage.coverage_height),
                     "Access-Control-Expose-Headers": "X-Model-Id, X-Model-Name, X-Slide-Width, X-Slide-Height, X-Coverage-Width, X-Coverage-Height",
                 }
             )
@@ -6252,18 +6275,16 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             # Generate a patch-resolution heatmap: 1 pixel = 1 patch (224x224).
             # This produces crisp discrete patches when rendered with image-rendering: pixelated.
             coords_list = [tuple(map(int, c)) for c in coords_arr]
-            slide_w, slide_h = slide_dims
-            
-            # Compute grid dimensions in patch units
-            grid_w = int(np.ceil(slide_w / patch_size))
-            grid_h = int(np.ceil(slide_h / patch_size))
-            
+            _coverage = compute_heatmap_grid_coverage(slide_dims[0], slide_dims[1], patch_size=patch_size)
+            grid_w = _coverage.grid_width
+            grid_h = _coverage.grid_height
+
             logger.info(f"Model heatmap patch-resolution: {grid_w}x{grid_h} (1 pixel per {patch_size}px patch)")
-            
+
             heatmap_rgba = evidence_gen.create_heatmap(
-                attention, 
-                coords_list, 
-                slide_dims, 
+                attention,
+                coords_list,
+                slide_dims,
                 thumbnail_size=(grid_w, grid_h),
                 smooth=False,
                 blur_kernel=1,
@@ -6287,15 +6308,15 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     logger.warning(f"Failed to cache heatmap: {cache_err}")
             
             return StreamingResponse(
-                buf, 
+                buf,
                 media_type="image/png",
                 headers={
                     "X-Model-Id": model_id,
                     "X-Model-Name": MODEL_CONFIGS[model_id]["display_name"],
                     "X-Slide-Width": str(slide_dims[0]),
                     "X-Slide-Height": str(slide_dims[1]),
-                    "X-Coverage-Width": str(grid_w * patch_size),
-                    "X-Coverage-Height": str(grid_h * patch_size),
+                    "X-Coverage-Width": str(_coverage.coverage_width),
+                    "X-Coverage-Height": str(_coverage.coverage_height),
                     "Access-Control-Expose-Headers": "X-Model-Id, X-Model-Name, X-Slide-Width, X-Slide-Height, X-Coverage-Width, X-Coverage-Height",
                 }
             )

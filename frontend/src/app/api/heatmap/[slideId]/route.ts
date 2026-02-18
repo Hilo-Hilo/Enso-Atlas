@@ -11,13 +11,18 @@ export async function GET(
 ) {
   const { slideId } = await params;
   const { searchParams } = new URL(request.url);
-  const level = searchParams.get("level");
-  
+
   try {
-    let backendUrl = `${BACKEND_URL}/api/heatmap/${encodeURIComponent(slideId)}`;
-    if (level) {
-      backendUrl += `?level=${level}`;
-    }
+    const backendParams = new URLSearchParams();
+    const level = searchParams.get("level");
+    const alphaPower = searchParams.get("alpha_power");
+    const projectId = searchParams.get("project_id");
+    if (level) backendParams.set("level", level);
+    if (alphaPower) backendParams.set("alpha_power", alphaPower);
+    if (projectId) backendParams.set("project_id", projectId);
+
+    const qs = backendParams.toString() ? `?${backendParams.toString()}` : "";
+    const backendUrl = `${BACKEND_URL}/api/heatmap/${encodeURIComponent(slideId)}${qs}`;
     
     const response = await fetch(backendUrl, {
       method: "GET",
