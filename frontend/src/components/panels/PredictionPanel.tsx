@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { ProgressStepper, InlineProgress } from "@/components/ui/ProgressStepper";
 import { SkeletonPrediction } from "@/components/ui/Skeleton";
 import { PredictionGauge, ConfidenceGauge, UncertaintyDisplay } from "@/components/ui/PredictionGauge";
-import { cn, formatProbability } from "@/lib/utils";
+import { cn, formatProbability, humanizeIdentifier } from "@/lib/utils";
 import {
   Activity,
   AlertCircle,
@@ -65,6 +65,10 @@ export function PredictionPanel({
   const { currentProject } = useProject();
   const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Positive";
   const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Negative";
+  const predictionTargetLabel = humanizeIdentifier(currentProject.prediction_target);
+  const projectDisclaimer =
+    currentProject.disclaimer ||
+    "This prediction is for research and decision support only. Clinical decisions should integrate multiple factors including patient history, other biomarkers, and clinician expertise.";
 
   // Show error state with retry
   if (error && !isLoading) {
@@ -156,8 +160,8 @@ export function PredictionPanel({
             <p className="text-sm font-medium text-gray-600">
               No analysis results yet
             </p>
-            <p className="text-xs mt-1.5 text-gray-500 max-w-[200px] mx-auto">
-              Select a slide and run analysis to see treatment response predictions.
+            <p className="text-xs mt-1.5 text-gray-500 max-w-[220px] mx-auto">
+              Select a slide and run analysis to see {predictionTargetLabel.toLowerCase()} predictions.
             </p>
           </div>
         </CardContent>
@@ -296,8 +300,8 @@ export function PredictionPanel({
               </div>
               <p className="text-xs text-gray-600 leading-relaxed">
                 {isResponder
-                  ? `Model predicts ${positiveLabel.toLowerCase()} for ${currentProject.prediction_target || "treatment response"} based on histopathological features.`
-                  : `Model predicts ${negativeLabel.toLowerCase()} for ${currentProject.prediction_target || "treatment response"}. Consider alternative therapies.`}
+                  ? `Model predicts ${positiveLabel.toLowerCase()} for ${predictionTargetLabel.toLowerCase()} based on histopathological features.`
+                  : `Model predicts ${negativeLabel.toLowerCase()} for ${predictionTargetLabel.toLowerCase()}. Correlate with clinical context before action.`}
               </p>
             </div>
           </div>
@@ -306,7 +310,7 @@ export function PredictionPanel({
         {/* Probability Bar with Threshold */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600 font-medium">Response Probability</span>
+            <span className="text-gray-600 font-medium">{predictionTargetLabel} Score</span>
             <span className="font-mono font-semibold text-gray-900">
               {formatProbability(prediction.score)}
             </span>
@@ -458,9 +462,7 @@ export function PredictionPanel({
           <div className="flex items-start gap-2">
             <Info className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
             <p className="text-xs text-gray-500 leading-relaxed">
-              This prediction is for research and decision support only. Clinical
-              decisions should integrate multiple factors including patient history,
-              other biomarkers, and clinician expertise.
+              {projectDisclaimer}
             </p>
           </div>
         </div>

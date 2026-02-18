@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useEffect, useCallback } from "react";
-import { cn, formatProbability } from "@/lib/utils";
+import { cn, humanizeIdentifier } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { useProject } from "@/contexts/ProjectContext";
 import {
   X,
   ZoomIn,
@@ -36,6 +37,8 @@ export function PatchZoomModal({
   slideId,
 }: PatchZoomModalProps) {
   const [zoomLevel, setZoomLevel] = React.useState(1);
+  const { currentProject } = useProject();
+  const predictionTargetLabel = humanizeIdentifier(currentProject.prediction_target).toLowerCase();
 
   // Sort patches by attention weight for rank
   const sortedPatches = [...allPatches].sort(
@@ -113,7 +116,7 @@ export function PatchZoomModal({
 
     const weight = patch.attentionWeight;
     if (weight >= 0.7) {
-      return "High attention region showing distinctive cellular patterns that strongly influence the model's prediction. This area contains morphological features characteristic of the predicted treatment response class.";
+      return `High attention region showing distinctive cellular patterns that strongly influence the model's prediction. This area contains morphological features characteristic of the predicted ${predictionTargetLabel} class.`;
     } else if (weight >= 0.4) {
       return "Moderate attention region with notable tissue architecture. The cellular composition and spatial arrangement in this patch contribute to the overall prediction confidence.";
     } else {

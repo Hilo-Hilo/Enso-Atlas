@@ -50,7 +50,7 @@ import type {
   BatchModelResult,
 } from "@/types";
 import { useProject } from "@/contexts/ProjectContext";
-import { AVAILABLE_MODELS, type ModelConfig } from "./ModelPicker";
+import { getProjectFallbackModels, type ModelConfig } from "./ModelPicker";
 
 interface BatchAnalysisPanelProps {
   onSlideSelect?: (slideId: string) => void;
@@ -105,8 +105,8 @@ export function BatchAnalysisPanel({
   // Polling interval ref
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Build model list from API or fallback
-  const models = useMemo(() => {
+  // Build model list from API or project-derived fallback
+  const models = useMemo<ModelConfig[]>(() => {
     if (apiModelDetails.length > 0) {
       return apiModelDetails.map((d) => ({
         id: d.id,
@@ -118,17 +118,24 @@ export function BatchAnalysisPanel({
         negativeLabel: d.negativeLabel,
       }));
     }
-    return AVAILABLE_MODELS;
-  }, [apiModelDetails]);
+    return getProjectFallbackModels(currentProject);
+  }, [apiModelDetails, currentProject]);
 
   // Fetch available models from project
   useEffect(() => {
+    let cancelled = false;
+
     const fetchModels = async () => {
+      // Reset stale details on project switch
+      if (!cancelled) {
+        setApiModelDetails([]);
+      }
+
       // Try API first (unless using default project)
       if (currentProject.id && currentProject.id !== "default") {
         try {
           const details = await getProjectAvailableModels(currentProject.id);
-          if (details.length > 0) {
+          if (!cancelled && details.length > 0) {
             setApiModelDetails(details);
             // Auto-select primary model
             const primaryId = currentProject.prediction_target;
@@ -140,17 +147,23 @@ export function BatchAnalysisPanel({
             return;
           }
         } catch {
-          // ignore API error, fall through to defaults
+          // ignore API error, fall through to project-derived fallback
         }
       }
-      // Fallback: select first hardcoded model
-      if (AVAILABLE_MODELS.length > 0 && selectedModelIds.length === 0) {
-        setSelectedModelIds([AVAILABLE_MODELS[0].id]);
+
+      // Fallback: select first project-derived fallback model
+      const fallbackModels = getProjectFallbackModels(currentProject);
+      if (!cancelled && fallbackModels.length > 0) {
+        setSelectedModelIds([fallbackModels[0].id]);
       }
     };
+
     fetchModels();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProject.id, currentProject.prediction_target]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject]);
 
   // Cleanup polling on unmount
   useEffect(() => {

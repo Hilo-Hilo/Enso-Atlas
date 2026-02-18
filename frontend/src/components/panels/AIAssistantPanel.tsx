@@ -24,7 +24,7 @@ import {
   Eye,
   MapPin,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, humanizeIdentifier } from "@/lib/utils";
 import type { StructuredReport } from "@/types";
 
 // API base URL
@@ -508,6 +508,14 @@ export function AIAssistantPanel({
   const [topEvidence, setTopEvidence] = useState<EvidencePatch[]>([]);
   const [copySuccess, setCopySuccess] = useState(false);
   
+  // Project-aware copy
+  const { currentProject } = useProject();
+  const predictionTargetLabel = humanizeIdentifier(currentProject.prediction_target);
+  const predictionTargetLabelLower = predictionTargetLabel.toLowerCase();
+  const isTreatmentResponseTarget = /response|sensitivity|resistance|therapy|drug|chemo/i.test(
+    currentProject.prediction_target || ""
+  );
+
   // Refs
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -800,43 +808,47 @@ export function AIAssistantPanel({
   // Context-aware suggested questions based on predictions
   const suggestedQuestions = React.useMemo(() => {
     const questions: string[] = [];
-    
+
     // Always include these basics
-    questions.push("What is the predicted treatment response?");
-    
+    questions.push(`What is the predicted ${predictionTargetLabelLower}?`);
+
     // Add based on predictions
-    const analyzeStep = steps.find(s => s.step === "analyze");
+    const analyzeStep = steps.find((s) => s.step === "analyze");
     if (analyzeStep?.data?.predictions) {
       const preds = analyzeStep.data.predictions as Record<string, AgentPrediction>;
-      
+
       const predKeys = Object.keys(preds);
       if (predKeys.length > 0) {
         questions.push("Why was this prediction made?");
         const firstPred = preds[predKeys[0]];
         if (firstPred && firstPred.score < 0.5) {
-          questions.push("What alternative treatments might work?");
+          questions.push(
+            isTreatmentResponseTarget
+              ? "What alternative treatments might work?"
+              : "What clinical implications should I consider?"
+          );
         }
       }
-      
-      if (predKeys.some(k => k.includes("survival"))) {
+
+      if (predKeys.some((k) => k.includes("survival"))) {
         questions.push("What is the survival prognosis?");
       }
     }
-    
+
     // Add region questions if we have evidence
     if (topEvidence.length > 0) {
       questions.push("What are the high-attention regions?");
       questions.push("Show me the concerning areas");
     }
-    
+
     // Add similar cases question if we have them
-    const retrieveStep = steps.find(s => s.step === "retrieve");
+    const retrieveStep = steps.find((s) => s.step === "retrieve");
     if (retrieveStep?.data?.similar_cases) {
       questions.push("How does this compare to similar cases?");
     }
-    
+
     return questions.slice(0, 4);
-  }, [steps, topEvidence]);
+  }, [steps, topEvidence, predictionTargetLabelLower, isTreatmentResponseTarget]);
 
   return (
     <div className={cn("flex flex-col h-full bg-white rounded-lg shadow-sm", className)}>
@@ -1013,7 +1025,7 @@ export function AIAssistantPanel({
                 <div className="flex flex-wrap gap-2">
                   {(sessionId ? suggestedQuestions : [
                     "What is the prognosis?",
-                    "What is the predicted treatment response?",
+                    `What is the predicted ${predictionTargetLabelLower}?`,
                     "Show me the high-attention regions",
                     "How does this compare to similar cases?",
                   ]).map((q, i) => (
