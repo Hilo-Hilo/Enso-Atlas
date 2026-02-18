@@ -23,6 +23,18 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+PROJECTS_DATA_ROOT = Path("data/projects")
+
+
+def default_dataset_paths(project_id: str) -> Dict[str, str]:
+    """Default per-project dataset layout under data/projects/<project_id>."""
+    root = PROJECTS_DATA_ROOT / project_id
+    return {
+        "slides_dir": str(root / "slides"),
+        "embeddings_dir": str(root / "embeddings"),
+        "labels_file": str(root / "labels.csv"),
+    }
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -32,9 +44,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DatasetConfig:
     """Dataset paths and labels configuration for a project."""
-    slides_dir: str = "data/slides"
-    embeddings_dir: str = "data/embeddings/level0"
-    labels_file: str = "data/labels.csv"
+    slides_dir: str = "data/projects/default/slides"
+    embeddings_dir: str = "data/projects/default/embeddings"
+    labels_file: str = "data/projects/default/labels.csv"
     label_column: str = "platinum_sensitivity"
 
     @classmethod
@@ -153,7 +165,10 @@ class ProjectConfig:
 
     @classmethod
     def from_dict(cls, project_id: str, d: Dict[str, Any]) -> "ProjectConfig":
-        dataset_raw = d.get("dataset", {})
+        dataset_raw = {
+            **default_dataset_paths(project_id),
+            **(d.get("dataset", {}) or {}),
+        }
         models_raw = d.get("models", {})
         features_raw = d.get("features", {})
         return cls(
@@ -210,6 +225,28 @@ class ProjectConfig:
             "threshold": self.threshold,
             "threshold_config": self.threshold_config,
         }
+
+    def validate_dataset_modularity(self) -> List[str]:
+        """Return path-modularity violations for this project, if any."""
+        errors: List[str] = []
+        expected_root = PROJECTS_DATA_ROOT / self.id
+
+        def _check_under_expected(path_str: str, field_name: str) -> None:
+            p = Path(path_str)
+            if p.is_absolute():
+                errors.append(
+                    f"{self.id}: dataset.{field_name} must be repo-relative, got absolute path '{path_str}'"
+                )
+                return
+            if len(p.parts) < 4 or p.parts[0:2] != ("data", "projects") or p.parts[2] != self.id:
+                errors.append(
+                    f"{self.id}: dataset.{field_name}='{path_str}' is outside expected '{expected_root}/...'"
+                )
+
+        _check_under_expected(self.dataset.slides_dir, "slides_dir")
+        _check_under_expected(self.dataset.embeddings_dir, "embeddings_dir")
+        _check_under_expected(self.dataset.labels_file, "labels_file")
+        return errors
 
 
 # ---------------------------------------------------------------------------
