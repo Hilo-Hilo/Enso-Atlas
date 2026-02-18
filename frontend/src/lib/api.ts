@@ -588,7 +588,10 @@ export async function generateReport(
     "/api/report",
     {
       method: "POST",
-      body: JSON.stringify({ slide_id: request.slideId }),
+      body: JSON.stringify({ 
+        slide_id: request.slideId,
+        project_id: request.projectId,
+      }),
     },
     { timeoutMs: 210000 } // 210 second timeout for CPU-based report generation
   );

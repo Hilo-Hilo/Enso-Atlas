@@ -162,6 +162,7 @@ export interface ReportRequest {
   slideId: string;
   evidencePatchIds: string[];
   includeDetails?: boolean;
+  projectId?: string;
 }
 
 // API error response

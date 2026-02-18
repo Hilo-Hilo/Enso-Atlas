@@ -1249,8 +1249,9 @@ function HomePage() {
       slideId: selectedSlide.id,
       evidencePatchIds: analysisResult?.evidencePatches?.map((p) => p.id) ?? [],
       includeDetails: true,
+      projectId: currentProject.id,
     });
-  }, [selectedSlide, analysisResult, multiModelResult, generateSlideReport]);
+  }, [selectedSlide, analysisResult, multiModelResult, generateSlideReport, currentProject.id]);
 
   // Define keyboard shortcuts
   const keyboardShortcuts = useMemo<KeyboardShortcut[]>(() => [
