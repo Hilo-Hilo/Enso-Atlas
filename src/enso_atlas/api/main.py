@@ -2433,8 +2433,22 @@ def create_app(
             raise HTTPException(status_code=503, detail="Model not loaded")
 
         slide_id = request.slide_id
-        emb_path = embeddings_dir / f"{slide_id}.npy"
-        coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+        
+        # Resolve project-specific embeddings directory if project_id is given
+        _report_embeddings_dir = embeddings_dir
+        if request.project_id and project_registry:
+            proj_cfg = project_registry.get_project(request.project_id)
+            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
+                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
+                # Resolve relative paths against _data_root's parent (project root)
+                if not proj_emb_dir.is_absolute():
+                    proj_emb_dir = _data_root.parent / proj_emb_dir
+                if proj_emb_dir.exists():
+                    _report_embeddings_dir = proj_emb_dir
+                    logger.info(f"generate_report: Using project embeddings dir: {_report_embeddings_dir}")
+        
+        emb_path = _report_embeddings_dir / f"{slide_id}.npy"
+        coord_path = _report_embeddings_dir / f"{slide_id}_coords.npy"
 
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
