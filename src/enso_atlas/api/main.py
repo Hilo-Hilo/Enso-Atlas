@@ -3399,7 +3399,8 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         slide_id: str,
         level: int = Query(default=2, ge=0, le=4, description="Downsample level: 0=2048px (highest detail), 2=512px (default), 4=128px (fastest)"),
         smooth: bool = Query(default=True, description="Apply Gaussian blur for smooth interpolation (True) or show sharp patch tiles (False)"),
-        blur: int = Query(default=31, ge=3, le=101, description="Blur kernel size (odd number, higher=smoother)")
+        blur: int = Query(default=31, ge=3, le=101, description="Blur kernel size (odd number, higher=smoother)"),
+        project_id: Optional[str] = Query(default=None, description="Project ID to scope embeddings lookup")
     ):
         """Get the attention heatmap for a slide as PNG.
         
@@ -3415,8 +3416,20 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         if classifier is None or evidence_gen is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
 
-        emb_path = embeddings_dir / f"{slide_id}.npy"
-        coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+        # Resolve project-specific embeddings directory if project_id is given
+        _heatmap_embeddings_dir = embeddings_dir
+        if project_id and project_registry:
+            proj_cfg = project_registry.get_project(project_id)
+            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
+                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
+                if not proj_emb_dir.is_absolute():
+                    proj_emb_dir = _data_root.parent / proj_emb_dir
+                if proj_emb_dir.exists():
+                    _heatmap_embeddings_dir = proj_emb_dir
+                    logger.info(f"get_heatmap: Using project embeddings dir: {_heatmap_embeddings_dir}")
+
+        emb_path = _heatmap_embeddings_dir / f"{slide_id}.npy"
+        coord_path = _heatmap_embeddings_dir / f"{slide_id}_coords.npy"
 
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
@@ -3597,7 +3610,12 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         return response
 
     @app.get("/api/similar", response_model=SimilarResponse)
-    async def get_similar_cases(slide_id: str, k: int = 5, top_patches: int = 3):
+    async def get_similar_cases(
+        slide_id: str,
+        k: int = 5,
+        top_patches: int = 3,
+        project_id: Optional[str] = Query(default=None, description="Project ID to scope embeddings lookup")
+    ):
         """Find similar slides from the reference cohort.
 
         Uses FAISS over **L2-normalized mean slide embeddings** and returns
@@ -3610,7 +3628,19 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         if slide_mean_index is None:
             raise HTTPException(status_code=503, detail="Similarity index not available")
 
-        emb_path = embeddings_dir / f"{slide_id}.npy"
+        # Resolve project-specific embeddings directory if project_id is given
+        _similar_embeddings_dir = embeddings_dir
+        if project_id and project_registry:
+            proj_cfg = project_registry.get_project(project_id)
+            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
+                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
+                if not proj_emb_dir.is_absolute():
+                    proj_emb_dir = _data_root.parent / proj_emb_dir
+                if proj_emb_dir.exists():
+                    _similar_embeddings_dir = proj_emb_dir
+                    logger.info(f"get_similar_cases: Using project embeddings dir: {_similar_embeddings_dir}")
+
+        emb_path = _similar_embeddings_dir / f"{slide_id}.npy"
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
 
@@ -5739,7 +5769,12 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
 
     @app.get("/api/heatmap/{slide_id}/{model_id}")
-    async def get_model_heatmap(slide_id: str, model_id: str, alpha_power: float = 0.7):
+    async def get_model_heatmap(
+        slide_id: str,
+        model_id: str,
+        alpha_power: float = 0.7,
+        project_id: Optional[str] = Query(default=None, description="Project ID to scope embeddings lookup")
+    ):
         """Get the attention heatmap for a specific TransMIL model.
         
         Available models:
@@ -5760,8 +5795,20 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 detail=f"Unknown model: {model_id}. Available: {list(MODEL_CONFIGS.keys())}"
             )
         
+        # Resolve project-specific embeddings directory if project_id is given
+        _model_heatmap_embeddings_dir = embeddings_dir
+        if project_id and project_registry:
+            proj_cfg = project_registry.get_project(project_id)
+            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
+                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
+                if not proj_emb_dir.is_absolute():
+                    proj_emb_dir = _data_root.parent / proj_emb_dir
+                if proj_emb_dir.exists():
+                    _model_heatmap_embeddings_dir = proj_emb_dir
+                    logger.info(f"get_model_heatmap: Using project embeddings dir: {_model_heatmap_embeddings_dir}")
+        
         # Check disk cache first (only for default alpha_power)
-        cache_dir = embeddings_dir / "heatmap_cache"
+        cache_dir = _model_heatmap_embeddings_dir / "heatmap_cache"
         cache_dir.mkdir(exist_ok=True)
         is_default_alpha = abs(alpha_power - 0.7) < 0.01
         cache_path = cache_dir / f"{slide_id}_{model_id}.png"
@@ -5778,7 +5825,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 except Exception:
                     pass
             if _slide_dims is None:
-                coord_path_c = embeddings_dir / f"{slide_id}_coords.npy"
+                coord_path_c = _model_heatmap_embeddings_dir / f"{slide_id}_coords.npy"
                 patch_size_c = 224
                 if coord_path_c.exists():
                     _ca = np.load(coord_path_c).astype(np.int64, copy=False)
@@ -5800,8 +5847,8 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 }
             )
         
-        emb_path = embeddings_dir / f"{slide_id}.npy"
-        coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+        emb_path = _model_heatmap_embeddings_dir / f"{slide_id}.npy"
+        coord_path = _model_heatmap_embeddings_dir / f"{slide_id}_coords.npy"
         
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
