@@ -690,7 +690,7 @@ export async function generateReport(
  * Get Deep Zoom Image (DZI) metadata for OpenSeadragon
  * 
  * Uses local Next.js API proxy to avoid CORS issues.
- * The proxy routes through /api/slides/{id}/dzi(.dzi) and /api/slides/{id}/dzi_files/...
+ * The proxy routes through /api/slides/{id}/dzi and /api/slides/{id}/dzi_files/...
  * which forward to the backend while keeping same-origin.
  */
 export function getDziUrl(slideId: string, projectId?: string): string {
@@ -699,8 +699,7 @@ export function getDziUrl(slideId: string, projectId?: string): string {
   const params = new URLSearchParams();
   if (projectId) params.set("project_id", projectId);
   const qs = params.toString() ? `?${params.toString()}` : "";
-  // Use .dzi suffix so OpenSeadragon preserves query params when deriving tile URLs.
-  return `/api/slides/${encodeURIComponent(slideId)}/dzi.dzi${qs}`;
+  return `/api/slides/${encodeURIComponent(slideId)}/dzi${qs}`;
 }
 
 /**

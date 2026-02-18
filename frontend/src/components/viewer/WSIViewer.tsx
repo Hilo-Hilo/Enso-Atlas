@@ -271,8 +271,14 @@ export function WSIViewer({
 
     let cancelled = false;
 
-    // Pre-check DZI availability (via GET) to avoid OpenSeadragon's ugly default error display
+    // Pre-check DZI availability and parse descriptor to build explicit tile source.
+    // OpenSeadragon's DziTileSource.configure derives tilesUrl via regex that expects
+    // a .dzi extension. Our proxy URL (/api/slides/{id}/dzi?project_id=...) lacks that
+    // extension, so OSD miscomputes tilesUrl and drops the query params. By fetching the
+    // XML ourselves and constructing the tile source object explicitly, we preserve
+    // project_id on every tile request.
     (async () => {
+      let dziTileSource: Record<string, unknown> | string = dziUrl;
       try {
         const dziResp = await fetch(dziUrl, { method: "GET" });
         if (!dziResp.ok) {
@@ -281,6 +287,35 @@ export function WSIViewer({
             setIsReady(false);
           }
           return;
+        }
+        const dziXml = await dziResp.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(dziXml, "application/xml");
+        const imageEl = doc.querySelector("Image");
+        const sizeEl = doc.querySelector("Size");
+        if (imageEl && sizeEl) {
+          const tileSize = parseInt(imageEl.getAttribute("TileSize") || "254", 10);
+          const overlap = parseInt(imageEl.getAttribute("Overlap") || "1", 10);
+          const format = imageEl.getAttribute("Format") || "jpeg";
+          const width = parseInt(sizeEl.getAttribute("Width") || "0", 10);
+          const height = parseInt(sizeEl.getAttribute("Height") || "0", 10);
+          // Derive tilesUrl: strip query string, append _files/
+          const baseUrl = dziUrl.split("?")[0];
+          const tilesUrl = baseUrl + "_files/";
+          // Preserve query params (e.g. project_id) for tile requests
+          const qIdx = dziUrl.indexOf("?");
+          const queryParams = qIdx >= 0 ? dziUrl.substring(qIdx) : "";
+          dziTileSource = {
+            Image: {
+              xmlns: "http://schemas.microsoft.com/deepzoom/2008",
+              Format: format,
+              Overlap: String(overlap),
+              TileSize: String(tileSize),
+              Size: { Width: String(width), Height: String(height) },
+            },
+            tilesUrl,
+            queryParams,
+          };
         }
       } catch {
         if (!cancelled) {
@@ -296,7 +331,7 @@ export function WSIViewer({
       id: containerId,
       prefixUrl:
         "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/images/",
-      tileSources: dziUrl,
+      tileSources: dziTileSource,
       showNavigator: true,
       navigatorPosition: "BOTTOM_RIGHT",
       navigatorHeight: "120px",
