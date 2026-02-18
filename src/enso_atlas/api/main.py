@@ -607,37 +607,40 @@ def create_app(
     def resolve_slide_path(slide_id: str, project_id: Optional[str] = None) -> Path | None:
         """Resolve slide file path across possible slide directories.
 
-        If project_id is provided, prioritize that project's configured slides_dir.
+        If project_id is provided, search ONLY that project's configured slides_dir
+        for deterministic project-scoped behavior.
         """
         candidates_dirs: list[Path] = []
 
-        # 1) Project-specific directory first (if provided)
-        if project_id and project_registry:
+        if project_id:
+            if not project_registry:
+                return None
             proj_cfg = project_registry.get_project(project_id)
-            if proj_cfg:
+            if not proj_cfg:
+                return None
+            try:
+                candidates_dirs.append(Path(proj_cfg.dataset.slides_dir))
+            except Exception:
+                return None
+        else:
+            # Global/default common locations
+            candidates_dirs.extend([
+                slides_dir,
+                _data_root / 'tcga_full' / 'slides',
+                _data_root / 'ovarian_bev' / 'slides',
+                _data_root / 'demo' / 'slides',
+                _data_root / 'slides',
+            ])
+
+            # Any project-configured slides dirs as a final fallback
+            if project_registry:
                 try:
-                    candidates_dirs.append(Path(proj_cfg.dataset.slides_dir))
+                    for _pid, _cfg in project_registry.list_projects().items():
+                        p = Path(_cfg.dataset.slides_dir)
+                        if p not in candidates_dirs:
+                            candidates_dirs.append(p)
                 except Exception:
                     pass
-
-        # 2) Global/default common locations
-        candidates_dirs.extend([
-            slides_dir,
-            _data_root / 'tcga_full' / 'slides',
-            _data_root / 'ovarian_bev' / 'slides',
-            _data_root / 'demo' / 'slides',
-            _data_root / 'slides',
-        ])
-
-        # 3) Any project-configured slides dirs as a final fallback
-        if project_registry:
-            try:
-                for _pid, _cfg in project_registry.list_projects().items():
-                    p = Path(_cfg.dataset.slides_dir)
-                    if p not in candidates_dirs:
-                        candidates_dirs.append(p)
-            except Exception:
-                pass
 
         exts = ['.svs', '.tiff', '.tif', '.ndpi', '.mrxs', '.vms', '.scn']
         for d in candidates_dirs:
@@ -651,6 +654,100 @@ def create_app(
 
     def has_wsi_file(slide_id: str, project_id: Optional[str] = None) -> bool:
         return resolve_slide_path(slide_id, project_id=project_id) is not None
+
+    def _require_project(project_id: Optional[str]):
+        """Validate and return project config when project_id is supplied."""
+        if not project_id:
+            return None
+        if not project_registry:
+            raise HTTPException(
+                status_code=503,
+                detail="Project registry not available",
+            )
+        proj_cfg = project_registry.get_project(project_id)
+        if not proj_cfg:
+            raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+        return proj_cfg
+
+    def _resolve_project_embeddings_dir(
+        project_id: Optional[str],
+        *,
+        require_exists: bool = False,
+    ) -> Path:
+        """Resolve embeddings dir for a project, defaulting to global embeddings_dir."""
+        proj_cfg = _require_project(project_id)
+        if not proj_cfg:
+            return embeddings_dir
+
+        proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
+        if not proj_emb_dir.is_absolute():
+            proj_emb_dir = _data_root.parent / proj_emb_dir
+
+        if require_exists and not proj_emb_dir.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Embeddings directory not found for project '{project_id}'",
+            )
+        return proj_emb_dir
+
+    def _resolve_project_label_pair(
+        project_id: Optional[str],
+        *,
+        positive_default: str,
+        negative_default: str,
+        uppercase: bool = False,
+    ) -> tuple[str, str]:
+        """Resolve positive/negative labels for a project with sensible defaults."""
+        pos_label = positive_default
+        neg_label = negative_default
+
+        proj_cfg = _require_project(project_id)
+        if proj_cfg and proj_cfg.classes:
+            pos_label = proj_cfg.positive_class if proj_cfg.positive_class else proj_cfg.classes[-1]
+            neg_candidates = [c for c in proj_cfg.classes if c.lower() != pos_label.lower()]
+            neg_label = neg_candidates[0] if neg_candidates else negative_default
+
+        if uppercase:
+            pos_label = pos_label.upper()
+            neg_label = neg_label.upper()
+
+        return pos_label, neg_label
+
+    def _project_slide_ids(project_id: Optional[str]) -> Optional[set[str]]:
+        """Return project-local slide IDs from that project's embeddings directory.
+
+        Returns None when project_id is not provided.
+        """
+        if not project_id:
+            return None
+
+        proj_emb_dir = _resolve_project_embeddings_dir(project_id, require_exists=True)
+        if not proj_emb_dir.exists():
+            return set()
+
+        slide_ids = set()
+        for f in proj_emb_dir.glob("*.npy"):
+            if not f.name.endswith("_coords.npy"):
+                slide_ids.add(f.stem)
+        return slide_ids
+
+    async def _resolve_project_model_ids(project_id: Optional[str]) -> Optional[set[str]]:
+        """Resolve allowed model ids for a project (DB first, YAML fallback)."""
+        if not project_id:
+            return None
+
+        proj_cfg = _require_project(project_id)
+        allowed: set[str] = set()
+
+        try:
+            allowed.update(await db.get_project_models(project_id))
+        except Exception as e:
+            logger.warning(f"DB model query failed for {project_id}: {e}")
+
+        if not allowed and proj_cfg and proj_cfg.classification_models:
+            allowed.update(proj_cfg.classification_models)
+
+        return allowed
 
 
     @app.on_event("startup")
@@ -1091,6 +1188,8 @@ def create_app(
         When project_id is provided, only returns slides assigned to that project
         via the project_slides junction table.
         """
+        proj_cfg = _require_project(project_id)
+
         # ---- Fast path: PostgreSQL ----
         if db_available:
             try:
@@ -1138,16 +1237,10 @@ def create_app(
                 if slides or not project_id:
                     return slides
                 logger.info(f"DB returned 0 slides for project {project_id}, falling through to flat-file scan")
-                # If project_id is not in the registry at all, return empty fast
-                if project_registry and not project_registry.get_project(project_id):
-                    logger.info(f"Project {project_id} not in registry, returning empty")
-                    return []
             except Exception as e:
                 logger.warning(f"DB query failed, falling back to flat-file scan: {e}")
 
-        # If project_id is not in the registry, return empty immediately
-        if project_id and project_registry and not project_registry.get_project(project_id):
-            return []
+        # project validity is enforced above via _require_project(project_id)
 
         # ---- Slow fallback: flat-file scan (with caching) ----
         # Cache flat-file scan results per project for 60s to avoid re-scanning
@@ -1159,22 +1252,28 @@ def create_app(
             logger.info(f"Returning cached flat-file scan for {_cache_key} ({len(_cached['data'])} slides)")
             return _cached["data"]
 
-        # When project_id is given and we have the registry, determine the
-        # correct embeddings and slides directories for that project.
+        # When project_id is given, determine project-specific embeddings/slides dirs.
         _fallback_embeddings_dir = embeddings_dir
         _fallback_slides_dir = slides_dir
-        if project_id and project_registry:
-            proj_cfg = project_registry.get_project(project_id)
-            if proj_cfg:
-                _fallback_embeddings_dir = Path(proj_cfg.dataset.embeddings_dir)
-                _fallback_slides_dir = Path(proj_cfg.dataset.slides_dir)
+        if proj_cfg:
+            _fallback_embeddings_dir = Path(proj_cfg.dataset.embeddings_dir)
+            _fallback_slides_dir = Path(proj_cfg.dataset.slides_dir)
+            if not _fallback_embeddings_dir.is_absolute():
+                _fallback_embeddings_dir = _data_root.parent / _fallback_embeddings_dir
+            if not _fallback_slides_dir.is_absolute():
+                _fallback_slides_dir = _data_root.parent / _fallback_slides_dir
 
         slides = []
-        labels_path = _data_root / "labels.csv"
-        if not labels_path.exists():
-            labels_path = _data_root / "tcga_full" / "labels.csv"
-        if not labels_path.exists():
-            labels_path = embeddings_dir.parent / "labels.csv"
+        if proj_cfg:
+            labels_path = Path(proj_cfg.dataset.labels_file)
+            if not labels_path.is_absolute():
+                labels_path = _data_root.parent / labels_path
+        else:
+            labels_path = _data_root / "labels.csv"
+            if not labels_path.exists():
+                labels_path = _data_root / "tcga_full" / "labels.csv"
+            if not labels_path.exists():
+                labels_path = embeddings_dir.parent / "labels.csv"
         slide_data = {}
 
         if labels_path.exists():
@@ -1215,7 +1314,7 @@ def create_app(
 
         # When filtering by project, only include slides whose embeddings
         # exist in the project's embeddings directory.
-        if project_id and _fallback_embeddings_dir != embeddings_dir:
+        if proj_cfg:
             # Scan the project-specific embeddings directory
             _project_slide_ids = []
             if _fallback_embeddings_dir.exists():
@@ -1269,7 +1368,7 @@ def create_app(
                 level0_dir = _fallback_embeddings_dir / "level0"
                 if level0_dir.exists():
                     has_level0 = (level0_dir / f"{slide_id}.npy").exists()
-                elif project_id and _fallback_embeddings_dir != embeddings_dir:
+                elif proj_cfg:
                     # Project-specific embeddings dir (e.g. data/luad/embeddings)
                     # that isn't named "level0" and has no level0/ subdirectory.
                     # Treat these as level 0 embeddings (full-resolution patches).
@@ -1476,19 +1575,12 @@ def create_app(
 
         slide_id = request.slide_id
         
-        # Resolve project-specific embeddings directory if project_id is given
-        _analysis_embeddings_dir = embeddings_dir
-        if request.project_id and project_registry:
-            proj_cfg = project_registry.get_project(request.project_id)
-            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
-                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
-                # Resolve relative paths against _data_root's parent (project root)
-                if not proj_emb_dir.is_absolute():
-                    proj_emb_dir = _data_root.parent / proj_emb_dir
-                if proj_emb_dir.exists():
-                    _analysis_embeddings_dir = proj_emb_dir
-                    logger.info(f"analyze_slide: Using project embeddings dir: {_analysis_embeddings_dir}")
-        
+        project_requested = request.project_id is not None
+        _analysis_embeddings_dir = _resolve_project_embeddings_dir(
+            request.project_id,
+            require_exists=project_requested,
+        )
+
         emb_path = _analysis_embeddings_dir / f"{slide_id}.npy"
 
         if not emb_path.exists():
@@ -1500,14 +1592,12 @@ def create_app(
         # Run prediction
         score, attention = classifier.predict(embeddings)
         threshold = classifier.threshold
-        # Use project-aware labels
-        _pos_label = "RESPONDER"
-        _neg_label = "NON-RESPONDER"
-        if request.project_id and project_registry:
-            _proj = project_registry.get_project(request.project_id)
-            if _proj and _proj.classes:
-                _pos_label = _proj.positive_class.upper() if _proj.positive_class else _proj.classes[-1].upper()
-                _neg_label = [c for c in _proj.classes if c.lower() != _pos_label.lower()][0].upper() if len(_proj.classes) > 1 else "NEGATIVE"
+        _pos_label, _neg_label = _resolve_project_label_pair(
+            request.project_id,
+            positive_default="RESPONDER",
+            negative_default="NON-RESPONDER",
+            uppercase=True,
+        )
         label = _pos_label if score >= threshold else _neg_label
         # Confidence based on distance from threshold, normalized to [0,1]
         if score >= threshold:
@@ -1548,6 +1638,7 @@ def create_app(
 
         # Get similar cases using slide-mean cosine similarity (same as /api/similar)
         similar_cases = []
+        allowed_slide_ids = _project_slide_ids(request.project_id)
         if slide_mean_index is not None:
             try:
                 q = np.asarray(embeddings, dtype=np.float32).mean(axis=0)
@@ -1563,6 +1654,8 @@ def create_app(
                         continue
                     sid = slide_mean_ids[int(idx_val)]
                     if sid == slide_id or sid in seen_slides:
+                        continue
+                    if allowed_slide_ids is not None and sid not in allowed_slide_ids:
                         continue
                     seen_slides.add(sid)
                     meta = slide_mean_meta.get(sid, {})
@@ -1588,6 +1681,8 @@ def create_app(
                     meta = s.get("metadata", {})
                     sid = meta.get("slide_id", "unknown")
                     if sid != slide_id and sid not in seen_slides:
+                        if allowed_slide_ids is not None and sid not in allowed_slide_ids:
+                            continue
                         seen_slides.add(sid)
                         case_label = slide_labels.get(sid)
                         similar_cases.append({
@@ -1645,17 +1740,17 @@ def create_app(
         if classifier is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
 
-        # Resolve project-specific embeddings directory
-        _batch_embeddings_dir = embeddings_dir
-        if hasattr(request, 'project_id') and request.project_id and project_registry:
-            proj_cfg = project_registry.get_project(request.project_id)
-            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
-                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
-                if not proj_emb_dir.is_absolute():
-                    proj_emb_dir = _data_root.parent / proj_emb_dir
-                if proj_emb_dir.exists():
-                    _batch_embeddings_dir = proj_emb_dir
-                    logger.info(f"analyze_batch: Using project embeddings dir: {_batch_embeddings_dir}")
+        project_requested = getattr(request, "project_id", None) is not None
+        _batch_embeddings_dir = _resolve_project_embeddings_dir(
+            getattr(request, "project_id", None),
+            require_exists=project_requested,
+        )
+        _b_pos, _b_neg = _resolve_project_label_pair(
+            getattr(request, "project_id", None),
+            positive_default="RESPONDER",
+            negative_default="NON-RESPONDER",
+            uppercase=True,
+        )
 
         results = []
         for slide_id in request.slide_ids:
@@ -1681,14 +1776,6 @@ def create_app(
 
                 # Run prediction
                 score, attention = classifier.predict(embeddings)
-                # Use project-aware labels
-                _b_pos = "RESPONDER"
-                _b_neg = "NON-RESPONDER"
-                if hasattr(request, 'project_id') and request.project_id and project_registry:
-                    _bproj = project_registry.get_project(request.project_id)
-                    if _bproj and _bproj.classes:
-                        _b_pos = _bproj.positive_class.upper() if _bproj.positive_class else _bproj.classes[-1].upper()
-                        _b_neg = [c for c in _bproj.classes if c.lower() != _b_pos.lower()][0].upper() if len(_bproj.classes) > 1 else "NEGATIVE"
                 _b_threshold = classifier.threshold
                 label = _b_pos if score >= _b_threshold else _b_neg
                 confidence = abs(score - _b_threshold) * 2
@@ -1749,13 +1836,8 @@ def create_app(
         completed = [r for r in results if r.error is None]
         failed = [r for r in results if r.error is not None]
         # Count positive vs negative predictions (project-aware)
-        _batch_pos_label = "RESPONDER"
-        if hasattr(request, 'project_id') and request.project_id and project_registry:
-            _bproj2 = project_registry.get_project(request.project_id)
-            if _bproj2 and _bproj2.positive_class:
-                _batch_pos_label = _bproj2.positive_class.upper()
-        responders = [r for r in completed if r.prediction == _batch_pos_label]
-        non_responders = [r for r in completed if r.prediction != _batch_pos_label]
+        responders = [r for r in completed if r.prediction == _b_pos]
+        non_responders = [r for r in completed if r.prediction != _b_pos]
         uncertain = [r for r in completed if r.requires_review]
         avg_confidence = (
             sum(r.confidence for r in completed) / len(completed)
@@ -1823,6 +1905,10 @@ def create_app(
             default=False,
             description="Force re-computation of embeddings even if cached"
         )
+        project_id: Optional[str] = Field(
+            default=None,
+            description="Project ID to scope embeddings and labels"
+        )
 
     class AsyncBatchResponse(BaseModel):
         """Response from async batch analysis start."""
@@ -1848,6 +1934,23 @@ def create_app(
         if classifier is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
 
+        _resolve_project_embeddings_dir(
+            request.project_id,
+            require_exists=request.project_id is not None,
+        )
+        allowed_model_ids = await _resolve_project_model_ids(request.project_id)
+        if request.model_ids is not None and allowed_model_ids is not None:
+            disallowed = sorted(set(request.model_ids) - allowed_model_ids)
+            if disallowed:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "MODELS_NOT_ALLOWED_FOR_PROJECT",
+                        "project_id": request.project_id,
+                        "disallowed_models": disallowed,
+                    },
+                )
+
         # Create task
         task = batch_task_manager.create_task(request.slide_ids)
 
@@ -1860,6 +1963,7 @@ def create_app(
                 model_ids=request.model_ids,
                 level=request.level,
                 force_reembed=request.force_reembed,
+                project_id=request.project_id,
             )
 
         background_tasks.add_task(run_batch_analysis)
@@ -1878,6 +1982,7 @@ def create_app(
         model_ids: Optional[List[str]] = None,
         level: int = 1,
         force_reembed: bool = False,
+        project_id: Optional[str] = None,
     ):
         """Background task to run batch analysis with progress tracking."""
         import time
@@ -1895,21 +2000,54 @@ def create_app(
         )
 
         use_multi_model = model_ids is not None and multi_model_inference is not None
+        project_requested = project_id is not None
+        try:
+            batch_embeddings_dir = _resolve_project_embeddings_dir(
+                project_id,
+                require_exists=project_requested,
+            )
+            project_pos_label, project_neg_label = _resolve_project_label_pair(
+                project_id,
+                positive_default="RESPONDER",
+                negative_default="NON-RESPONDER",
+                uppercase=True,
+            )
+        except Exception as e:
+            batch_task_manager.update_task(
+                task_id,
+                status=BatchTaskStatus.FAILED,
+                error=str(e),
+                message=f"Batch analysis failed: {str(e)}",
+            )
+            return
+
+        effective_model_ids = list(model_ids or [])
 
         def _resolve_emb_path(slide_id: str):
-            """Resolve embedding path based on requested level."""
+            """Resolve embedding path based on requested level and project scope."""
+            candidate_dirs: List[Path] = []
             if level == 0:
-                p = embeddings_dir / f"{slide_id}.npy"
-                if p.exists():
-                    return p
-                p = embeddings_dir / "level0" / f"{slide_id}.npy"
-                return p if p.exists() else None
+                if batch_embeddings_dir.name == "level0":
+                    candidate_dirs.append(batch_embeddings_dir)
+                else:
+                    candidate_dirs.extend([batch_embeddings_dir / "level0", batch_embeddings_dir])
+                if not project_requested and batch_embeddings_dir != embeddings_dir:
+                    if embeddings_dir.name == "level0":
+                        candidate_dirs.append(embeddings_dir)
+                    else:
+                        candidate_dirs.extend([embeddings_dir / "level0", embeddings_dir])
             else:
-                p = embeddings_dir / f"{slide_id}.npy"
+                candidate_dirs.append(batch_embeddings_dir)
+                if batch_embeddings_dir.name != "level1":
+                    candidate_dirs.append(batch_embeddings_dir / "level1")
+                if not project_requested and batch_embeddings_dir != embeddings_dir:
+                    candidate_dirs.extend([embeddings_dir, embeddings_dir / "level1"])
+
+            for d in candidate_dirs:
+                p = d / f"{slide_id}.npy"
                 if p.exists():
                     return p
-                p = embeddings_dir / "level1" / f"{slide_id}.npy"
-                return p if p.exists() else None
+            return None
 
         def analyze_single_slide(slide_id: str) -> BatchSlideResult:
             """Analyze a single slide and return result."""
@@ -1932,7 +2070,14 @@ def create_app(
                     primary_label = "UNKNOWN"
                     primary_conf = 0.0
 
-                    for i, mid in enumerate(model_ids):
+                    if not effective_model_ids:
+                        return BatchSlideResult(
+                            slide_id=slide_id,
+                            prediction="ERROR",
+                            error="No permitted models available for this request",
+                        )
+
+                    for i, mid in enumerate(effective_model_ids):
                         try:
                             model_obj = multi_model_inference.models.get(mid)
                             if model_obj is None:
@@ -2003,16 +2148,9 @@ def create_app(
 
                 # Single classifier path (legacy)
                 score, attention = classifier.predict(embeddings)
-                # Use project labels if available
-                _lp = "RESPONDER"
-                _ln = "NON-RESPONDER"
-                if project_id and project_registry:
-                    _lproj = project_registry.get_project(project_id)
-                    if _lproj and _lproj.classes:
-                        _lp = _lproj.positive_class.upper() if _lproj.positive_class else _lproj.classes[-1].upper()
-                        _ln = [c for c in _lproj.classes if c.lower() != _lp.lower()][0].upper() if len(_lproj.classes) > 1 else "NEGATIVE"
-                label = _lp if score > 0.5 else _ln
-                confidence = abs(score - 0.5) * 2
+                threshold_val = getattr(classifier, "threshold", 0.5)
+                label = project_pos_label if score >= threshold_val else project_neg_label
+                confidence = abs(score - threshold_val) * 2
 
                 if confidence < 0.3:
                     uncertainty_level = "high"
@@ -2442,11 +2580,21 @@ def create_app(
             total=len(all_entries),
         )
 
-    def _load_patient_context(slide_id: str) -> Optional[Dict[str, Any]]:
-        """Load patient context from labels.csv for a given slide."""
-        labels_path = _data_root / "labels.csv"
-        if not labels_path.exists():
-            labels_path = embeddings_dir.parent / "labels.csv"
+    def _load_patient_context(slide_id: str, project_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Load patient context from labels file for a given slide."""
+        labels_path: Optional[Path] = None
+        proj_cfg = _require_project(project_id)
+        if proj_cfg:
+            candidate = Path(proj_cfg.dataset.labels_file)
+            if not candidate.is_absolute():
+                candidate = _data_root.parent / candidate
+            labels_path = candidate
+
+        if labels_path is None:
+            labels_path = _data_root / "labels.csv"
+            if not labels_path.exists():
+                labels_path = embeddings_dir.parent / "labels.csv"
+
         if not labels_path.exists():
             return None
 
@@ -2522,20 +2670,14 @@ def create_app(
             raise HTTPException(status_code=503, detail="Model not loaded")
 
         slide_id = request.slide_id
-        
-        # Resolve project-specific embeddings directory if project_id is given
-        _report_embeddings_dir = embeddings_dir
-        if request.project_id and project_registry:
-            proj_cfg = project_registry.get_project(request.project_id)
-            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
-                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
-                # Resolve relative paths against _data_root's parent (project root)
-                if not proj_emb_dir.is_absolute():
-                    proj_emb_dir = _data_root.parent / proj_emb_dir
-                if proj_emb_dir.exists():
-                    _report_embeddings_dir = proj_emb_dir
-                    logger.info(f"generate_report: Using project embeddings dir: {_report_embeddings_dir}")
-        
+
+        project_requested = request.project_id is not None
+        proj_cfg = _require_project(request.project_id)
+        _report_embeddings_dir = _resolve_project_embeddings_dir(
+            request.project_id,
+            require_exists=project_requested,
+        )
+
         emb_path = _report_embeddings_dir / f"{slide_id}.npy"
         coord_path = _report_embeddings_dir / f"{slide_id}_coords.npy"
 
@@ -2545,18 +2687,16 @@ def create_app(
         embeddings = np.load(emb_path)
         score, attention = classifier.predict(embeddings)
         threshold = classifier.threshold
-        # Use project-aware labels (same logic as /api/analyze)
-        _pos_label = "responder"
-        _neg_label = "non-responder"
-        if request.project_id and project_registry:
-            _proj = project_registry.get_project(request.project_id)
-            if _proj and _proj.classes:
-                _pos_label = _proj.positive_class if _proj.positive_class else _proj.classes[-1]
-                _neg_label = [c for c in _proj.classes if c.lower() != _pos_label.lower()][0] if len(_proj.classes) > 1 else "negative"
+        _pos_label, _neg_label = _resolve_project_label_pair(
+            request.project_id,
+            positive_default="responder",
+            negative_default="non-responder",
+            uppercase=False,
+        )
         label = _pos_label if score >= threshold else _neg_label
 
         # Load patient context
-        patient_ctx = _load_patient_context(slide_id)
+        patient_ctx = _load_patient_context(slide_id, request.project_id)
 
         # Get top evidence patches with coordinates
         top_k = min(8, len(attention))
@@ -2579,12 +2719,16 @@ def create_app(
 
         # Get similar cases
         similar_cases = []
+        allowed_slide_ids = _project_slide_ids(request.project_id)
         if evidence_gen is not None:
             try:
                 similar_results = evidence_gen.find_similar(
                     embeddings, attention, k=5, top_patches=3
                 )
                 for s in similar_results:
+                    sid = s.get("slide_id") if isinstance(s, dict) else None
+                    if allowed_slide_ids is not None and sid and sid not in allowed_slide_ids:
+                        continue
                     similar_cases.append(s)
             except Exception as e:
                 logger.warning(f"Similar case search failed for report: {e}")
@@ -2618,11 +2762,7 @@ def create_app(
             logger.warning(f"Could not compute quality metrics: {e}")
 
         # Look up cancer type from project config (used by both decision support and MedGemma)
-        cancer_type = "Cancer"  # Default fallback
-        if request.project_id and project_registry:
-            proj_cfg = project_registry.get_project(request.project_id)
-            if proj_cfg:
-                cancer_type = proj_cfg.cancer_type if hasattr(proj_cfg, 'cancer_type') else proj_cfg.get("cancer_type", "Cancer")
+        cancer_type = (proj_cfg.cancer_type if proj_cfg else "Cancer") or "Cancer"
 
         # Generate clinical decision support
         decision_support_data = None
@@ -2839,9 +2979,9 @@ regions that contributed most significantly to the prediction.
 
 Key morphological features observed in high-attention regions include: {tissue_summary}.
 
-{"POSITIVE INTERPRETATION" if label == "responder" else "NEGATIVE INTERPRETATION"}
+{"POSITIVE INTERPRETATION" if label == _pos_label else "NEGATIVE INTERPRETATION"}
 ---------------------------------
-{"The morphological patterns identified by the model suggest features associated with the positive class in the training cohort. These patterns may include specific tumor architecture, stromal characteristics, or inflammatory infiltrate distributions that have been correlated with the predicted outcome." if label == "responder" else "The morphological patterns identified by the model suggest features associated with the negative class in the training cohort. Further clinical evaluation is recommended to determine appropriate treatment strategies."}
+{"The morphological patterns identified by the model suggest features associated with the positive class in the training cohort. These patterns may include specific tumor architecture, stromal characteristics, or inflammatory infiltrate distributions that have been correlated with the predicted outcome." if label == _pos_label else "The morphological patterns identified by the model suggest features associated with the negative class in the training cohort. Further clinical evaluation is recommended to determine appropriate treatment strategies."}
 
 SIMILAR CASES
 -------------
@@ -2888,9 +3028,15 @@ should incorporate all available clinical, pathological, and molecular data."""
         Report generation typically takes 20-60 seconds depending on model warmup.
         """
         slide_id = request.slide_id
-        
+
+        project_requested = request.project_id is not None
+        report_embeddings_dir = _resolve_project_embeddings_dir(
+            request.project_id,
+            require_exists=project_requested,
+        )
+
         # Check if slide exists
-        emb_path = embeddings_dir / f"{slide_id}.npy"
+        emb_path = report_embeddings_dir / f"{slide_id}.npy"
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
         
@@ -2951,24 +3097,22 @@ should incorporate all available clinical, pathological, and molecular data."""
             message="Loading embeddings and running analysis..."
         )
         
-        # Resolve project-specific embeddings directory and cancer type
-        _report_embeddings_dir = embeddings_dir
-        cancer_type = "Cancer"  # Default fallback
-        if project_id and project_registry:
-            proj_cfg = project_registry.get_project(project_id)
-            if proj_cfg:
-                # Get cancer type from project config
-                cancer_type = proj_cfg.cancer_type or proj_cfg.name or "Cancer"
-                # Get project-specific embeddings directory
-                if hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
-                    proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
-                    if not proj_emb_dir.is_absolute():
-                        proj_emb_dir = _data_root.parent / proj_emb_dir
-                    if proj_emb_dir.exists():
-                        _report_embeddings_dir = proj_emb_dir
-                        logger.info(f"_generate_report_background: Using project embeddings dir: {_report_embeddings_dir}")
-        
         try:
+            # Resolve project-specific embeddings directory and cancer type
+            proj_cfg = _require_project(project_id)
+            project_requested = project_id is not None
+            _report_embeddings_dir = _resolve_project_embeddings_dir(
+                project_id,
+                require_exists=project_requested,
+            )
+            cancer_type = (proj_cfg.cancer_type if proj_cfg else "Cancer") or "Cancer"
+            positive_label, negative_label = _resolve_project_label_pair(
+                project_id,
+                positive_default="responder",
+                negative_default="non-responder",
+                uppercase=False,
+            )
+
             # Load embeddings
             emb_path = _report_embeddings_dir / f"{slide_id}.npy"
             coord_path = _report_embeddings_dir / f"{slide_id}_coords.npy"
@@ -2981,7 +3125,8 @@ should incorporate all available clinical, pathological, and molecular data."""
             )
             
             score, attention = classifier.predict(embeddings)
-            label = "responder" if score > 0.5 else "non-responder"
+            threshold_val = getattr(classifier.config, "threshold", 0.5)
+            label = positive_label if score >= threshold_val else negative_label
             
             report_task_manager.update_task(task_id,
                 progress=30,
@@ -2990,7 +3135,7 @@ should incorporate all available clinical, pathological, and molecular data."""
             )
             
             # Load patient context
-            patient_ctx = _load_patient_context(slide_id)
+            patient_ctx = _load_patient_context(slide_id, project_id)
             
             # Get top evidence patches
             top_k = min(8, len(attention))
@@ -3017,12 +3162,16 @@ should incorporate all available clinical, pathological, and molecular data."""
             
             # Get similar cases
             similar_cases = []
+            allowed_slide_ids = _project_slide_ids(project_id)
             if include_similar and evidence_gen is not None:
                 try:
                     similar_results = evidence_gen.find_similar(
                         embeddings, attention, k=5, top_patches=3
                     )
                     for s in similar_results:
+                        sid = s.get("slide_id") if isinstance(s, dict) else None
+                        if allowed_slide_ids is not None and sid and sid not in allowed_slide_ids:
+                            continue
                         similar_cases.append(s)
                 except Exception as e:
                     logger.warning(f"Similar case search failed: {e}")
@@ -3515,17 +3664,11 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         if classifier is None or evidence_gen is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
 
-        # Resolve project-specific embeddings directory if project_id is given
-        _heatmap_embeddings_dir = embeddings_dir
-        if project_id and project_registry:
-            proj_cfg = project_registry.get_project(project_id)
-            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
-                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
-                if not proj_emb_dir.is_absolute():
-                    proj_emb_dir = _data_root.parent / proj_emb_dir
-                if proj_emb_dir.exists():
-                    _heatmap_embeddings_dir = proj_emb_dir
-                    logger.info(f"get_heatmap: Using project embeddings dir: {_heatmap_embeddings_dir}")
+        project_requested = project_id is not None
+        _heatmap_embeddings_dir = _resolve_project_embeddings_dir(
+            project_id,
+            require_exists=project_requested,
+        )
 
         emb_path = _heatmap_embeddings_dir / f"{slide_id}.npy"
         coord_path = _heatmap_embeddings_dir / f"{slide_id}_coords.npy"
@@ -3595,7 +3738,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             raise HTTPException(status_code=500, detail=f"Heatmap generation failed: {str(e)}")
         
         # Get actual slide dimensions from slide file
-        slide_path = resolve_slide_path(slide_id)
+        slide_path = resolve_slide_path(slide_id, project_id=project_id)
         if slide_path is not None and slide_path.exists():
             try:
                 import openslide
@@ -3727,17 +3870,12 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         if slide_mean_index is None:
             raise HTTPException(status_code=503, detail="Similarity index not available")
 
-        # Resolve project-specific embeddings directory if project_id is given
-        _similar_embeddings_dir = embeddings_dir
-        if project_id and project_registry:
-            proj_cfg = project_registry.get_project(project_id)
-            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
-                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
-                if not proj_emb_dir.is_absolute():
-                    proj_emb_dir = _data_root.parent / proj_emb_dir
-                if proj_emb_dir.exists():
-                    _similar_embeddings_dir = proj_emb_dir
-                    logger.info(f"get_similar_cases: Using project embeddings dir: {_similar_embeddings_dir}")
+        project_requested = project_id is not None
+        _similar_embeddings_dir = _resolve_project_embeddings_dir(
+            project_id,
+            require_exists=project_requested,
+        )
+        allowed_slide_ids = _project_slide_ids(project_id)
 
         emb_path = _similar_embeddings_dir / f"{slide_id}.npy"
         if not emb_path.exists():
@@ -3762,6 +3900,8 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 continue
             sid = slide_mean_ids[int(idx)]
             if sid == slide_id or sid in seen:
+                continue
+            if allowed_slide_ids is not None and sid not in allowed_slide_ids:
                 continue
             seen.add(sid)
 
@@ -3820,18 +3960,12 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
         slide_id = request.slide_id
         
-        # Resolve project-specific embeddings directory if project_id is given
-        _search_embeddings_dir = embeddings_dir
-        if request.project_id and project_registry:
-            proj_cfg = project_registry.get_project(request.project_id)
-            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
-                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
-                if not proj_emb_dir.is_absolute():
-                    proj_emb_dir = _data_root.parent / proj_emb_dir
-                if proj_emb_dir.exists():
-                    _search_embeddings_dir = proj_emb_dir
-                    logger.info(f"semantic_search: Using project embeddings dir: {_search_embeddings_dir}")
-        
+        project_requested = request.project_id is not None
+        _search_embeddings_dir = _resolve_project_embeddings_dir(
+            request.project_id,
+            require_exists=project_requested,
+        )
+
         emb_path = _search_embeddings_dir / f"{slide_id}.npy"
         coord_path = _search_embeddings_dir / f"{slide_id}_coords.npy"
 
@@ -3863,7 +3997,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             else:
                 # On-the-fly MedSigLIP embedding: extract patches from WSI and embed
                 siglip_embeddings = None
-                wsi_result = get_slide_and_dz(slide_id)
+                wsi_result = get_slide_and_dz(slide_id, project_id=request.project_id)
                 coord_path_check = _search_embeddings_dir / f"{slide_id}_coords.npy"
                 
                 if wsi_result is not None and coord_path_check.exists():
@@ -4338,6 +4472,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         project_id: Optional[str] = Query(None, description="Optional project id to resolve project-specific WSI paths"),
     ):
         """Get/HEAD Deep Zoom Image descriptor for OpenSeadragon."""
+        _require_project(project_id)
         result = get_slide_and_dz(slide_id, project_id=project_id)
         if result is None:
             raise HTTPException(
@@ -4387,6 +4522,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         project_id: Optional[str] = Query(None, description="Optional project id to resolve project-specific WSI paths"),
     ):
         """Serve a single DZI tile image."""
+        _require_project(project_id)
         result = get_slide_and_dz(slide_id, project_id=project_id)
         if result is None:
             raise HTTPException(
@@ -4448,9 +4584,11 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         clients never render broken image icons.
         """
         size = max(64, min(size, 1024))
+        _require_project(project_id)
 
         # Check disk cache first
-        cache_path = thumbnail_cache_dir / f"{slide_id}_{size}.jpg"
+        cache_prefix = project_id if project_id else "global"
+        cache_path = thumbnail_cache_dir / f"{cache_prefix}_{slide_id}_{size}.jpg"
         if cache_path.exists():
             return FileResponse(
                 cache_path,
@@ -4919,7 +5057,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
     async def list_available_models(project_id: Optional[str] = Query(None, description="Filter models by project")):
         """
         List all available TransMIL models.
-        
+
         Returns model metadata including:
         - Model ID and display name
         - Description of what the model predicts
@@ -4927,45 +5065,18 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         - Number of training slides
         - Category (cancer-specific or general_pathology)
 
-        When project_id is provided, only returns models assigned to that
-        project via the project_models junction table.
+        When project_id is provided, model visibility is resolved via:
+        1) project_models DB assignments, then
+        2) projects.yaml classification_models fallback.
         """
         if multi_model_inference is None:
             raise HTTPException(status_code=503, detail="Multi-model inference not initialized")
-        
+
         models = multi_model_inference.get_available_models()
+        allowed_ids = await _resolve_project_model_ids(project_id)
 
-        if project_id:
-            # Validate project exists
-            project_exists = False
-            if project_registry and project_registry.get_project(project_id):
-                project_exists = True
-            if not project_exists:
-                try:
-                    # Check DB as well - only count as existing if there are actual models
-                    db_models = await db.get_project_models(project_id)
-                    if db_models:  # Non-empty list means project exists in DB
-                        project_exists = True
-                except Exception:
-                    pass
-            if not project_exists:
-                return AvailableModelsResponse(models=[])
-
-            allowed_ids = set()
-            try:
-                allowed_ids = set(await db.get_project_models(project_id))
-            except Exception as e:
-                logger.warning(f"DB model query failed for {project_id}: {e}")
-
-            # Fall through to YAML config if DB returned empty
-            if not allowed_ids and project_registry:
-                proj_cfg = project_registry.get_project(project_id)
-                if proj_cfg and proj_cfg.classification_models:
-                    allowed_ids = set(proj_cfg.classification_models)
-                    logger.info(f"Using YAML classification_models for {project_id}: {allowed_ids}")
-
-            if allowed_ids:
-                models = [m for m in models if m.get("id", m.get("model_id")) in allowed_ids]
+        if allowed_ids is not None:
+            models = [m for m in models if m.get("id", m.get("model_id")) in allowed_ids]
 
         return AvailableModelsResponse(models=models)
 
@@ -5719,50 +5830,60 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
     async def analyze_slide_multi(request: MultiModelRequest):
         """
         Analyze a slide with multiple TransMIL models.
-        
+
         This endpoint runs all (or selected) trained models on a slide:
-        
+
         **Ovarian Cancer Specific:**
         - Platinum Sensitivity (AUC 0.907): Predicts platinum chemotherapy response
         - 5-Year Survival (AUC 0.697): Predicts 5-year overall survival
         - 3-Year Survival (AUC 0.645): Predicts 3-year overall survival
         - 1-Year Survival (AUC 0.639): Predicts 1-year overall survival
-        
+
         **General Pathology:**
         - Tumor Grade (AUC 0.752): Predicts high vs low tumor grade
-        
+
         Use the `models` parameter to select specific models, or leave empty for all.
         Set `level=0` for full-resolution analysis (requires pre-generated level 0 embeddings).
         """
         import time
         start_time = time.time()
-        
+
         if multi_model_inference is None:
             raise HTTPException(status_code=503, detail="Multi-model inference not initialized")
-        
+
         slide_id = request.slide_id
-        level = request.level  # Get requested resolution level
-        
+        level = request.level
+
+        allowed_model_ids = await _resolve_project_model_ids(request.project_id)
+        if request.models is not None:
+            effective_model_ids = list(request.models)
+            if allowed_model_ids is not None:
+                disallowed = sorted(set(effective_model_ids) - allowed_model_ids)
+                if disallowed:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": "MODELS_NOT_ALLOWED_FOR_PROJECT",
+                            "project_id": request.project_id,
+                            "disallowed_models": disallowed,
+                        },
+                    )
+        else:
+            effective_model_ids = sorted(allowed_model_ids) if allowed_model_ids is not None else None
+
         # Cache check: if not forcing, look for existing results in the DB
         if not request.force:
             try:
                 cached = await db.get_all_cached_results(slide_id)
                 if cached:
-                    # Build a response from cached results
                     cached_predictions = {}
                     cached_by_cat: Dict[str, list] = {}
-                    # Determine allowed models: explicit list > project scope > all
-                    requested_models = set(request.models) if request.models else None
-                    if requested_models is None and request.project_id and project_registry:
-                        _proj_cfg = project_registry.get_project(request.project_id)
-                        if _proj_cfg and _proj_cfg.classification_models:
-                            requested_models = set(_proj_cfg.classification_models)
+                    requested_models = set(effective_model_ids) if effective_model_ids else None
 
                     for row in cached:
                         mid = row["model_id"]
                         if requested_models and mid not in requested_models:
                             continue
-                        # Look up model config for display metadata
                         cfg = MODEL_CONFIGS.get(mid, {})
                         pred_dict = {
                             "model_id": mid,
@@ -5782,7 +5903,6 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                         cat = cfg.get("category", "general_pathology")
                         cached_by_cat.setdefault(cat, []).append(mp)
 
-                    # Only return cached if we found at least one matching result
                     if cached_predictions:
                         processing_time = (time.time() - start_time) * 1000
                         logger.info(f"Returning cached results for {slide_id} ({len(cached_predictions)} models)")
@@ -5795,40 +5915,34 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                             warnings=["Results loaded from cache"],
                         )
             except Exception as e:
-                # Cache lookup failed; continue with fresh analysis
                 logger.warning(f"Cache lookup failed for {slide_id}, running fresh: {e}")
-        
-        # Resolve project-specific embeddings directory if project_id is given
-        _analysis_embeddings_dir = embeddings_dir
-        if request.project_id and project_registry:
-            proj_cfg = project_registry.get_project(request.project_id)
-            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
-                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
-                # Resolve relative paths against _data_root's parent (project root)
-                if not proj_emb_dir.is_absolute():
-                    proj_emb_dir = _data_root.parent / proj_emb_dir
-                if proj_emb_dir.exists():
-                    _analysis_embeddings_dir = proj_emb_dir
-                    logger.info(f"Using project embeddings dir: {_analysis_embeddings_dir}")
-        
-        # Determine embedding path based on level
-        # _analysis_embeddings_dir may already point to level0 (auto-detected at startup)
+
+        project_requested = request.project_id is not None
+        analysis_embeddings_dir = _resolve_project_embeddings_dir(
+            request.project_id,
+            require_exists=project_requested,
+        )
+
+        emb_path: Optional[Path] = None
         if level == 0:
-            # Try _analysis_embeddings_dir directly first (it may already be level0)
-            emb_path = _analysis_embeddings_dir / f"{slide_id}.npy"
-            if not emb_path.exists():
-                # Try explicit level0 subdir
-                level0_dir = _analysis_embeddings_dir / "level0"
-                emb_path = level0_dir / f"{slide_id}.npy"
-            # Also try the default embeddings_dir as fallback
-            if not emb_path.exists():
-                emb_path = embeddings_dir / f"{slide_id}.npy"
-            if not emb_path.exists():
-                level0_dir = embeddings_dir / "level0"
-                emb_path = level0_dir / f"{slide_id}.npy"
-            
-            # Block analysis if level 0 embeddings don't exist
-            if not emb_path.exists():
+            candidate_dirs = []
+            if analysis_embeddings_dir.name == "level0":
+                candidate_dirs.append(analysis_embeddings_dir)
+            else:
+                candidate_dirs.extend([analysis_embeddings_dir / "level0", analysis_embeddings_dir])
+            if not project_requested:
+                if embeddings_dir.name == "level0":
+                    candidate_dirs.append(embeddings_dir)
+                else:
+                    candidate_dirs.extend([embeddings_dir / "level0", embeddings_dir])
+
+            for d in candidate_dirs:
+                cand = d / f"{slide_id}.npy"
+                if cand.exists():
+                    emb_path = cand
+                    break
+
+            if emb_path is None:
                 raise HTTPException(
                     status_code=400,
                     detail={
@@ -5837,34 +5951,30 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                         "needs_embedding": True,
                         "slide_id": slide_id,
                         "level": 0,
+                        "project_id": request.project_id,
                     }
                 )
         else:
-            # Default level: use project-specific or global embeddings_dir
-            emb_path = _analysis_embeddings_dir / f"{slide_id}.npy"
-            if not emb_path.exists() and _analysis_embeddings_dir != embeddings_dir:
-                emb_path = embeddings_dir / f"{slide_id}.npy"
-            if not emb_path.exists():
-                level1_dir = _data_root / "embeddings" / "level1"
-                level1_emb_path = level1_dir / f"{slide_id}.npy"
-                if level1_emb_path.exists():
-                    emb_path = level1_emb_path
-        
-        if not emb_path.exists():
+            candidate_dirs = [analysis_embeddings_dir]
+            if analysis_embeddings_dir.name != "level1":
+                candidate_dirs.append(analysis_embeddings_dir / "level1")
+            if not project_requested:
+                candidate_dirs.extend([
+                    embeddings_dir,
+                    _data_root / "embeddings" / "level1",
+                ])
+
+            for d in candidate_dirs:
+                cand = d / f"{slide_id}.npy"
+                if cand.exists():
+                    emb_path = cand
+                    break
+
+        if emb_path is None or not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
-        
-        # Load embeddings
+
         embeddings = np.load(emb_path)
-        
-        # Determine which models to run: explicit list > project scope > all
-        effective_model_ids = request.models
-        if effective_model_ids is None and request.project_id and project_registry:
-            proj_cfg = project_registry.get_project(request.project_id)
-            if proj_cfg and hasattr(proj_cfg, 'classification_models') and proj_cfg.classification_models:
-                effective_model_ids = list(proj_cfg.classification_models)
-                logger.info(f"Scoping models to project {request.project_id}: {effective_model_ids}")
-        
-        # Run multi-model inference
+
         try:
             results = multi_model_inference.predict_all(
                 embeddings,
@@ -5874,13 +5984,11 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         except Exception as e:
             logger.error(f"Multi-model inference failed: {e}")
             raise HTTPException(status_code=500, detail=f"Inference failed: {str(e)}")
-        
+
         processing_time = (time.time() - start_time) * 1000
-        
-        # Convert to Pydantic models
+
         def _normalize_prediction_dict(p: Dict[str, Any]) -> Dict[str, Any]:
             out = {k: v for k, v in p.items() if k != "attention"}
-            # Cap confidence to avoid misleading 99.99% displays from extreme sigmoid scores
             if "confidence" in out and out["confidence"] is not None:
                 try:
                     out["confidence"] = min(float(out["confidence"]), 0.99)
@@ -5899,8 +6007,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 ModelPrediction(**_normalize_prediction_dict(p))
                 for p in cat_preds if "error" not in p
             ]
-        
-        # Add simple logical consistency warnings for survival horizons
+
         warnings: List[str] = list(results.get("warnings") or [])
         try:
             s1 = predictions.get("survival_1y")
@@ -5908,30 +6015,26 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             s5 = predictions.get("survival_5y")
             if s1 and s3:
                 if s1.label == s1.negative_label and s3.label == s3.positive_label:
-                    msg = "Survival predictions inconsistent: 1-year predicts deceased but 3-year predicts survived"
-                    warnings.append(msg)
+                    warnings.append("Survival predictions inconsistent: 1-year predicts deceased but 3-year predicts survived")
             if s3 and s5:
                 if s3.label == s3.negative_label and s5.label == s5.positive_label:
-                    msg = "Survival predictions inconsistent: 3-year predicts deceased but 5-year predicts survived"
-                    warnings.append(msg)
+                    warnings.append("Survival predictions inconsistent: 3-year predicts deceased but 5-year predicts survived")
             if s1 and s5:
                 if s1.label == s1.negative_label and s5.label == s5.positive_label:
-                    msg = "Survival predictions inconsistent: 1-year predicts deceased but 5-year predicts survived"
-                    warnings.append(msg)
+                    warnings.append("Survival predictions inconsistent: 1-year predicts deceased but 5-year predicts survived")
         except Exception:
             pass
 
-        # Log to audit trail
         log_audit_event(
             "multi_model_analysis",
             slide_id,
             details={
                 "models_run": list(predictions.keys()),
                 "processing_time_ms": processing_time,
+                "project_id": request.project_id,
             },
         )
 
-        # Save results to DB for caching
         try:
             for mid, pred in predictions.items():
                 await db.save_analysis_result(
@@ -5982,27 +6085,33 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 detail=f"Unknown model: {model_id}. Available: {list(MODEL_CONFIGS.keys())}"
             )
         
-        # Resolve project-specific embeddings directory if project_id is given
-        _model_heatmap_embeddings_dir = embeddings_dir
-        if project_id and project_registry:
-            proj_cfg = project_registry.get_project(project_id)
-            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
-                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
-                if not proj_emb_dir.is_absolute():
-                    proj_emb_dir = _data_root.parent / proj_emb_dir
-                if proj_emb_dir.exists():
-                    _model_heatmap_embeddings_dir = proj_emb_dir
-                    logger.info(f"get_model_heatmap: Using project embeddings dir: {_model_heatmap_embeddings_dir}")
-        
+        project_requested = project_id is not None
+        _model_heatmap_embeddings_dir = _resolve_project_embeddings_dir(
+            project_id,
+            require_exists=project_requested,
+        )
+
+        allowed_model_ids = await _resolve_project_model_ids(project_id)
+        if allowed_model_ids is not None and model_id not in allowed_model_ids:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "MODEL_NOT_ALLOWED_FOR_PROJECT",
+                    "project_id": project_id,
+                    "model_id": model_id,
+                },
+            )
+
         # Check disk cache first (only for default alpha_power)
         cache_dir = _model_heatmap_embeddings_dir / "heatmap_cache"
         cache_dir.mkdir(exist_ok=True)
         is_default_alpha = abs(alpha_power - 0.7) < 0.01
-        cache_path = cache_dir / f"{slide_id}_{model_id}.png"
+        cache_suffix = project_id if project_id else "global"
+        cache_path = cache_dir / f"{cache_suffix}_{slide_id}_{model_id}.png"
         
         if is_default_alpha and cache_path.exists():
             # Serve cached heatmap — still need slide dims for headers
-            slide_path = resolve_slide_path(slide_id)
+            slide_path = resolve_slide_path(slide_id, project_id=project_id)
             _slide_dims = None
             if slide_path is not None and slide_path.exists():
                 try:
@@ -6084,7 +6193,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         # Generate heatmap image using EvidenceGenerator for proper coordinate scaling
         try:
             # Get actual slide dimensions
-            slide_path = resolve_slide_path(slide_id)
+            slide_path = resolve_slide_path(slide_id, project_id=project_id)
             if slide_path is not None and slide_path.exists():
                 try:
                     import openslide
