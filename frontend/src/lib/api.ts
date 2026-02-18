@@ -487,7 +487,8 @@ export async function analyzeSlide(
  */
 export async function fetchSimilarCases(
   slideId: string,
-  k: number = 5
+  k: number = 5,
+  projectId?: string
 ): Promise<SimilarCase[]> {
   interface BackendSimilarResponse {
     slide_id: string;
@@ -502,8 +503,13 @@ export async function fetchSimilarCases(
   }
 
   try {
+    const params = new URLSearchParams();
+    params.set('slide_id', slideId);
+    params.set('k', String(k));
+    if (projectId) params.set('project_id', projectId);
+    
     const backend = await fetchApi<BackendSimilarResponse>(
-      `/api/similar?slide_id=${encodeURIComponent(slideId)}&k=${k}`,
+      `/api/similar?${params.toString()}`,
       {},
       { timeoutMs: 10000 }
     );
@@ -699,12 +705,13 @@ export function getDziUrl(slideId: string): string {
  * 
  * Uses local Next.js API proxy to avoid CORS issues.
  */
-export function getHeatmapUrl(slideId: string, modelId?: string, level?: number, alphaPower?: number): string {
+export function getHeatmapUrl(slideId: string, modelId?: string, level?: number, alphaPower?: number, projectId?: string): string {
   const params = new URLSearchParams();
   if (level !== undefined) params.set('level', String(level));
   if (alphaPower !== undefined && Math.abs(alphaPower - 0.7) > 0.01) {
     params.set('alpha_power', alphaPower.toFixed(2));
   }
+  if (projectId) params.set('project_id', projectId);
   const qs = params.toString() ? `?${params.toString()}` : '';
   if (modelId) {
     return `/api/heatmap/${encodeURIComponent(slideId)}/${encodeURIComponent(modelId)}${qs}`;
@@ -820,7 +827,8 @@ interface BackendSemanticSearchResponse {
 export async function semanticSearch(
   slideId: string,
   query: string,
-  topK: number = 5
+  topK: number = 5,
+  projectId?: string
 ): Promise<SemanticSearchResponse> {
   const backend = await fetchApi<BackendSemanticSearchResponse>(
     "/api/semantic-search",
@@ -830,6 +838,7 @@ export async function semanticSearch(
         slide_id: slideId,
         query,
         top_k: topK,
+        project_id: projectId || null,
       }),
     },
     { timeoutMs: 30000 }

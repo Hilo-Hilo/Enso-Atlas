@@ -846,7 +846,7 @@ function HomePage() {
       setSearchError(null);
 
       try {
-        const response = await semanticSearch(selectedSlide.id, query, topK);
+        const response = await semanticSearch(selectedSlide.id, query, topK, currentProject?.id);
         setSemanticResults(response.results);
       } catch (err) {
         console.error("Semantic search failed:", err);
@@ -1645,7 +1645,7 @@ function HomePage() {
   
   // Build heatmap data with selected model
   const heatmapData = selectedSlide ? {
-    imageUrl: getHeatmapUrl(selectedSlide.id, heatmapModel || (AVAILABLE_MODELS[0]?.id ?? "platinum_sensitivity"), heatmapLevel, debouncedAlphaPower),
+    imageUrl: getHeatmapUrl(selectedSlide.id, heatmapModel || (AVAILABLE_MODELS[0]?.id ?? "platinum_sensitivity"), heatmapLevel, debouncedAlphaPower, currentProject?.id),
     minValue: 0,
     maxValue: 1,
     colorScale: "viridis" as const,
