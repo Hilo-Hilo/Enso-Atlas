@@ -1666,17 +1666,25 @@ function applyClientSideFilters(
     );
   }
 
-  // Label filter - map UI values to data values
+  // Label filter - map UI values to data values (project-aware)
   if (filters.label) {
-    // Data uses "1" for sensitive, "0" for resistant
+    // Generic label mapping for common patterns; also supports raw label matching
     const labelMap: Record<string, string> = {
       "platinum_sensitive": "1",
       "Sensitive": "1",
       "platinum_resistant": "0", 
       "Resistant": "0",
+      "Advanced": "1",
+      "Early": "0",
+      "ADVANCED": "1",
+      "EARLY": "0",
     };
     const dataLabel = labelMap[filters.label] ?? filters.label;
-    filtered = filtered.filter((s) => s.label === dataLabel);
+    // Try both mapped value and original label for case-insensitive matching
+    filtered = filtered.filter((s) => 
+      s.label === dataLabel || 
+      s.label?.toLowerCase() === filters.label?.toLowerCase()
+    );
   }
 
   // Embeddings filter

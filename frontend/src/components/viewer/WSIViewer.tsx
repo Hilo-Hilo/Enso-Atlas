@@ -1165,13 +1165,13 @@ export function WSIViewer({
     <div className="mb-3">
       <label className="text-xs text-gray-500 mb-1.5 block">Model</label>
       <select
-        value={heatmapModel ?? (HEATMAP_MODELS[0]?.id || "platinum_sensitivity")}
+        value={heatmapModel ?? ((availableModels.length > 0 ? availableModels : HEATMAP_MODELS)[0]?.id || "tumor_stage")}
         onChange={(e) => {
           onHeatmapModelChange?.(e.target.value);
         }}
         className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-md text-gray-700 focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:border-transparent"
       >
-        {HEATMAP_MODELS.map((model) => (
+        {(availableModels.length > 0 ? availableModels : HEATMAP_MODELS).map((model) => (
           <option key={model.id} value={model.id}>
             {model.name}
           </option>
