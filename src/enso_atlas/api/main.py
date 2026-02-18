@@ -467,6 +467,7 @@ class MultiModelRequest(BaseModel):
     """Request for multi-model analysis."""
     slide_id: str = Field(..., min_length=1, max_length=256)
     models: Optional[List[str]] = None  # None = run all models
+    project_id: Optional[str] = Field(default=None, description="Project ID to scope models to project's classification_models")
     return_attention: bool = False
     level: int = Field(default=1, ge=0, le=1, description="Resolution level: 0=full res, 1=downsampled")
     force: bool = Field(default=False, description="Bypass cache and force fresh analysis")
@@ -5520,11 +5521,19 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         # Load embeddings
         embeddings = np.load(emb_path)
         
+        # Determine which models to run: explicit list > project scope > all
+        effective_model_ids = request.models
+        if effective_model_ids is None and request.project_id and project_registry:
+            proj_cfg = project_registry.get_project(request.project_id)
+            if proj_cfg and hasattr(proj_cfg, 'classification_models') and proj_cfg.classification_models:
+                effective_model_ids = list(proj_cfg.classification_models)
+                logger.info(f"Scoping models to project {request.project_id}: {effective_model_ids}")
+        
         # Run multi-model inference
         try:
             results = multi_model_inference.predict_all(
                 embeddings,
-                model_ids=request.models,
+                model_ids=effective_model_ids,
                 return_attention=request.return_attention,
             )
         except Exception as e:
