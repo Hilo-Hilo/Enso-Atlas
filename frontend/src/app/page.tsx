@@ -303,6 +303,9 @@ function HomePage() {
   const [isCachedResult, setIsCachedResult] = useState(false);
   const [cachedResultTimestamp, setCachedResultTimestamp] = useState<string | null>(null);
 
+  // Project-specific available models for MultiModelPredictionPanel preview
+  const [projectAvailableModels, setProjectAvailableModels] = useState<{ id: string; name: string; description: string }[]>([]);
+
   // Embedding progress state for better UX during long operations
   const [embeddingProgress, setEmbeddingProgress] = useState<{
     phase: "idle" | "embedding" | "analyzing" | "complete";
@@ -525,6 +528,22 @@ function HomePage() {
     setSlideIndex(0);
     // Clear heatmap model selection
     setHeatmapModel(null);
+    
+    // Fetch project-specific available models for preview
+    if (currentProject.id && currentProject.id !== "default") {
+      getProjectAvailableModels(currentProject.id)
+        .then((models) => {
+          setProjectAvailableModels(models.map(m => ({
+            id: m.id,
+            name: m.displayName,
+            description: m.description,
+          })));
+        })
+        .catch((err) => {
+          console.warn("Failed to fetch project models for preview:", err);
+          setProjectAvailableModels([]);
+        });
+    }
   }, [currentProject.id]);
 
   // Auto-select slide from URL query params (e.g. /?slide=TCGA-... from Slide Manager)
@@ -1745,6 +1764,7 @@ function HomePage() {
           isCached={isCachedResult}
           cachedAt={cachedResultTimestamp}
           onReanalyze={selectedSlide ? handleReanalyze : undefined}
+          availableModels={projectAvailableModels.length > 0 ? projectAvailableModels : undefined}
         />
       </div>
 
