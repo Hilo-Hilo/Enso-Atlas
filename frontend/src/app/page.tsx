@@ -304,7 +304,7 @@ function HomePage() {
   const [cachedResultTimestamp, setCachedResultTimestamp] = useState<string | null>(null);
 
   // Project-specific available models for MultiModelPredictionPanel preview
-  const [projectAvailableModels, setProjectAvailableModels] = useState<{ id: string; name: string; description: string }[]>([]);
+  const [projectAvailableModels, setProjectAvailableModels] = useState<import("@/types").AvailableModel[]>([]);
 
   // Embedding progress state for better UX during long operations
   const [embeddingProgress, setEmbeddingProgress] = useState<{
@@ -537,6 +537,12 @@ function HomePage() {
             id: m.id,
             name: m.displayName,
             description: m.description,
+            auc: m.auc ?? 0,
+            nSlides: m.nTrainingSlides ?? 0,
+            category: m.category,
+            positiveLabel: m.positiveLabel ?? "Positive",
+            negativeLabel: m.negativeLabel ?? "Negative",
+            available: true,
           })));
         })
         .catch((err) => {
