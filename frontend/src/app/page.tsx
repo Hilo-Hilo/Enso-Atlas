@@ -283,7 +283,7 @@ function HomePage() {
   const [resolutionLevel, setResolutionLevel] = useState<number>(1); // 0 = full res, 1 = downsampled
   const [forceReembed, setForceReembed] = useState(false);
   const [heatmapModel, setHeatmapModel] = useState<string | null>(() => 
-    AVAILABLE_MODELS.length > 0 ? AVAILABLE_MODELS[0].id : "platinum_sensitivity"
+    AVAILABLE_MODELS.length > 0 ? AVAILABLE_MODELS[0].id : "treatment_response"
   );
   const [heatmapLevel, setHeatmapLevel] = useState<number>(2); // 0-4, default 2 (512px)
   const [heatmapAlphaPower, setHeatmapAlphaPower] = useState<number>(0.7); // 0.1-1.5, controls low-attention visibility
@@ -1645,7 +1645,7 @@ function HomePage() {
   
   // Build heatmap data with selected model
   const heatmapData = selectedSlide ? {
-    imageUrl: getHeatmapUrl(selectedSlide.id, heatmapModel || (AVAILABLE_MODELS[0]?.id ?? "platinum_sensitivity"), heatmapLevel, debouncedAlphaPower, currentProject?.id),
+    imageUrl: getHeatmapUrl(selectedSlide.id, heatmapModel || (AVAILABLE_MODELS[0]?.id ?? "treatment_response"), heatmapLevel, debouncedAlphaPower, currentProject?.id),
     minValue: 0,
     maxValue: 1,
     colorScale: "viridis" as const,

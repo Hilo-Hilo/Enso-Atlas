@@ -6,12 +6,12 @@ import type { Project } from "@/types";
 // Default fallback project when API is not available
 const DEFAULT_PROJECT: Project = {
   id: "default",
-  name: "Ovarian Cancer - Platinum Sensitivity",
-  cancer_type: "Ovarian Cancer",
-  prediction_target: "platinum_sensitivity",
-  classes: ["resistant", "sensitive"],
-  positive_class: "sensitive",
-  description: "Predicts platinum-based chemotherapy sensitivity in high-grade serous ovarian carcinoma",
+  name: "Cancer Analysis",
+  cancer_type: "Cancer",
+  prediction_target: "treatment_response",
+  classes: ["unfavorable", "favorable"],
+  positive_class: "favorable",
+  description: "AI-powered pathology analysis for treatment response prediction",
   dataset_source: "TCGA",
   disclaimer: "These predictions are from research models. Model reliability varies by AUC score. Clinical decisions should integrate multiple factors including patient history, other biomarkers, and clinician expertise.",
   models: {
