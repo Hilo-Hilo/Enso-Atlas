@@ -295,6 +295,7 @@ class BatchAnalyzeRequest(BaseModel):
         max_length=100,
         description="List of slide IDs to analyze (1-100 slides)"
     )
+    project_id: Optional[str] = Field(default=None, description="Project ID to scope analysis")
 
 
 class BatchAnalysisResult(BaseModel):
