@@ -210,6 +210,7 @@ class ReportRequest(BaseModel):
     slide_id: str = Field(..., min_length=1, max_length=256)
     include_evidence: bool = True
     include_similar: bool = True
+    project_id: Optional[str] = Field(default=None, description="Project ID to determine cancer type for report")
 
 
 class ReportResponse(BaseModel):
@@ -2515,6 +2516,13 @@ def create_app(
                 # Allow generous timeout for CPU inference (120s gen + 60s buffer)
                 timeout_s = max(10.0, float(timeout_s) + 60.0)
 
+                # Look up cancer type from project config
+                cancer_type = "Cancer"  # Default fallback
+                if request.project_id and project_registry:
+                    proj_cfg = project_registry.get_project(request.project_id)
+                    if proj_cfg:
+                        cancer_type = proj_cfg.get("cancer_type", proj_cfg.get("display_name", "Cancer"))
+
                 report = await asyncio.wait_for(
                     asyncio.to_thread(
                         reporter.generate_report,
@@ -2524,6 +2532,7 @@ def create_app(
                         similar_cases=similar_cases,
                         case_id=slide_id,
                         patient_context=patient_ctx,
+                        cancer_type=cancer_type,
                     ),
                     timeout=timeout_s,
                 )

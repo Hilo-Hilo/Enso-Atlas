@@ -326,6 +326,7 @@ class MedGemmaReporter:
         similar_cases: List[Dict],
         case_id: str = "unknown",
         patient_context: Optional[Dict] = None,
+        cancer_type: str = "Cancer",
     ) -> str:
         """Build a compact prompt that forces JSON-first output from MedGemma."""
 
@@ -337,7 +338,7 @@ class MedGemmaReporter:
             categories.append(f"{cat}({attn:.2f})")
         cat_str = ", ".join(categories) if categories else "mixed"
 
-        line1 = f'Ovarian H&E. Prediction: {label} ({score:.2f}). Tissue: {cat_str}.'
+        line1 = f'{cancer_type} H&E. Prediction: {label} ({score:.2f}). Tissue: {cat_str}.'
         line2 = f'{{"prediction":"{label}","confidence":{score:.2f},"morphology":"'
         prompt = line1 + chr(10) + line2
 
@@ -537,6 +538,7 @@ class MedGemmaReporter:
         case_id: str = "unknown",
         max_retries: int = 2,
         patient_context: Optional[Dict] = None,
+        cancer_type: str = "Cancer",
     ) -> Dict:
         """
         Generate a structured report.
@@ -569,6 +571,7 @@ class MedGemmaReporter:
             similar_cases[:similar_limit],
             case_id,
             patient_context,
+            cancer_type,
         )
         prompt_tokens = self._count_prompt_tokens(prompt)
 
@@ -818,6 +821,7 @@ class MedGemmaReporter:
         similar_cases: List[Dict],
         case_id: str = "unknown",
         patient_context: Optional[Dict] = None,
+        cancer_type: str = "Cancer",
     ) -> Dict:
         """
         Generate a complete report with structured data and summary.
@@ -844,6 +848,7 @@ class MedGemmaReporter:
             similar_cases=similar_cases,
             case_id=case_id,
             patient_context=patient_context,
+            cancer_type=cancer_type,
         )
 
         # Generate human-readable summary
