@@ -445,6 +445,7 @@ export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
       showProgress
       scrollToFirstStep
       spotlightClicks
+      disableOverlay
       disableOverlayClose
       callback={handleJoyrideCallback}
       tooltipComponent={CustomTooltip}
