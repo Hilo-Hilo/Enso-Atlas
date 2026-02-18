@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useProject } from "@/contexts/ProjectContext";
 import {
   Bot,
@@ -209,6 +209,15 @@ function WorkflowStep({
   slideId?: string;
   onHighlightRegion?: (x: number, y: number, weight: number) => void;
 }) {
+  // Project-aware label detection
+  const { currentProject } = useProject();
+  const positiveClassLower = (currentProject.positive_class || "").toLowerCase();
+  const isPositiveLabel = (label: string) => {
+    const lower = label.toLowerCase();
+    if (positiveClassLower && lower === positiveClassLower) return true;
+    return lower === "responder" || lower === "positive" || lower === "sensitive" || lower.includes("sensitive");
+  };
+
   const statusColors: Record<string, string> = {
     pending: "text-gray-400",
     running: "text-blue-500 animate-pulse",
@@ -481,16 +490,6 @@ export function AIAssistantPanel({
   onHighlightRegion,
   className,
 }: AIAssistantPanelProps) {
-  // Project-aware positive class detection
-  const { currentProject } = useProject();
-  const positiveClassLower = useMemo(() => 
-    (currentProject.positive_class || "").toLowerCase(), [currentProject.positive_class]);
-  const isPositiveLabel = useCallback((label: string) => {
-    const lower = label.toLowerCase();
-    if (positiveClassLower && lower === positiveClassLower) return true;
-    return lower === "responder" || lower === "positive" || lower === "sensitive" || lower.includes("sensitive");
-  }, [positiveClassLower]);
-
   // State
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
