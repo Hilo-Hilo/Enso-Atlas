@@ -482,7 +482,7 @@ class MedGemmaReporter:
 
         return {
             "case_id": case_id,
-            "task": "Bevacizumab treatment response prediction from H&E histopathology",
+            "task": f"{cancer_type} treatment response prediction from H&E histopathology",
             "model_output": {
                 "label": parsed.get("prediction", label),
                 "probability": parsed.get("confidence", score),
@@ -794,7 +794,7 @@ class MedGemmaReporter:
         """Create a fallback report when generation fails."""
         return {
             "case_id": case_id,
-            "task": "Bevacizumab treatment response prediction from H&E histopathology",
+            "task": "Treatment response prediction from H&E histopathology",
             "model_output": {
                 "label": label,
                 "probability": score,
