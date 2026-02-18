@@ -81,17 +81,24 @@ export function OncologistSummaryView({
   }
 
   const { prediction, evidencePatches } = analysisResult;
-  const isResponder = prediction.score >= 0.5;
+  const isPositive = prediction.score >= 0.5;
   const topPatches = evidencePatches.slice(0, 3);
 
-  // Group similar cases by outcome
+  // Group similar cases by outcome using project-aware labels
   const similarCases = analysisResult.similarCases || [];
-  const responderCount = similarCases.filter(c => 
-    c.label?.toLowerCase().includes("responder") && !c.label?.toLowerCase().includes("non")
-  ).length;
-  const nonResponderCount = similarCases.filter(c => 
-    c.label?.toLowerCase().includes("non") || c.label?.toLowerCase().includes("negative")
-  ).length;
+  const positiveLabelLower = positiveLabel.toLowerCase();
+  const negativeLabelLower = negativeLabel.toLowerCase();
+  const responderCount = similarCases.filter(c => {
+    const label = c.label?.toLowerCase() || "";
+    // Match against project positive class, or legacy "responder"
+    return label.includes(positiveLabelLower) || 
+           (label.includes("responder") && !label.includes("non"));
+  }).length;
+  const nonResponderCount = similarCases.filter(c => {
+    const label = c.label?.toLowerCase() || "";
+    return label.includes(negativeLabelLower) || 
+           label.includes("non") || label.includes("negative");
+  }).length;
 
   return (
     <div className="h-full overflow-y-auto bg-gray-50 p-6 space-y-6">
@@ -130,11 +137,11 @@ export function OncologistSummaryView({
       {/* Main Prediction Card */}
       <Card className={cn(
         "border-2",
-        isResponder ? "border-green-300 bg-green-50" : "border-red-300 bg-red-50"
+        isPositive ? "border-green-300 bg-green-50" : "border-red-300 bg-red-50"
       )}>
         <CardContent className="p-6">
           <div className="flex items-center gap-4 mb-4">
-            {isResponder ? (
+            {isPositive ? (
               <CheckCircle className="h-12 w-12 text-green-600" />
             ) : (
               <XCircle className="h-12 w-12 text-red-600" />
@@ -142,7 +149,7 @@ export function OncologistSummaryView({
             <div>
               <h3 className={cn(
                 "text-2xl font-bold",
-                isResponder ? "text-green-800" : "text-red-800"
+                isPositive ? "text-green-800" : "text-red-800"
               )}>
                 {prediction.label}
               </h3>
@@ -173,13 +180,13 @@ export function OncologistSummaryView({
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded-full bg-green-500" />
                 <span className="text-sm font-medium">
-                  {responderCount} {positiveLabel}{responderCount !== 1 ? "s" : ""}
+                  {responderCount} {positiveLabel}
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded-full bg-red-500" />
                 <span className="text-sm font-medium">
-                  {nonResponderCount} {negativeLabel}{nonResponderCount !== 1 ? "s" : ""}
+                  {nonResponderCount} {negativeLabel}
                 </span>
               </div>
             </div>

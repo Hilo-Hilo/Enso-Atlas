@@ -1450,7 +1450,15 @@ def create_app(
         # Run prediction
         score, attention = classifier.predict(embeddings)
         threshold = classifier.threshold
-        label = "RESPONDER" if score >= threshold else "NON-RESPONDER"
+        # Use project-aware labels
+        _pos_label = "RESPONDER"
+        _neg_label = "NON-RESPONDER"
+        if request.project_id and project_registry:
+            _proj = project_registry.get_project(request.project_id)
+            if _proj and _proj.classes:
+                _pos_label = _proj.positive_class.upper() if _proj.positive_class else _proj.classes[-1].upper()
+                _neg_label = [c for c in _proj.classes if c.lower() != _pos_label.lower()][0].upper() if len(_proj.classes) > 1 else "NEGATIVE"
+        label = _pos_label if score >= threshold else _neg_label
         # Confidence based on distance from threshold, normalized to [0,1]
         if score >= threshold:
             # Sigmoid-like scaling: small margins -> ~50%, large margins -> ~99%
@@ -1611,7 +1619,15 @@ def create_app(
 
                 # Run prediction
                 score, attention = classifier.predict(embeddings)
-                label = "RESPONDER" if score > 0.5 else "NON-RESPONDER"
+                # Use project-aware labels
+                _b_pos = "RESPONDER"
+                _b_neg = "NON-RESPONDER"
+                if hasattr(request, 'project_id') and request.project_id and project_registry:
+                    _bproj = project_registry.get_project(request.project_id)
+                    if _bproj and _bproj.classes:
+                        _b_pos = _bproj.positive_class.upper() if _bproj.positive_class else _bproj.classes[-1].upper()
+                        _b_neg = [c for c in _bproj.classes if c.lower() != _b_pos.lower()][0].upper() if len(_bproj.classes) > 1 else "NEGATIVE"
+                label = _b_pos if score > 0.5 else _b_neg
                 confidence = abs(score - 0.5) * 2
 
                 # Determine uncertainty level and review requirement
@@ -1669,8 +1685,14 @@ def create_app(
         # Calculate summary statistics
         completed = [r for r in results if r.error is None]
         failed = [r for r in results if r.error is not None]
-        responders = [r for r in completed if r.prediction == "RESPONDER"]
-        non_responders = [r for r in completed if r.prediction == "NON-RESPONDER"]
+        # Count positive vs negative predictions (project-aware)
+        _batch_pos_label = "RESPONDER"
+        if hasattr(request, 'project_id') and request.project_id and project_registry:
+            _bproj2 = project_registry.get_project(request.project_id)
+            if _bproj2 and _bproj2.positive_class:
+                _batch_pos_label = _bproj2.positive_class.upper()
+        responders = [r for r in completed if r.prediction == _batch_pos_label]
+        non_responders = [r for r in completed if r.prediction != _batch_pos_label]
         uncertain = [r for r in completed if r.requires_review]
         avg_confidence = (
             sum(r.confidence for r in completed) / len(completed)
@@ -1918,7 +1940,15 @@ def create_app(
 
                 # Single classifier path (legacy)
                 score, attention = classifier.predict(embeddings)
-                label = "RESPONDER" if score > 0.5 else "NON-RESPONDER"
+                # Use project labels if available
+                _lp = "RESPONDER"
+                _ln = "NON-RESPONDER"
+                if project_id and project_registry:
+                    _lproj = project_registry.get_project(project_id)
+                    if _lproj and _lproj.classes:
+                        _lp = _lproj.positive_class.upper() if _lproj.positive_class else _lproj.classes[-1].upper()
+                        _ln = [c for c in _lproj.classes if c.lower() != _lp.lower()][0].upper() if len(_lproj.classes) > 1 else "NEGATIVE"
+                label = _lp if score > 0.5 else _ln
                 confidence = abs(score - 0.5) * 2
 
                 if confidence < 0.3:
@@ -2160,16 +2190,11 @@ def create_app(
         if uncertainty < 0.10:
             uncertainty_level = "low"
             requires_review = False
-            if result["prediction"] == "RESPONDER":
-                clinical_recommendation = (
-                    "Model shows high confidence in RESPONDER prediction. "
-                    "Consider proceeding with treatment evaluation based on clinical context."
-                )
-            else:
-                clinical_recommendation = (
-                    "Model shows high confidence in NON-RESPONDER prediction. "
-                    "Consider alternative treatment options."
-                )
+            _pred_label = result.get("prediction", "unknown")
+            clinical_recommendation = (
+                f"Model shows high confidence in {_pred_label} prediction. "
+                "Consider proceeding with clinical evaluation based on full context."
+            )
         elif uncertainty < 0.20:
             uncertainty_level = "moderate"
             requires_review = True

@@ -230,7 +230,6 @@ export function SimilarCasesPanel({
                   <div className="w-2 h-2 rounded-full bg-status-positive" />
                   <span className="text-gray-600">
                     {outcomeSummary.responders} {positiveLabel}
-                    {outcomeSummary.responders !== 1 ? "s" : ""}
                   </span>
                 </div>
               )}
@@ -239,7 +238,6 @@ export function SimilarCasesPanel({
                   <div className="w-2 h-2 rounded-full bg-status-negative" />
                   <span className="text-gray-600">
                     {outcomeSummary.nonResponders} {negativeLabel}
-                    {outcomeSummary.nonResponders !== 1 ? "s" : ""}
                   </span>
                 </div>
               )}
