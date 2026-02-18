@@ -3709,25 +3709,20 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
         embeddings = np.load(emb_path)
 
-        # Load or generate coordinates
+        # Coordinates are required for truthful heatmap localization.
         patch_size = 224
-        if coord_path.exists():
-            coords_arr = np.load(coord_path)
-            coords_arr = coords_arr.astype(np.int64, copy=False)
-        else:
-            n_patches = len(embeddings)
-            if n_patches > 0:
-                grid_size = int(np.ceil(np.sqrt(n_patches)))
-                grid_x, grid_y = np.meshgrid(
-                    np.arange(grid_size) * patch_size,
-                    np.arange(grid_size) * patch_size,
-                )
-                coords_arr = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)[:n_patches]
-            else:
-                coords_arr = np.zeros((0, 2), dtype=np.int64)
-            logger.warning(
-                f"No coords found for {slide_id}; generated {len(coords_arr)} grid coords from embeddings"
+        if not coord_path.exists():
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "COORDS_REQUIRED_FOR_HEATMAP",
+                    "slide_id": slide_id,
+                    "project_id": project_id,
+                    "message": "Patch coordinates are missing for this slide; regenerate/recover *_coords.npy before rendering heatmap.",
+                },
             )
+
+        coords_arr = np.load(coord_path).astype(np.int64, copy=False)
 
         coords = [tuple(map(int, c)) for c in coords_arr]
 
@@ -6149,13 +6144,35 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 },
             )
 
-        # Check disk cache first (only for default alpha_power)
+        emb_path = _model_heatmap_embeddings_dir / f"{slide_id}.npy"
+        coord_path = _model_heatmap_embeddings_dir / f"{slide_id}_coords.npy"
+
+        if not emb_path.exists():
+            raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
+
+        # Coordinates are required for truthful attention localization.
+        # Synthetic fallback grids create misleading overlays when embeddings were
+        # generated after tissue filtering without persisted coords.
+        if not coord_path.exists():
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "COORDS_REQUIRED_FOR_HEATMAP",
+                    "slide_id": slide_id,
+                    "project_id": project_id,
+                    "message": "Patch coordinates are missing for this slide; regenerate/recover *_coords.npy before rendering attention heatmap.",
+                },
+            )
+
+        # Check disk cache first (only for default alpha_power).
+        # Use a versioned cache key to avoid serving stale overlays generated
+        # with pre-fix coordinate assumptions.
         cache_dir = _model_heatmap_embeddings_dir / "heatmap_cache"
         cache_dir.mkdir(exist_ok=True)
         is_default_alpha = abs(alpha_power - 0.7) < 0.01
         cache_suffix = project_id if project_id else "global"
-        cache_path = cache_dir / f"{cache_suffix}_{slide_id}_{model_id}.png"
-        
+        cache_path = cache_dir / f"{cache_suffix}_{slide_id}_{model_id}_v2.png"
+
         if is_default_alpha and cache_path.exists():
             # Serve cached heatmap — still need slide dims for headers
             slide_path = resolve_slide_path(slide_id, project_id=project_id)
@@ -6168,13 +6185,9 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 except Exception:
                     pass
             if _slide_dims is None:
-                coord_path_c = _model_heatmap_embeddings_dir / f"{slide_id}_coords.npy"
                 patch_size_c = 224
-                if coord_path_c.exists():
-                    _ca = np.load(coord_path_c).astype(np.int64, copy=False)
-                    _slide_dims = (int(_ca[:, 0].max()) + patch_size_c, int(_ca[:, 1].max()) + patch_size_c)
-                else:
-                    _slide_dims = (patch_size_c, patch_size_c)
+                _ca = np.load(coord_path).astype(np.int64, copy=False)
+                _slide_dims = (int(_ca[:, 0].max()) + patch_size_c, int(_ca[:, 1].max()) + patch_size_c)
             _coverage = compute_heatmap_grid_coverage(_slide_dims[0], _slide_dims[1], patch_size=224)
             logger.info(f"Serving cached heatmap for {slide_id}/{model_id}")
             return FileResponse(
@@ -6190,35 +6203,11 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     "Access-Control-Expose-Headers": "X-Model-Id, X-Model-Name, X-Slide-Width, X-Slide-Height, X-Coverage-Width, X-Coverage-Height",
                 }
             )
-        
-        emb_path = _model_heatmap_embeddings_dir / f"{slide_id}.npy"
-        coord_path = _model_heatmap_embeddings_dir / f"{slide_id}_coords.npy"
-        
-        if not emb_path.exists():
-            raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
-        
+
         embeddings = np.load(emb_path)
-        
-        # Check for coordinates
+
         patch_size = 224
-        if coord_path.exists():
-            coords_arr = np.load(coord_path)
-            coords_arr = coords_arr.astype(np.int64, copy=False)
-        else:
-            # Generate grid coordinates (pixel space) as fallback
-            n_patches = len(embeddings)
-            if n_patches > 0:
-                grid_size = int(np.ceil(np.sqrt(n_patches)))
-                grid_x, grid_y = np.meshgrid(
-                    np.arange(grid_size) * patch_size,
-                    np.arange(grid_size) * patch_size,
-                )
-                coords_arr = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)[:n_patches]
-            else:
-                coords_arr = np.zeros((0, 2), dtype=np.int64)
-            logger.warning(
-                f"No coords found for {slide_id}; generated {len(coords_arr)} grid coords from embeddings"
-            )
+        coords_arr = np.load(coord_path).astype(np.int64, copy=False)
         
         # Get prediction with attention from specific model
         try:
