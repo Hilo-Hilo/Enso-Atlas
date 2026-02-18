@@ -4627,11 +4627,21 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         models = multi_model_inference.get_available_models()
 
         if project_id:
+            allowed_ids = set()
             try:
                 allowed_ids = set(await db.get_project_models(project_id))
-                models = [m for m in models if m.get("id", m.get("model_id")) in allowed_ids]
             except Exception as e:
-                logger.warning(f"Failed to filter models by project {project_id}: {e}")
+                logger.warning(f"DB model query failed for {project_id}: {e}")
+
+            # Fall through to YAML config if DB returned empty
+            if not allowed_ids and project_registry:
+                proj_cfg = project_registry.get_project(project_id)
+                if proj_cfg and proj_cfg.classification_models:
+                    allowed_ids = set(proj_cfg.classification_models)
+                    logger.info(f"Using YAML classification_models for {project_id}: {allowed_ids}")
+
+            if allowed_ids:
+                models = [m for m in models if m.get("id", m.get("model_id")) in allowed_ids]
 
         return AvailableModelsResponse(models=models)
 
