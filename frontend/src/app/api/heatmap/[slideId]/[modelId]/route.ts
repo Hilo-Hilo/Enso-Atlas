@@ -16,8 +16,10 @@ export async function GET(
     const backendParams = new URLSearchParams();
     const level = searchParams.get("level");
     const alphaPower = searchParams.get("alpha_power");
+    const projectId = searchParams.get("project_id");
     if (level) backendParams.set("level", level);
     if (alphaPower) backendParams.set("alpha_power", alphaPower);
+    if (projectId) backendParams.set("project_id", projectId);
     const qs = backendParams.toString() ? `?${backendParams.toString()}` : "";
     let backendUrl = `${BACKEND_URL}/api/heatmap/${encodeURIComponent(slideId)}/${encodeURIComponent(modelId)}${qs}`;
     

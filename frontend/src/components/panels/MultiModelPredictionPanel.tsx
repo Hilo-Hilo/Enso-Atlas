@@ -31,7 +31,26 @@ import {
 } from "lucide-react";
 import type { ModelPrediction, MultiModelResponse, AvailableModel } from "@/types";
 import { useProject } from "@/contexts/ProjectContext";
-import { AVAILABLE_MODELS } from "./ModelPicker";
+
+function humanizeModelId(modelId: string): string {
+  return modelId
+    .replace(/[\-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function getProjectFallbackPreviewModel(currentProject: {
+  prediction_target?: string;
+  cancer_type?: string;
+}): Array<{ id: string; displayName: string; description: string }> {
+  if (!currentProject.prediction_target) return [];
+  return [
+    {
+      id: currentProject.prediction_target,
+      displayName: humanizeModelId(currentProject.prediction_target),
+      description: `Primary ${currentProject.cancer_type || "project"} model`,
+    },
+  ];
+}
 
 // Skeleton Loading Component for Multi-Model Panel
 function ModelCardSkeleton() {
@@ -406,10 +425,10 @@ export function MultiModelPredictionPanel({
   const { currentProject } = useProject();
   const cancerTypeLabel = currentProject.cancer_type || "Cancer";
 
-  // Prefer the prop (from API / project config) over the static fallback
+  // Prefer project-scoped API models; otherwise use a safe project-derived fallback
   const modelsToPreview = (availableModels && availableModels.length > 0)
     ? availableModels.map((m) => ({ id: m.id, displayName: m.name, description: m.description }))
-    : AVAILABLE_MODELS;
+    : getProjectFallbackPreviewModel(currentProject);
 
   // Update elapsed time during embedding
   useEffect(() => {

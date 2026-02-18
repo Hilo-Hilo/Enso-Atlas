@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check:model-scope": "node ./scripts/check-project-model-scoping.mjs",
+    "check:heatmap-alignment": "node ./scripts/check-heatmap-grid-alignment.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

@@ -19,57 +19,90 @@ export interface ModelConfig {
   negativeLabel?: string;
 }
 
-// Default models -- used as fallback when project context is not available
-export const AVAILABLE_MODELS: ModelConfig[] = [
-  {
-    id: "platinum_sensitivity",
-    displayName: "Platinum Sensitivity",
-    description: "Response to platinum-based chemotherapy",
-    auc: 0.907,
-    category: "ovarian_cancer",
-    positiveLabel: "Sensitive",
-    negativeLabel: "Resistant",
-  },
-  {
-    id: "tumor_grade",
-    displayName: "Tumor Grade",
-    description: "High vs low grade classification",
-    auc: 0.752,
-    category: "general_pathology",
-    positiveLabel: "High Grade",
-    negativeLabel: "Low Grade",
-  },
-  {
-    id: "survival_5y",
-    displayName: "5-Year Survival",
-    description: "5-year overall survival probability",
-    auc: 0.697,
-    category: "ovarian_cancer",
-    positiveLabel: "Favorable",
-    negativeLabel: "Poor",
-  },
-  {
-    id: "survival_3y",
-    displayName: "3-Year Survival",
-    description: "3-year overall survival probability",
-    auc: 0.645,
-    category: "ovarian_cancer",
-    positiveLabel: "Favorable",
-    negativeLabel: "Poor",
-  },
-  {
-    id: "survival_1y",
-    displayName: "1-Year Survival",
-    description: "1-year overall survival probability",
-    auc: 0.639,
-    category: "ovarian_cancer",
-    positiveLabel: "Favorable",
-    negativeLabel: "Poor",
-  },
-];
+function humanizeModelId(modelId: string): string {
+  return modelId
+    .replace(/[\-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
-// getProjectModels is no longer used as a local helper -- model filtering
-// now happens via the API and the apiModels state inside ModelPicker.
+function mapDetailToModelConfig(detail: AvailableModelDetail): ModelConfig {
+  return {
+    id: detail.id,
+    displayName: detail.displayName,
+    description: detail.description,
+    auc: detail.auc,
+    category: detail.category,
+    positiveLabel: detail.positiveLabel,
+    negativeLabel: detail.negativeLabel,
+  };
+}
+
+function buildProjectFallbackModels(currentProject: {
+  prediction_target?: string;
+  cancer_type?: string;
+  positive_class?: string;
+  classes?: string[];
+}): ModelConfig[] {
+  const primaryId = currentProject.prediction_target;
+  if (!primaryId) return [];
+
+  const positiveLabel =
+    currentProject.positive_class ||
+    currentProject.classes?.[1] ||
+    "Positive";
+  const negativeLabel =
+    currentProject.classes?.find((c) => c !== positiveLabel) ||
+    currentProject.classes?.[0] ||
+    "Negative";
+
+  return [
+    {
+      id: primaryId,
+      displayName: humanizeModelId(primaryId),
+      description: `Primary ${currentProject.cancer_type || "project"} model`,
+      auc: 0,
+      category: "project_specific",
+      positiveLabel,
+      negativeLabel,
+    },
+  ];
+}
+
+function buildModelFromId(
+  modelId: string,
+  currentProject: {
+    prediction_target?: string;
+    cancer_type?: string;
+    positive_class?: string;
+    classes?: string[];
+  }
+): ModelConfig {
+  const base = buildProjectFallbackModels(currentProject)[0];
+  const isPrimary = modelId === currentProject.prediction_target;
+
+  return {
+    id: modelId,
+    displayName: humanizeModelId(modelId),
+    description: isPrimary
+      ? base?.description || `Primary ${currentProject.cancer_type || "project"} model`
+      : `${currentProject.cancer_type || "Project"} model`,
+    auc: 0,
+    category: "project_specific",
+    positiveLabel: base?.positiveLabel || "Positive",
+    negativeLabel: base?.negativeLabel || "Negative",
+  };
+}
+
+function dedupeModels(models: ModelConfig[]): ModelConfig[] {
+  const seen = new Set<string>();
+  const unique: ModelConfig[] = [];
+  for (const model of models) {
+    if (seen.has(model.id)) continue;
+    seen.add(model.id);
+    unique.push(model);
+  }
+  return unique;
+}
 
 interface EmbeddingStatus {
   hasLevel0: boolean;
@@ -106,51 +139,105 @@ export function ModelPicker({
   const { currentProject } = useProject();
   const cancerTypeLabel = currentProject.cancer_type || "Cancer Specific";
 
-  // Fetch full model configs from the project available-models API
+  // Fetch full model configs from project-scoped APIs
   const [apiModelDetails, setApiModelDetails] = useState<AvailableModelDetail[]>([]);
-  const [apiModels, setApiModels] = useState<string[]>([]);
-  const [usingCachedModels, setUsingCachedModels] = useState(false);
+  const [projectModelIds, setProjectModelIds] = useState<string[]>([]);
+  const [usingFallbackModels, setUsingFallbackModels] = useState(false);
 
   useEffect(() => {
-    // Skip fetch until a real project is loaded (avoids 404 on "default")
-    if (!currentProject.id || currentProject.id === "default") return;
-    
+    let cancelled = false;
+
     // Clear old models first to prevent race condition with auto-select
-    setApiModels([]);
     setApiModelDetails([]);
-    setUsingCachedModels(false);
-    
+    setProjectModelIds([]);
+    setUsingFallbackModels(false);
+
     const fetchModels = async () => {
+      // For default project, use safe project-derived fallback only
+      if (!currentProject.id || currentProject.id === "default") {
+        if (!cancelled) {
+          setUsingFallbackModels(true);
+        }
+        return;
+      }
+
       try {
-        // Try the new config-driven endpoint first
+        // Try the config-driven endpoint first
         const details = await getProjectAvailableModels(currentProject.id);
-        if (details.length > 0) {
+        if (!cancelled && details.length > 0) {
           setApiModelDetails(details);
-          setApiModels(details.map((m) => m.id));
           return;
         }
       } catch (err) {
         console.warn("Failed to fetch available models config:", err);
       }
+
       try {
-        // Fallback to the older model IDs endpoint
+        // Fallback to older project model IDs endpoint (still project-scoped)
         const modelIds = await getProjectModelsApi(currentProject.id);
-        setApiModels(modelIds);
+        if (!cancelled && modelIds.length > 0) {
+          setProjectModelIds(modelIds);
+          setUsingFallbackModels(true);
+          return;
+        }
       } catch (err) {
-        console.warn("Failed to fetch project models, using cached defaults:", err);
-        setApiModels(AVAILABLE_MODELS.map((m) => m.id));
-        setUsingCachedModels(true);
+        console.warn("Failed to fetch project model IDs:", err);
+      }
+
+      if (!cancelled) {
+        setUsingFallbackModels(true);
       }
     };
+
     fetchModels();
+
+    return () => {
+      cancelled = true;
+    };
   }, [currentProject.id]);
+
+  const fallbackModels = React.useMemo(
+    () =>
+      buildProjectFallbackModels({
+        prediction_target: currentProject.prediction_target,
+        cancer_type: currentProject.cancer_type,
+        positive_class: currentProject.positive_class,
+        classes: currentProject.classes,
+      }),
+    [
+      currentProject.prediction_target,
+      currentProject.cancer_type,
+      currentProject.positive_class,
+      currentProject.classes,
+    ]
+  );
+
+  // Build ModelConfig list from API details or project-safe fallback
+  const models = React.useMemo(() => {
+    let result: ModelConfig[];
+
+    if (apiModelDetails.length > 0) {
+      result = apiModelDetails.map(mapDetailToModelConfig);
+    } else if (projectModelIds.length > 0) {
+      result = projectModelIds.map((id) => buildModelFromId(id, currentProject));
+    } else {
+      result = fallbackModels;
+    }
+
+    const unique = dedupeModels(result);
+
+    // Reorder: primary target first
+    const primary = unique.find((m) => m.id === currentProject.prediction_target);
+    if (!primary) return unique;
+    return [primary, ...unique.filter((m) => m.id !== primary.id)];
+  }, [apiModelDetails, projectModelIds, fallbackModels, currentProject]);
 
   // Auto-select all models when models are loaded and selectedModels is empty
   useEffect(() => {
-    if (apiModels.length > 0 && selectedModels.length === 0) {
-      onSelectionChange(apiModels);
+    if (models.length > 0 && selectedModels.length === 0) {
+      onSelectionChange(models.map((m) => m.id));
     }
-  }, [apiModels, selectedModels.length, onSelectionChange]);
+  }, [models, selectedModels.length, onSelectionChange]);
 
   // Track which models have been previously run on the selected slide
   const [previouslyRanModels, setPreviouslyRanModels] = useState<Set<string>>(new Set());
@@ -171,30 +258,6 @@ export function ModelPicker({
     };
     fetchStatus();
   }, [selectedSlideId]);
-
-  // Build ModelConfig list from API details, falling back to hardcoded AVAILABLE_MODELS
-  const models = React.useMemo(() => {
-    let result: ModelConfig[];
-    if (apiModelDetails.length > 0) {
-      result = apiModelDetails.map((d) => ({
-        id: d.id,
-        displayName: d.displayName,
-        description: d.description,
-        auc: d.auc,
-        category: d.category,
-        positiveLabel: d.positiveLabel,
-        negativeLabel: d.negativeLabel,
-      }));
-    } else if (apiModels.length > 0) {
-      result = AVAILABLE_MODELS.filter((m) => apiModels.includes(m.id));
-    } else {
-      result = AVAILABLE_MODELS;
-    }
-    // Reorder: primary target first
-    const primary = result.find((m) => m.id === currentProject.prediction_target);
-    if (!primary) return result;
-    return [primary, ...result.filter((m) => m.id !== primary.id)];
-  }, [apiModelDetails, apiModels, currentProject.prediction_target]);
 
   const toggleModel = (modelId: string) => {
     if (disabled) return;
@@ -250,9 +313,9 @@ export function ModelPicker({
           <Badge variant="default" size="sm">
             {selectedModels.length}/{models.length}
           </Badge>
-          {usingCachedModels && (
+          {usingFallbackModels && (
             <Badge variant="default" size="sm" className="text-amber-600 bg-amber-50 border-amber-200">
-              cached
+              fallback
             </Badge>
           )}
         </div>
@@ -406,49 +469,53 @@ export function ModelPicker({
 
           <div className="space-y-3">
             {/* Cancer-Specific Models */}
-            <div>
-              <div className="flex items-center gap-1.5 mb-2">
-                <Activity className="h-3 w-3 text-pink-500" />
-                <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                  {cancerTypeLabel}
-                </span>
+            {cancerSpecificModels.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Activity className="h-3 w-3 text-pink-500" />
+                  <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    {cancerTypeLabel}
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {cancerSpecificModels.map((model) => (
+                    <ModelCheckbox
+                      key={model.id}
+                      model={model}
+                      checked={selectedModels.includes(model.id)}
+                      onChange={() => toggleModel(model.id)}
+                      disabled={disabled}
+                      isPrimary={model.id === currentProject.prediction_target}
+                      previouslyRan={previouslyRanModels.has(model.id)}
+                    />
+                  ))}
+                </div>
               </div>
-              <div className="space-y-1.5">
-                {cancerSpecificModels.map((model) => (
-                  <ModelCheckbox
-                    key={model.id}
-                    model={model}
-                    checked={selectedModels.includes(model.id)}
-                    onChange={() => toggleModel(model.id)}
-                    disabled={disabled}
-                    isPrimary={model.id === currentProject.prediction_target}
-                    previouslyRan={previouslyRanModels.has(model.id)}
-                  />
-                ))}
-              </div>
-            </div>
+            )}
 
             {/* General Pathology Models */}
-            <div>
-              <div className="flex items-center gap-1.5 mb-2">
-                <FlaskConical className="h-3 w-3 text-blue-500" />
-                <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                  General Pathology
-                </span>
+            {generalModels.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <FlaskConical className="h-3 w-3 text-blue-500" />
+                  <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    General Pathology
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {generalModels.map((model) => (
+                    <ModelCheckbox
+                      key={model.id}
+                      model={model}
+                      checked={selectedModels.includes(model.id)}
+                      onChange={() => toggleModel(model.id)}
+                      disabled={disabled}
+                      previouslyRan={previouslyRanModels.has(model.id)}
+                    />
+                  ))}
+                </div>
               </div>
-              <div className="space-y-1.5">
-                {generalModels.map((model) => (
-                  <ModelCheckbox
-                    key={model.id}
-                    model={model}
-                    checked={selectedModels.includes(model.id)}
-                    onChange={() => toggleModel(model.id)}
-                    disabled={disabled}
-                    previouslyRan={previouslyRanModels.has(model.id)}
-                  />
-                ))}
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}

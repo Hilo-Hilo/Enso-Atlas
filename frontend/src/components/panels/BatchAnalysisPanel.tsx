@@ -39,6 +39,7 @@ import {
   cancelBatchAnalysis,
   convertAsyncBatchResults,
   getProjectAvailableModels,
+  getProjectModels,
   type AsyncBatchTaskStatus,
   type AvailableModelDetail,
 } from "@/lib/api";
@@ -50,7 +51,81 @@ import type {
   BatchModelResult,
 } from "@/types";
 import { useProject } from "@/contexts/ProjectContext";
-import { AVAILABLE_MODELS, type ModelConfig } from "./ModelPicker";
+import type { ModelConfig } from "./ModelPicker";
+
+function humanizeModelId(modelId: string): string {
+  return modelId
+    .replace(/[\-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function mapAvailableModelDetailToConfig(detail: AvailableModelDetail): ModelConfig {
+  return {
+    id: detail.id,
+    displayName: detail.displayName,
+    description: detail.description,
+    auc: detail.auc,
+    category: detail.category,
+    positiveLabel: detail.positiveLabel,
+    negativeLabel: detail.negativeLabel,
+  };
+}
+
+function buildProjectFallbackModels(currentProject: {
+  prediction_target?: string;
+  cancer_type?: string;
+  positive_class?: string;
+  classes?: string[];
+}): ModelConfig[] {
+  const primaryId = currentProject.prediction_target;
+  if (!primaryId) return [];
+
+  const positive =
+    currentProject.positive_class ||
+    currentProject.classes?.[1] ||
+    "Positive";
+  const negative =
+    currentProject.classes?.find((c) => c !== positive) ||
+    currentProject.classes?.[0] ||
+    "Negative";
+
+  return [
+    {
+      id: primaryId,
+      displayName: humanizeModelId(primaryId),
+      description: `Primary ${currentProject.cancer_type || "project"} model`,
+      auc: 0,
+      category: "project_specific",
+      positiveLabel: positive,
+      negativeLabel: negative,
+    },
+  ];
+}
+
+function buildConfigFromModelId(
+  modelId: string,
+  currentProject: {
+    prediction_target?: string;
+    cancer_type?: string;
+    positive_class?: string;
+    classes?: string[];
+  }
+): ModelConfig {
+  const fallback = buildProjectFallbackModels(currentProject)[0];
+  const isPrimary = modelId === currentProject.prediction_target;
+
+  return {
+    id: modelId,
+    displayName: humanizeModelId(modelId),
+    description: isPrimary
+      ? fallback?.description || `Primary ${currentProject.cancer_type || "project"} model`
+      : `${currentProject.cancer_type || "Project"} model`,
+    auc: 0,
+    category: "project_specific",
+    positiveLabel: fallback?.positiveLabel || "Positive",
+    negativeLabel: fallback?.negativeLabel || "Negative",
+  };
+}
 
 interface BatchAnalysisPanelProps {
   onSlideSelect?: (slideId: string) => void;
@@ -81,6 +156,7 @@ export function BatchAnalysisPanel({
   const [forceReembed, setForceReembed] = useState(false);
   const [modelConfigExpanded, setModelConfigExpanded] = useState(true);
   const [apiModelDetails, setApiModelDetails] = useState<AvailableModelDetail[]>([]);
+  const [projectModelIds, setProjectModelIds] = useState<string[]>([]);
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -105,52 +181,100 @@ export function BatchAnalysisPanel({
   // Polling interval ref
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Build model list from API or fallback
+  const fallbackModels = useMemo(
+    () =>
+      buildProjectFallbackModels({
+        prediction_target: currentProject.prediction_target,
+        cancer_type: currentProject.cancer_type,
+        positive_class: currentProject.positive_class,
+        classes: currentProject.classes,
+      }),
+    [
+      currentProject.prediction_target,
+      currentProject.cancer_type,
+      currentProject.positive_class,
+      currentProject.classes,
+    ]
+  );
+
+  // Build model list from project-scoped APIs or project-safe fallback
   const models = useMemo(() => {
+    let next: ModelConfig[];
+
     if (apiModelDetails.length > 0) {
-      return apiModelDetails.map((d) => ({
-        id: d.id,
-        displayName: d.displayName,
-        description: d.description,
-        auc: d.auc,
-        category: d.category,
-        positiveLabel: d.positiveLabel,
-        negativeLabel: d.negativeLabel,
-      }));
+      next = apiModelDetails.map(mapAvailableModelDetailToConfig);
+    } else if (projectModelIds.length > 0) {
+      next = projectModelIds.map((id) => buildConfigFromModelId(id, currentProject));
+    } else {
+      next = fallbackModels;
     }
-    return AVAILABLE_MODELS;
-  }, [apiModelDetails]);
+
+    const unique = next.filter((model, index, arr) => arr.findIndex((m) => m.id === model.id) === index);
+    const primary = unique.find((m) => m.id === currentProject.prediction_target);
+
+    if (!primary) return unique;
+    return [primary, ...unique.filter((m) => m.id !== primary.id)];
+  }, [apiModelDetails, projectModelIds, fallbackModels, currentProject]);
 
   // Fetch available models from project
   useEffect(() => {
+    let cancelled = false;
+
     const fetchModels = async () => {
-      // Try API first (unless using default project)
-      if (currentProject.id && currentProject.id !== "default") {
-        try {
-          const details = await getProjectAvailableModels(currentProject.id);
-          if (details.length > 0) {
-            setApiModelDetails(details);
-            // Auto-select primary model
-            const primaryId = currentProject.prediction_target;
-            if (primaryId && details.some((d) => d.id === primaryId)) {
-              setSelectedModelIds([primaryId]);
-            } else {
-              setSelectedModelIds([details[0].id]);
-            }
-            return;
-          }
-        } catch {
-          // ignore API error, fall through to defaults
+      setApiModelDetails([]);
+      setProjectModelIds([]);
+
+      // Default project: use project-safe fallback only
+      if (!currentProject.id || currentProject.id === "default") {
+        if (!cancelled) {
+          setSelectedModelIds(fallbackModels[0] ? [fallbackModels[0].id] : []);
         }
+        return;
       }
-      // Fallback: select first hardcoded model
-      if (AVAILABLE_MODELS.length > 0 && selectedModelIds.length === 0) {
-        setSelectedModelIds([AVAILABLE_MODELS[0].id]);
+
+      try {
+        const details = await getProjectAvailableModels(currentProject.id);
+        if (!cancelled && details.length > 0) {
+          setApiModelDetails(details);
+          const primaryId = currentProject.prediction_target;
+          if (primaryId && details.some((d) => d.id === primaryId)) {
+            setSelectedModelIds([primaryId]);
+          } else {
+            setSelectedModelIds([details[0].id]);
+          }
+          return;
+        }
+      } catch {
+        // fall through to ID endpoint + fallback
+      }
+
+      try {
+        const modelIds = await getProjectModels(currentProject.id);
+        if (!cancelled && modelIds.length > 0) {
+          setProjectModelIds(modelIds);
+          const primaryId = currentProject.prediction_target;
+          if (primaryId && modelIds.includes(primaryId)) {
+            setSelectedModelIds([primaryId]);
+          } else {
+            setSelectedModelIds([modelIds[0]]);
+          }
+          return;
+        }
+      } catch {
+        // fall through to final fallback
+      }
+
+      if (!cancelled) {
+        setSelectedModelIds(fallbackModels[0] ? [fallbackModels[0].id] : []);
       }
     };
+
     fetchModels();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProject.id, currentProject.prediction_target]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject.id, currentProject.prediction_target, fallbackModels]);
 
   // Cleanup polling on unmount
   useEffect(() => {
