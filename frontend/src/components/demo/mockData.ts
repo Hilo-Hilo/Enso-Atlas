@@ -14,7 +14,7 @@ import type {
 export const DEMO_SLIDE: SlideInfo = {
   id: "TCGA-DEMO-001",
   filename: "TCGA-DEMO-001.svs",
-  displayName: "Demo: Ovarian Carcinoma Biopsy",
+  displayName: "Demo: Cancer Biopsy Sample",
   dimensions: { width: 98304, height: 65536 },
   magnification: 20,
   mpp: 0.5,
@@ -26,10 +26,10 @@ export const DEMO_SLIDE: SlideInfo = {
   patient: {
     age: 58,
     sex: "Female",
-    stage: "IIIC",
+    stage: "III",
     grade: "High",
     prior_lines: 0,
-    histology: "High-grade serous carcinoma",
+    histology: "Adenocarcinoma",
   },
 };
 
@@ -50,9 +50,9 @@ function makePatch(idx: number, weight: number): EvidencePatch {
     )}`,
     morphologyDescription: [
       "Dense tumor cell clusters with high nuclear-to-cytoplasmic ratio",
-      "Solid sheets of high-grade serous carcinoma with prominent nucleoli",
+      "Solid sheets of carcinoma cells with prominent nucleoli",
       "Stromal invasion with desmoplastic reaction",
-      "Papillary architecture with fibrovascular cores",
+      "Glandular architecture with irregular borders",
       "Tumor-infiltrating lymphocytes at invasive front",
       "High mitotic activity with atypical mitoses",
     ][idx % 6],
@@ -79,7 +79,7 @@ export const DEMO_SIMILAR_CASES: SimilarCase[] = [
 ];
 
 export const DEMO_PREDICTION = {
-  label: "Platinum Sensitive",
+  label: "Favorable Response",
   score: 0.87,
   confidence: 0.91,
 };
@@ -112,18 +112,18 @@ export const DEMO_ANALYSIS_RESULT: AnalysisResponse = {
 export const DEMO_MULTI_MODEL: MultiModelResponse = {
   slideId: "TCGA-DEMO-001",
   predictions: {
-    platinum_sensitivity: {
-      modelId: "platinum_sensitivity",
-      modelName: "Platinum Sensitivity",
+    treatment_response: {
+      modelId: "treatment_response",
+      modelName: "Treatment Response",
       category: "cancer_specific",
       score: 0.87,
-      label: "Sensitive",
-      positiveLabel: "Sensitive",
-      negativeLabel: "Resistant",
+      label: "Favorable",
+      positiveLabel: "Favorable",
+      negativeLabel: "Unfavorable",
       confidence: 0.91,
       auc: 0.78,
       nTrainingSlides: 342,
-      description: "Predicts platinum-based chemotherapy response in ovarian cancer",
+      description: "Predicts treatment response from histopathology patterns",
     },
     tumor_grade: {
       modelId: "tumor_grade",
@@ -142,17 +142,17 @@ export const DEMO_MULTI_MODEL: MultiModelResponse = {
   byCategory: {
     cancerSpecific: [
       {
-        modelId: "platinum_sensitivity",
-        modelName: "Platinum Sensitivity",
+        modelId: "treatment_response",
+        modelName: "Treatment Response",
         category: "cancer_specific",
         score: 0.87,
-        label: "Sensitive",
-        positiveLabel: "Sensitive",
-        negativeLabel: "Resistant",
+        label: "Favorable",
+        positiveLabel: "Favorable",
+        negativeLabel: "Unfavorable",
         confidence: 0.91,
         auc: 0.78,
         nTrainingSlides: 342,
-        description: "Predicts platinum-based chemotherapy response in ovarian cancer",
+        description: "Predicts treatment response from histopathology patterns",
       },
     ],
     generalPathology: [
@@ -177,7 +177,7 @@ export const DEMO_MULTI_MODEL: MultiModelResponse = {
 
 export const DEMO_REPORT: StructuredReport = {
   caseId: "TCGA-DEMO-001",
-  task: "Platinum sensitivity prediction for high-grade serous ovarian carcinoma",
+  task: "Treatment response prediction from histopathology",
   generatedAt: new Date().toISOString(),
   patientContext: DEMO_SLIDE.patient,
   modelOutput: DEMO_PREDICTION,
@@ -186,10 +186,10 @@ export const DEMO_REPORT: StructuredReport = {
     coordsLevel0: [p.coordinates.x, p.coordinates.y] as [number, number],
     morphologyDescription: p.morphologyDescription || "",
     whyThisPatchMatters: [
-      "Highest attention region — solid tumor architecture suggests chemosensitive phenotype",
-      "Prominent nucleoli and high mitotic rate correlate with platinum response",
-      "Stromal reaction pattern associated with immune-mediated sensitivity",
-      "Papillary growth pattern linked to favorable treatment response",
+      "Highest attention region — tumor architecture suggests favorable response phenotype",
+      "Prominent nucleoli and high mitotic rate correlate with treatment response",
+      "Stromal reaction pattern associated with immune-mediated response",
+      "Glandular growth pattern linked to favorable treatment response",
     ][i],
   })),
   similarExamples: DEMO_SIMILAR_CASES.slice(0, 3).map((c) => ({
@@ -200,15 +200,15 @@ export const DEMO_REPORT: StructuredReport = {
   limitations: [
     "Research model — not validated for clinical decision-making",
     "Prediction based on morphology alone; genomic and clinical factors not included",
-    "Training cohort limited to TCGA ovarian cancer data",
+    "Training cohort limited to TCGA cancer data",
   ],
   suggestedNextSteps: [
-    "Correlate with BRCA1/2 mutation status and HRD score",
+    "Correlate with relevant biomarker testing results",
     "Consider germline and somatic testing results",
     "Discuss with tumor board before treatment decision",
   ],
   safetyStatement:
     "This AI analysis is for research and decision support only. All treatment decisions must be made by qualified clinicians in consultation with the patient.",
   summary:
-    "AI analysis of this high-grade serous ovarian carcinoma predicts platinum sensitivity with 91% confidence. The model identified dense tumor cell clusters and stromal invasion patterns consistent with chemosensitive phenotypes observed in the training cohort. Four of five most similar historical cases were also classified as platinum-sensitive, supporting the prediction. These findings should be integrated with genomic profiling and clinical context before therapeutic decision-making.",
+    "AI analysis of this cancer biopsy predicts favorable treatment response with 91% confidence. The model identified dense tumor cell clusters and stromal invasion patterns consistent with favorable response phenotypes observed in the training cohort. Four of five most similar historical cases were also classified as favorable responders, supporting the prediction. These findings should be integrated with genomic profiling and clinical context before therapeutic decision-making.",
 };

@@ -389,6 +389,7 @@ class SemanticSearchRequest(BaseModel):
     slide_id: str = Field(..., min_length=1, max_length=256)
     query: str = Field(..., min_length=1, max_length=512, description="Text query (e.g., 'tumor cells', 'lymphocytes')")
     top_k: int = Field(default=10, ge=1, le=50, description="Number of patches to return")
+    project_id: Optional[str] = Field(default=None, description="Project ID to scope embeddings lookup")
 
 
 class SemanticSearchResult(BaseModel):
@@ -2770,6 +2771,7 @@ should incorporate all available clinical, pathological, and molecular data."""
         slide_id: str = Field(..., min_length=1, max_length=256)
         include_evidence: bool = True
         include_similar: bool = True
+        project_id: Optional[str] = Field(default=None, description="Project ID to determine cancer type and embeddings path")
     
     class AsyncReportResponse(BaseModel):
         """Response from async report generation."""
@@ -2815,6 +2817,7 @@ should incorporate all available clinical, pathological, and molecular data."""
                 slide_id,
                 request.include_evidence,
                 request.include_similar,
+                request.project_id,
             )
         
         background_tasks.add_task(run_report_generation)
@@ -2832,6 +2835,7 @@ should incorporate all available clinical, pathological, and molecular data."""
         slide_id: str,
         include_evidence: bool,
         include_similar: bool,
+        project_id: Optional[str] = None,
     ):
         """Background task to generate report."""
         import time
@@ -2849,10 +2853,27 @@ should incorporate all available clinical, pathological, and molecular data."""
             message="Loading embeddings and running analysis..."
         )
         
+        # Resolve project-specific embeddings directory and cancer type
+        _report_embeddings_dir = embeddings_dir
+        cancer_type = "Cancer"  # Default fallback
+        if project_id and project_registry:
+            proj_cfg = project_registry.get_project(project_id)
+            if proj_cfg:
+                # Get cancer type from project config
+                cancer_type = proj_cfg.cancer_type or proj_cfg.name or "Cancer"
+                # Get project-specific embeddings directory
+                if hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
+                    proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
+                    if not proj_emb_dir.is_absolute():
+                        proj_emb_dir = _data_root.parent / proj_emb_dir
+                    if proj_emb_dir.exists():
+                        _report_embeddings_dir = proj_emb_dir
+                        logger.info(f"_generate_report_background: Using project embeddings dir: {_report_embeddings_dir}")
+        
         try:
             # Load embeddings
-            emb_path = embeddings_dir / f"{slide_id}.npy"
-            coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+            emb_path = _report_embeddings_dir / f"{slide_id}.npy"
+            coord_path = _report_embeddings_dir / f"{slide_id}_coords.npy"
             
             embeddings = np.load(emb_path)
             
@@ -2995,6 +3016,7 @@ should incorporate all available clinical, pathological, and molecular data."""
                                 similar_cases=similar_cases,
                                 case_id=slide_id,
                                 patient_context=patient_ctx,
+                                cancer_type=cancer_type,
                             )
                         except Exception as ex:
                             gen_error[0] = ex
@@ -3668,8 +3690,21 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             raise HTTPException(status_code=503, detail="MedSigLIP embedder not initialized")
 
         slide_id = request.slide_id
-        emb_path = embeddings_dir / f"{slide_id}.npy"
-        coord_path = embeddings_dir / f"{slide_id}_coords.npy"
+        
+        # Resolve project-specific embeddings directory if project_id is given
+        _search_embeddings_dir = embeddings_dir
+        if request.project_id and project_registry:
+            proj_cfg = project_registry.get_project(request.project_id)
+            if proj_cfg and hasattr(proj_cfg, 'dataset') and proj_cfg.dataset:
+                proj_emb_dir = Path(proj_cfg.dataset.embeddings_dir)
+                if not proj_emb_dir.is_absolute():
+                    proj_emb_dir = _data_root.parent / proj_emb_dir
+                if proj_emb_dir.exists():
+                    _search_embeddings_dir = proj_emb_dir
+                    logger.info(f"semantic_search: Using project embeddings dir: {_search_embeddings_dir}")
+        
+        emb_path = _search_embeddings_dir / f"{slide_id}.npy"
+        coord_path = _search_embeddings_dir / f"{slide_id}_coords.npy"
 
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
@@ -3682,17 +3717,17 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         if siglip_cache_key in slide_siglip_embeddings:
             siglip_embeddings = slide_siglip_embeddings[siglip_cache_key]
             # Load SigLIP-specific coords if available
-            siglip_coords_path = embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip_coords.npy"
+            siglip_coords_path = _search_embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip_coords.npy"
             if siglip_coords_path.exists():
                 siglip_coords = np.load(siglip_coords_path)
             logger.info(f"Using cached MedSigLIP embeddings for {slide_id}")
         else:
-            siglip_cache_path = embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip.npy"
+            siglip_cache_path = _search_embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip.npy"
             if siglip_cache_path.exists():
                 siglip_embeddings = np.load(siglip_cache_path)
                 slide_siglip_embeddings[siglip_cache_key] = siglip_embeddings
                 # Load SigLIP-specific coords if available
-                siglip_coords_path = embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip_coords.npy"
+                siglip_coords_path = _search_embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip_coords.npy"
                 if siglip_coords_path.exists():
                     siglip_coords = np.load(siglip_coords_path)
                 logger.info(f"Loaded MedSigLIP embeddings from cache for {slide_id}")
@@ -3700,7 +3735,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 # On-the-fly MedSigLIP embedding: extract patches from WSI and embed
                 siglip_embeddings = None
                 wsi_result = get_slide_and_dz(slide_id)
-                coord_path_check = embeddings_dir / f"{slide_id}_coords.npy"
+                coord_path_check = _search_embeddings_dir / f"{slide_id}_coords.npy"
                 
                 if wsi_result is not None and coord_path_check.exists():
                     try:
