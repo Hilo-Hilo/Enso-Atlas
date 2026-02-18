@@ -29,7 +29,7 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
-import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords } from "@/lib/api";
+import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords, getProjectAvailableModels } from "@/lib/api";
 import { deduplicateSlides } from "@/lib/slideUtils";
 import { useProject } from "@/contexts/ProjectContext";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
@@ -715,20 +715,42 @@ function HomePage() {
 
       // If cached results exist, build a MultiModelResponse from them
       if (cachedResult && cachedResult.count > 0) {
-        // Build model metadata lookup from AVAILABLE_MODELS (dynamic, not hardcoded)
+        // Build model metadata lookup from project-specific available models
+        // Fall back to static AVAILABLE_MODELS if fetch fails
         const MODEL_META: Record<string, {
           name: string; category: string;
           auc: number; posLabel: string; negLabel: string; desc: string;
         }> = {};
+        
+        // Try to get project-specific models for accurate metadata
+        try {
+          const projectModels = await getProjectAvailableModels(currentProject.id);
+          for (const m of projectModels) {
+            MODEL_META[m.id] = {
+              name: m.displayName,
+              category: m.category,
+              auc: m.auc ?? 0,
+              posLabel: m.positiveLabel ?? "Positive",
+              negLabel: m.negativeLabel ?? "Negative",
+              desc: m.description ?? "",
+            };
+          }
+        } catch (err) {
+          console.warn("Failed to fetch project models for metadata, using fallback:", err);
+        }
+        
+        // Fallback to static AVAILABLE_MODELS for any missing models
         for (const m of AVAILABLE_MODELS) {
-          MODEL_META[m.id] = {
-            name: m.displayName,
-            category: m.category,
-            auc: m.auc ?? 0,
-            posLabel: m.positiveLabel ?? "Positive",
-            negLabel: m.negativeLabel ?? "Negative",
-            desc: m.description ?? "",
-          };
+          if (!MODEL_META[m.id]) {
+            MODEL_META[m.id] = {
+              name: m.displayName,
+              category: m.category,
+              auc: m.auc ?? 0,
+              posLabel: m.positiveLabel ?? "Positive",
+              negLabel: m.negativeLabel ?? "Negative",
+              desc: m.description ?? "",
+            };
+          }
         }
 
         const predictions: Record<string, import("@/types").ModelPrediction> = {};
