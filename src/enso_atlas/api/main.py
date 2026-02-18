@@ -1216,16 +1216,13 @@ def create_app(
         proj_cfg = _require_project(project_id)
 
         # ---- Fast path: PostgreSQL ----
-        if db_available:
+        # For project-scoped requests we intentionally bypass DB rows because
+        # patch counts can lag behind active re-embedding jobs. Flat-file scan
+        # reads live embedding arrays from the project's directory.
+        if db_available and not project_id:
             try:
                 t0 = time.time()
-                # If project_id given, filter through project_slides
-                if project_id:
-                    allowed_ids = set(await db.get_project_slides(project_id))
-                    all_rows = await db.get_all_slides()
-                    rows = [r for r in all_rows if r["slide_id"] in allowed_ids]
-                else:
-                    rows = await db.get_all_slides()
+                rows = await db.get_all_slides()
                 slides = []
                 for r in rows:
                     patient_ctx = None
@@ -1256,15 +1253,9 @@ def create_app(
                     ))
                 elapsed_ms = (time.time() - t0) * 1000
                 logger.info(f"/api/slides returned {len(slides)} slides from DB in {elapsed_ms:.0f}ms")
-                # If DB returned 0 slides for a specific project, fall through
-                # to flat-file scan — the project's embeddings may not be in
-                # the DB yet but exist on disk.
-                if slides or not project_id:
-                    return slides
-                logger.info(f"DB returned 0 slides for project {project_id}, falling through to flat-file scan")
+                return slides
             except Exception as e:
                 logger.warning(f"DB query failed, falling back to flat-file scan: {e}")
-
         # project validity is enforced above via _require_project(project_id)
 
         # ---- Slow fallback: flat-file scan (with caching) ----
