@@ -45,3 +45,25 @@ export async function GET(
     );
   }
 }
+
+// HEAD handler for DZI availability pre-check (used by WSIViewer to avoid OSD error flash)
+export async function HEAD(
+  request: NextRequest,
+  { params }: { params: Promise<{ slideId: string }> }
+) {
+  const { slideId } = await params;
+
+  try {
+    const backendUrl = `${BACKEND_URL}/api/slides/${encodeURIComponent(slideId)}/dzi`;
+    const response = await fetch(backendUrl, { method: "GET" });
+
+    return new NextResponse(null, {
+      status: response.ok ? 200 : response.status,
+      headers: {
+        "Cache-Control": "public, max-age=3600",
+      },
+    });
+  } catch {
+    return new NextResponse(null, { status: 502 });
+  }
+}

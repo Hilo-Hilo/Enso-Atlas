@@ -261,6 +261,29 @@ export function WSIViewer({
     const containerId = `wsi-viewer-${slideId}`;
     containerRef.current.id = containerId;
 
+    let cancelled = false;
+
+    // Pre-check DZI availability to avoid OpenSeadragon's ugly default error display
+    (async () => {
+      try {
+        const headResp = await fetch(dziUrl, { method: "HEAD" });
+        if (!headResp.ok) {
+          if (!cancelled) {
+            setLoadError("WSI preview unavailable — embeddings only");
+            setIsReady(false);
+          }
+          return;
+        }
+      } catch {
+        if (!cancelled) {
+          setLoadError("WSI preview unavailable — embeddings only");
+          setIsReady(false);
+        }
+        return;
+      }
+
+      if (cancelled || !containerRef.current) return;
+
     const viewer = OpenSeadragon({
       id: containerId,
       prefixUrl:
@@ -299,7 +322,7 @@ export function WSIViewer({
     viewer.addHandler("open-failed", (event: OpenSeadragon.OpenFailedEvent) => {
       const message = event.message || "Failed to load slide";
       if (message.includes("404") || message.includes("Unable to open")) {
-        setLoadError("WSI preview unavailable - embeddings only");
+        setLoadError("WSI preview unavailable — embeddings only");
       } else {
         setLoadError(message);
       }
@@ -344,9 +367,14 @@ export function WSIViewer({
 
     viewerRef.current = viewer;
 
+    })(); // end async IIFE
+
     return () => {
-      viewer.destroy();
-      viewerRef.current = null;
+      cancelled = true;
+      if (viewerRef.current) {
+        viewerRef.current.destroy();
+        viewerRef.current = null;
+      }
       setIsReady(false);
     };
   }, [dziUrl, slideId]); // Removed onRegionClick and activeTool - they use refs now

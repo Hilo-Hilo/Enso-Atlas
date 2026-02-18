@@ -137,8 +137,9 @@ function SlideThumbnail({
           />
         </>
       ) : imageError ? (
-        <div className="w-full h-full flex items-center justify-center bg-gray-50">
-          <ImageOff className="h-5 w-5 text-gray-300" />
+        <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
+          <Layers className="h-5 w-5 text-slate-400" />
+          <span className="text-[7px] font-medium text-slate-400 mt-0.5 leading-none">Embeddings</span>
         </div>
       ) : (
         <div className="w-full h-full flex items-center justify-center pattern-dots">
