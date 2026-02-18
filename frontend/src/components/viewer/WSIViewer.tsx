@@ -263,11 +263,11 @@ export function WSIViewer({
 
     let cancelled = false;
 
-    // Pre-check DZI availability to avoid OpenSeadragon's ugly default error display
+    // Pre-check DZI availability (via GET) to avoid OpenSeadragon's ugly default error display
     (async () => {
       try {
-        const headResp = await fetch(dziUrl, { method: "HEAD" });
-        if (!headResp.ok) {
+        const dziResp = await fetch(dziUrl, { method: "GET" });
+        if (!dziResp.ok) {
           if (!cancelled) {
             setLoadError("WSI preview unavailable — embeddings only");
             setIsReady(false);
