@@ -1115,6 +1115,13 @@ function HomePage() {
   const handleMultiModelAnalyze = useCallback(async (forceRefresh: boolean = false) => {
     if (!selectedSlide) return;
 
+    // Safety gate: single-model projects should never execute multi-model inference.
+    if (scopedProjectModels.length <= 1) {
+      setMultiModelResult(null);
+      setMultiModelError(null);
+      return;
+    }
+
     // Clear previous results and cache state
     setMultiModelResult(null);
     setIsCachedResult(false);
@@ -1893,7 +1900,7 @@ function HomePage() {
           qcMetrics={slideQCMetrics}
           isCached={isCachedResult && !analysisResult}
           cachedAt={cachedResultTimestamp}
-          onReanalyze={selectedSlide ? handleReanalyze : undefined}
+          onReanalyze={selectedSlide ? handleAnalyze : undefined}
         />
       </div>
 
