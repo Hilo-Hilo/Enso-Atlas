@@ -16,9 +16,11 @@ export async function GET(
     const backendParams = new URLSearchParams();
     const level = searchParams.get("level");
     const alphaPower = searchParams.get("alpha_power");
+    const smooth = searchParams.get("smooth");
     const projectId = searchParams.get("project_id");
     if (level) backendParams.set("level", level);
     if (alphaPower) backendParams.set("alpha_power", alphaPower);
+    if (smooth) backendParams.set("smooth", smooth);
     if (projectId) backendParams.set("project_id", projectId);
     const qs = backendParams.toString() ? `?${backendParams.toString()}` : "";
     const backendUrl = `${BACKEND_URL}/api/heatmap/${encodeURIComponent(slideId)}/${encodeURIComponent(modelId)}${qs}`;
@@ -39,7 +41,7 @@ export async function GET(
     
     const headers: Record<string, string> = {
       "Content-Type": contentType,
-      "Cache-Control": alphaPower ? "no-cache" : "public, max-age=3600",
+      "Cache-Control": alphaPower || smooth ? "no-cache" : "public, max-age=3600",
     };
     // Forward coverage headers for heatmap alignment
     for (const h of ["X-Model-Id", "X-Model-Name", "X-Slide-Width", "X-Slide-Height", "X-Coverage-Width", "X-Coverage-Height"]) {

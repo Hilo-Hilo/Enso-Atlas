@@ -334,6 +334,7 @@ function HomePage() {
   const [heatmapModel, setHeatmapModel] = useState<string | null>(null);
   const [heatmapLevel, setHeatmapLevel] = useState<number>(2); // 0-4, default 2 (512px)
   const [heatmapAlphaPower, setHeatmapAlphaPower] = useState<number>(0.7); // 0.1-1.5, controls low-attention visibility
+  const [heatmapSmooth, setHeatmapSmooth] = useState<boolean>(false); // optional interpolated view (visual only)
   // Debounce alpha power so heatmap only re-fetches after user stops sliding
   const [debouncedAlphaPower, setDebouncedAlphaPower] = useState<number>(0.7);
   useEffect(() => {
@@ -1779,7 +1780,14 @@ function HomePage() {
     heatmapModel ?? scopedProjectModels[0]?.id ?? currentProject?.prediction_target ?? null;
 
   const heatmapData = selectedSlide && effectiveHeatmapModel ? {
-    imageUrl: getHeatmapUrl(selectedSlide.id, effectiveHeatmapModel, heatmapLevel, debouncedAlphaPower, currentProject?.id),
+    imageUrl: getHeatmapUrl(
+      selectedSlide.id,
+      effectiveHeatmapModel,
+      heatmapLevel,
+      debouncedAlphaPower,
+      currentProject?.id,
+      heatmapSmooth,
+    ),
     minValue: 0,
     maxValue: 1,
     colorScale: "viridis" as const,
@@ -2184,6 +2192,8 @@ function HomePage() {
                 onHeatmapLevelChange={setHeatmapLevel}
                 heatmapAlphaPower={heatmapAlphaPower}
                 onHeatmapAlphaPowerChange={setHeatmapAlphaPower}
+                heatmapSmooth={heatmapSmooth}
+                onHeatmapSmoothChange={setHeatmapSmooth}
                 onHeatmapModelChange={setHeatmapModel}
                 availableModels={scopedProjectModels.map((m) => ({ id: m.id, name: m.name }))}
                 onControlsReady={(controls) => { viewerControlsRef.current = controls; }}

@@ -710,13 +710,21 @@ export function getDziUrl(slideId: string, projectId?: string): string {
  * 
  * Uses local Next.js API proxy to avoid CORS issues.
  */
-export function getHeatmapUrl(slideId: string, modelId?: string, level?: number, alphaPower?: number, projectId?: string): string {
+export function getHeatmapUrl(
+  slideId: string,
+  modelId?: string,
+  level?: number,
+  alphaPower?: number,
+  projectId?: string,
+  smooth?: boolean,
+): string {
   const params = new URLSearchParams();
   if (level !== undefined) params.set('level', String(level));
   if (alphaPower !== undefined && Math.abs(alphaPower - 0.7) > 0.01) {
     params.set('alpha_power', alphaPower.toFixed(2));
   }
   if (projectId) params.set('project_id', projectId);
+  if (smooth) params.set('smooth', 'true');
   const qs = params.toString() ? `?${params.toString()}` : '';
   if (modelId) {
     return `/api/heatmap/${encodeURIComponent(slideId)}/${encodeURIComponent(modelId)}${qs}`;

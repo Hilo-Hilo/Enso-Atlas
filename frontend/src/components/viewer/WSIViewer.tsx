@@ -116,6 +116,9 @@ interface WSIViewerProps {
   // Heatmap alpha power (controls low-attention patch visibility)
   heatmapAlphaPower?: number; // 0.1-1.5, default 0.7
   onHeatmapAlphaPowerChange?: (power: number) => void;
+  // Optional interpolated visualization mode (visual smoothing only)
+  heatmapSmooth?: boolean;
+  onHeatmapSmoothChange?: (smooth: boolean) => void;
   onControlsReady?: (controls: WSIViewerControls) => void;
   onZoomChange?: (zoom: number) => void;
   // Annotation support
@@ -149,6 +152,8 @@ export function WSIViewer({
   onHeatmapLevelChange,
   heatmapAlphaPower = 0.7,
   onHeatmapAlphaPowerChange,
+  heatmapSmooth = false,
+  onHeatmapSmoothChange,
   onControlsReady,
   onZoomChange,
   annotations = [],
@@ -679,25 +684,27 @@ export function WSIViewer({
     };
   }, [heatmapImageUrl, isReady, getSlideTiledImage]);
 
-  // Force pixelated rendering on all OSD canvas elements for discrete heatmap patches
+  // Keep OpenSeadragon canvas rendering mode in sync with heatmap visualization mode.
+  // Truthful mode uses pixelated patches; interpolated mode restores browser smoothing.
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !isReady) return;
 
-    const applyPixelated = () => {
+    const imageRendering = heatmapSmooth ? "auto" : "pixelated";
+    const applyRenderingMode = () => {
       const canvases = container.querySelectorAll("canvas");
       canvases.forEach((c) => {
-        (c as HTMLCanvasElement).style.imageRendering = "pixelated";
+        (c as HTMLCanvasElement).style.imageRendering = imageRendering;
       });
     };
 
     // Apply immediately and also observe for new canvases added by OSD
-    applyPixelated();
-    const observer = new MutationObserver(applyPixelated);
+    applyRenderingMode();
+    const observer = new MutationObserver(applyRenderingMode);
     observer.observe(container, { childList: true, subtree: true });
 
     return () => observer.disconnect();
-  }, [isReady]);
+  }, [isReady, heatmapSmooth]);
 
   // Unified effect for heatmap opacity AND pathology tile visibility.
   // Merging these ensures any toggle change (showHeatmap, heatmapOnly)
@@ -1501,7 +1508,18 @@ export function WSIViewer({
             </div>
 
             {showHeatmapPanel && showHeatmap && (
-              <div className="pt-2 border-t border-gray-100 animate-fade-in">
+              <div className="pt-2 border-t border-gray-100 animate-fade-in space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-xs text-gray-500">Interpolated view</span>
+                    <span className="text-2xs text-gray-400">Visual smoothing only</span>
+                  </div>
+                  <Toggle
+                    checked={heatmapSmooth}
+                    onChange={(checked) => onHeatmapSmoothChange?.(checked)}
+                    size="sm"
+                  />
+                </div>
                 <ModelSelector />
                 <Slider
                   label="Opacity"
@@ -1512,6 +1530,9 @@ export function WSIViewer({
                   onChange={(e) => setHeatmapOpacity(Number(e.target.value))}
                   formatValue={(v) => `${Math.round(v * 100)}%`}
                 />
+                <p className="text-2xs text-gray-400 leading-snug">
+                  Heatmap density reflects extracted patch coverage.
+                </p>
               </div>
             )}
           </div>
@@ -1722,6 +1743,18 @@ export function WSIViewer({
                     />
                   </div>
 
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-gray-500">Interpolated view</span>
+                      <span className="text-2xs text-gray-400">Visual smoothing only</span>
+                    </div>
+                    <Toggle
+                      checked={heatmapSmooth}
+                      onChange={(checked) => onHeatmapSmoothChange?.(checked)}
+                      size="sm"
+                    />
+                  </div>
+
                   <ModelSelector />
                   <Slider
                     label="Opacity"
@@ -1757,6 +1790,9 @@ export function WSIViewer({
                       <span>Low attention</span>
                       <span>High attention</span>
                     </div>
+                    <p className="text-2xs text-gray-400 mt-1.5 leading-snug">
+                      Heatmap density reflects extracted patch coverage.
+                    </p>
                   </div>
                 </div>
               )}

@@ -6070,6 +6070,10 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         slide_id: str,
         model_id: str,
         alpha_power: float = 0.7,
+        smooth: bool = Query(
+            default=False,
+            description="Apply Gaussian blur interpolation for denser visualization (False keeps truthful patch-grid rendering)",
+        ),
         project_id: Optional[str] = Query(default=None, description="Project ID to scope embeddings lookup")
     ):
         """Get the attention heatmap for a specific TransMIL model.
@@ -6151,8 +6155,9 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         cache_dir = _model_heatmap_embeddings_dir / "heatmap_cache"
         cache_dir.mkdir(exist_ok=True)
         is_default_alpha = abs(alpha_power - 0.7) < 0.01
+        mode_suffix = "smooth" if smooth else "truthful"
         cache_suffix = project_id if project_id else "global"
-        cache_path = cache_dir / f"{cache_suffix}_{slide_id}_{model_id}_v2.png"
+        cache_path = cache_dir / f"{cache_suffix}_{slide_id}_{model_id}_{mode_suffix}_v3.png"
 
         if is_default_alpha and cache_path.exists():
             # Serve cached heatmap — still need slide dims for headers
@@ -6252,8 +6257,8 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 coords_list,
                 slide_dims,
                 thumbnail_size=(grid_w, grid_h),
-                smooth=False,
-                blur_kernel=1,
+                smooth=smooth,
+                blur_kernel=31 if smooth else 1,
                 alpha_power=alpha_power,
             )
             

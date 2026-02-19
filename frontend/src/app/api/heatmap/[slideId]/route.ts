@@ -13,12 +13,14 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   const level = searchParams.get("level");
   const alphaPower = searchParams.get("alpha_power");
+  const smooth = searchParams.get("smooth");
   const projectId = searchParams.get("project_id");
   
   try {
     const backendParams = new URLSearchParams();
     if (level) backendParams.set("level", level);
     if (alphaPower) backendParams.set("alpha_power", alphaPower);
+    if (smooth) backendParams.set("smooth", smooth);
     if (projectId) backendParams.set("project_id", projectId);
 
     const qs = backendParams.toString() ? `?${backendParams.toString()}` : "";
@@ -40,7 +42,7 @@ export async function GET(
 
     const headers: Record<string, string> = {
       "Content-Type": contentType,
-      "Cache-Control": alphaPower ? "no-cache" : "public, max-age=3600",
+      "Cache-Control": alphaPower || smooth ? "no-cache" : "public, max-age=3600",
     };
 
     for (const h of ["X-Slide-Width", "X-Slide-Height", "X-Coverage-Width", "X-Coverage-Height"]) {
