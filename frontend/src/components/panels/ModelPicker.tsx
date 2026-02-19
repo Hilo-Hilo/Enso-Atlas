@@ -232,6 +232,25 @@ export function ModelPicker({
     return [primary, ...unique.filter((m) => m.id !== primary.id)];
   }, [apiModelDetails, projectModelIds, fallbackModels, currentProject]);
 
+  // Prune stale/duplicate selected model IDs whenever the project model list changes.
+  // This prevents impossible counts like 4/3 after project switches.
+  useEffect(() => {
+    if (models.length === 0 || selectedModels.length === 0) return;
+
+    const availableModelIds = new Set(models.map((m) => m.id));
+    const seen = new Set<string>();
+    const prunedSelection = selectedModels.filter((id) => {
+      if (!availableModelIds.has(id)) return false;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+
+    if (prunedSelection.length !== selectedModels.length) {
+      onSelectionChange(prunedSelection);
+    }
+  }, [models, selectedModels, onSelectionChange]);
+
   // Auto-select all models when models are loaded and selectedModels is empty
   useEffect(() => {
     if (models.length > 0 && selectedModels.length === 0) {

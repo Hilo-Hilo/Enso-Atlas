@@ -715,6 +715,72 @@ def create_app(
             )
         return proj_emb_dir
 
+    def _candidate_embedding_dirs_for_level(
+        base_embeddings_dir: Path,
+        *,
+        level: int,
+        project_id: Optional[str],
+    ) -> list[Path]:
+        """Resolve candidate embedding directories for a request.
+
+        Level 0 is strict dense-only: we only check explicit ``level0`` directories
+        (project-level and global-level). We intentionally do not fall back to flat
+        project embedding roots for level 0 because those roots may contain sparse
+        embeddings, which causes silent dense/sparse mismatches.
+        """
+        project_requested = project_id is not None
+        candidates: list[Path] = []
+
+        def _add(path: Path):
+            if path not in candidates:
+                candidates.append(path)
+
+        if level == 0:
+            if base_embeddings_dir.name == "level0":
+                _add(base_embeddings_dir)
+            else:
+                _add(base_embeddings_dir / "level0")
+
+            global_level0 = embeddings_dir if embeddings_dir.name == "level0" else embeddings_dir / "level0"
+            _add(global_level0)
+            _add(_data_root / "embeddings" / "level0")
+        else:
+            _add(base_embeddings_dir)
+            if base_embeddings_dir.name != "level1":
+                _add(base_embeddings_dir / "level1")
+
+            if not project_requested:
+                _add(embeddings_dir)
+                _add(_data_root / "embeddings" / "level1")
+
+        return candidates
+
+    def _resolve_embedding_path(
+        slide_id: str,
+        *,
+        level: int,
+        project_id: Optional[str],
+        base_embeddings_dir: Optional[Path] = None,
+    ) -> tuple[Optional[Path], list[Path]]:
+        """Return (embedding_path, searched_dirs) for a slide-level request."""
+        project_requested = project_id is not None
+        resolved_base = base_embeddings_dir or _resolve_project_embeddings_dir(
+            project_id,
+            require_exists=project_requested,
+        )
+        candidate_dirs = _candidate_embedding_dirs_for_level(
+            resolved_base,
+            level=level,
+            project_id=project_id,
+        )
+
+        for d in candidate_dirs:
+            emb_path = d / f"{slide_id}.npy"
+            if emb_path.exists():
+                return emb_path, candidate_dirs
+
+        return None, candidate_dirs
+
     def _resolve_project_label_pair(
         project_id: Optional[str],
         *,
@@ -2049,29 +2115,13 @@ def create_app(
 
         def _resolve_emb_path(slide_id: str):
             """Resolve embedding path based on requested level and project scope."""
-            candidate_dirs: List[Path] = []
-            if level == 0:
-                if batch_embeddings_dir.name == "level0":
-                    candidate_dirs.append(batch_embeddings_dir)
-                else:
-                    candidate_dirs.extend([batch_embeddings_dir / "level0", batch_embeddings_dir])
-                if not project_requested and batch_embeddings_dir != embeddings_dir:
-                    if embeddings_dir.name == "level0":
-                        candidate_dirs.append(embeddings_dir)
-                    else:
-                        candidate_dirs.extend([embeddings_dir / "level0", embeddings_dir])
-            else:
-                candidate_dirs.append(batch_embeddings_dir)
-                if batch_embeddings_dir.name != "level1":
-                    candidate_dirs.append(batch_embeddings_dir / "level1")
-                if not project_requested and batch_embeddings_dir != embeddings_dir:
-                    candidate_dirs.extend([embeddings_dir, embeddings_dir / "level1"])
-
-            for d in candidate_dirs:
-                p = d / f"{slide_id}.npy"
-                if p.exists():
-                    return p
-            return None
+            emb_path, _ = _resolve_embedding_path(
+                slide_id,
+                level=level,
+                project_id=project_id,
+                base_embeddings_dir=batch_embeddings_dir,
+            )
+            return emb_path
 
         def analyze_single_slide(slide_id: str) -> BatchSlideResult:
             """Analyze a single slide and return result."""
@@ -3692,11 +3742,27 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             require_exists=project_requested,
         )
 
-        emb_path = _heatmap_embeddings_dir / f"{slide_id}.npy"
-        coord_path = _heatmap_embeddings_dir / f"{slide_id}_coords.npy"
+        emb_path, searched_dirs = _resolve_embedding_path(
+            slide_id,
+            level=0,
+            project_id=project_id,
+            base_embeddings_dir=_heatmap_embeddings_dir,
+        )
+        if emb_path is None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "LEVEL0_EMBEDDINGS_REQUIRED",
+                    "message": f"Level 0 (full resolution) embeddings do not exist for slide {slide_id}. Generate embeddings first using /api/embed-slide with level=0.",
+                    "needs_embedding": True,
+                    "slide_id": slide_id,
+                    "level": 0,
+                    "project_id": project_id,
+                    "searched_dirs": [str(d) for d in searched_dirs],
+                },
+            )
 
-        if not emb_path.exists():
-            raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
+        coord_path = emb_path.with_name(f"{slide_id}_coords.npy")
 
         embeddings = np.load(emb_path)
 
@@ -5930,26 +5996,15 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             require_exists=project_requested,
         )
 
-        emb_path: Optional[Path] = None
-        if level == 0:
-            candidate_dirs = []
-            if analysis_embeddings_dir.name == "level0":
-                candidate_dirs.append(analysis_embeddings_dir)
-            else:
-                candidate_dirs.extend([analysis_embeddings_dir / "level0", analysis_embeddings_dir])
-            if not project_requested:
-                if embeddings_dir.name == "level0":
-                    candidate_dirs.append(embeddings_dir)
-                else:
-                    candidate_dirs.extend([embeddings_dir / "level0", embeddings_dir])
+        emb_path, searched_dirs = _resolve_embedding_path(
+            slide_id,
+            level=level,
+            project_id=request.project_id,
+            base_embeddings_dir=analysis_embeddings_dir,
+        )
 
-            for d in candidate_dirs:
-                cand = d / f"{slide_id}.npy"
-                if cand.exists():
-                    emb_path = cand
-                    break
-
-            if emb_path is None:
+        if emb_path is None:
+            if level == 0:
                 raise HTTPException(
                     status_code=400,
                     detail={
@@ -5959,25 +6014,9 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                         "slide_id": slide_id,
                         "level": 0,
                         "project_id": request.project_id,
+                        "searched_dirs": [str(d) for d in searched_dirs],
                     }
                 )
-        else:
-            candidate_dirs = [analysis_embeddings_dir]
-            if analysis_embeddings_dir.name != "level1":
-                candidate_dirs.append(analysis_embeddings_dir / "level1")
-            if not project_requested:
-                candidate_dirs.extend([
-                    embeddings_dir,
-                    _data_root / "embeddings" / "level1",
-                ])
-
-            for d in candidate_dirs:
-                cand = d / f"{slide_id}.npy"
-                if cand.exists():
-                    emb_path = cand
-                    break
-
-        if emb_path is None or not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
 
         embeddings = np.load(emb_path)
@@ -6125,11 +6164,27 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 },
             )
 
-        emb_path = _model_heatmap_embeddings_dir / f"{slide_id}.npy"
-        coord_path = _model_heatmap_embeddings_dir / f"{slide_id}_coords.npy"
+        emb_path, searched_dirs = _resolve_embedding_path(
+            slide_id,
+            level=0,
+            project_id=project_id,
+            base_embeddings_dir=_model_heatmap_embeddings_dir,
+        )
+        if emb_path is None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "LEVEL0_EMBEDDINGS_REQUIRED",
+                    "message": f"Level 0 (full resolution) embeddings do not exist for slide {slide_id}. Generate embeddings first using /api/embed-slide with level=0.",
+                    "needs_embedding": True,
+                    "slide_id": slide_id,
+                    "level": 0,
+                    "project_id": project_id,
+                    "searched_dirs": [str(d) for d in searched_dirs],
+                },
+            )
 
-        if not emb_path.exists():
-            raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
+        coord_path = emb_path.with_name(f"{slide_id}_coords.npy")
 
         # Coordinates are required for truthful attention localization.
         # Synthetic fallback grids create misleading overlays when embeddings were
@@ -6148,7 +6203,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         # Check disk cache first (only for default alpha_power).
         # Use a versioned cache key to avoid serving stale overlays generated
         # with pre-fix coordinate assumptions.
-        cache_dir = _model_heatmap_embeddings_dir / "heatmap_cache"
+        cache_dir = emb_path.parent / "heatmap_cache"
         cache_dir.mkdir(exist_ok=True)
         is_default_alpha = abs(alpha_power - 0.7) < 0.01
         cache_suffix = project_id if project_id else "global"
