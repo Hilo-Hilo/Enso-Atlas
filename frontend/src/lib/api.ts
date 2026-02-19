@@ -2395,7 +2395,7 @@ export async function startBatchAnalysisAsync(
         slide_ids: slideIds,
         concurrency,
         model_ids: options?.modelIds ?? null,
-        level: options?.level ?? 1,
+        level: options?.level ?? 0,
         force_reembed: options?.forceReembed ?? false,
       }),
     }

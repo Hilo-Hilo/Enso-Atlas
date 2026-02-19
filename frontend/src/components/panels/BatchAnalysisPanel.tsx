@@ -152,7 +152,7 @@ export function BatchAnalysisPanel({
 
   // Model selection state
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
-  const [resolutionLevel, setResolutionLevel] = useState(1);
+  const [resolutionLevel, setResolutionLevel] = useState(0);
   const [forceReembed, setForceReembed] = useState(false);
   const [modelConfigExpanded, setModelConfigExpanded] = useState(true);
   const [apiModelDetails, setApiModelDetails] = useState<AvailableModelDetail[]>([]);
