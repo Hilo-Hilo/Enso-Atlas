@@ -1225,11 +1225,28 @@ function HomePage() {
                               errorMessage.toLowerCase().includes("patch") ||
                               errorMessage.toLowerCase().includes("timeout");
       
+      const lowerError = errorMessage.toLowerCase();
+
+      // Busy overload contract from backend while batch embedding is active
+      const isServerBusy =
+        lowerError.includes("server_busy") ||
+        lowerError.includes("batch embedding") ||
+        lowerError.includes("temporarily unavailable to avoid gpu contention");
+
       // Check if it's a level 0 embeddings required error
-      const needsLevel0 = errorMessage.toLowerCase().includes("level0_embeddings_required") ||
-                          errorMessage.toLowerCase().includes("level 0");
-      
-      if (needsLevel0) {
+      const needsLevel0 = lowerError.includes("level0_embeddings_required") ||
+                          lowerError.includes("level 0");
+
+      if (isServerBusy) {
+        const busyMsg =
+          "Level 0 batch embedding is currently running. Multi-model analysis is temporarily paused to keep the server stable.\n\n" +
+          "Please wait for embedding to finish (or cancel the batch job) and try again.";
+        setMultiModelError(busyMsg);
+        toast.warning(
+          "Server Busy",
+          "Batch embedding is in progress. Please retry analysis in a moment."
+        );
+      } else if (needsLevel0) {
         setMultiModelError(
           "Level 0 embeddings are required for full-resolution analysis. Please click 'Generate Level 0 Embeddings' first."
         );

@@ -163,14 +163,41 @@ async function fetchApi<T>(
       if (!response.ok) {
         let errorData: ApiError;
         try {
-          errorData = await response.json();
+          const rawError = await response.json() as Record<string, unknown>;
+          const detail = rawError?.detail;
+
+          // FastAPI commonly returns { detail: "..." } or { detail: { error, message, ... } }
+          if (detail && typeof detail === "object") {
+            const detailObj = detail as Record<string, unknown>;
+            errorData = {
+              code: String(rawError?.code ?? detailObj.error ?? detailObj.code ?? `HTTP_${response.status}`),
+              message:
+                (typeof detailObj.message === "string" && detailObj.message) ||
+                (typeof detailObj.error === "string" && detailObj.error) ||
+                `HTTP ${response.status}: ${response.statusText}`,
+              details: detailObj,
+            };
+          } else if (typeof detail === "string") {
+            errorData = {
+              code: String(rawError?.code ?? `HTTP_${response.status}`),
+              message: detail,
+            };
+          } else {
+            errorData = {
+              code: String(rawError?.code ?? `HTTP_${response.status}`),
+              message:
+                (typeof rawError?.message === "string" && rawError.message) ||
+                `HTTP ${response.status}: ${response.statusText}`,
+              details: (rawError?.details as Record<string, unknown> | undefined),
+            };
+          }
         } catch (err) {
           errorData = {
             code: `HTTP_${response.status}`,
             message: `HTTP ${response.status}: ${response.statusText}`,
           };
         }
-        
+
         const apiError = new AtlasApiError({
           ...errorData,
           statusCode: response.status,

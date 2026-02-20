@@ -22,6 +22,7 @@ from datetime import datetime
 from .embedding_tasks import task_manager, TaskStatus, EmbeddingTask
 from .report_tasks import report_task_manager, ReportTaskStatus, ReportTask
 from .batch_tasks import batch_task_manager, BatchTaskStatus, BatchTask, BatchSlideResult
+from .batch_embed_tasks import batch_embed_manager, BatchEmbedStatus, BatchEmbedSlideResult
 from . import database as db
 from .projects import ProjectRegistry
 from .project_routes import router as project_router, set_registry as set_project_registry
@@ -108,6 +109,8 @@ def get_timestamp() -> str:
 
 # Track server startup time for uptime calculation
 _STARTUP_TIME = time.time()
+# Cache CUDA probe once at startup; avoid per-request GPU checks in health endpoint.
+_CUDA_AVAILABLE_AT_STARTUP: Optional[bool] = None
 
 
 def log_audit_event(
@@ -774,10 +777,26 @@ def create_app(
 
         return allowed
 
+    def _active_batch_embed_info() -> Optional[Dict[str, Any]]:
+        """Return lightweight info for the active batch embedding task, if any."""
+        active = batch_embed_manager.get_active_task()
+        if not active:
+            return None
+        return {
+            "task_id": active.task_id,
+            "status": active.status.value,
+            "progress": round(active.progress, 1),
+            "current_slide_index": active.current_slide_index,
+            "total_slides": active.total_slides,
+            "current_slide_id": active.current_slide_id,
+            "message": active.message,
+        }
+
 
     @app.on_event("startup")
     async def load_models():
         nonlocal classifier, evidence_gen, embedder, medsiglip_embedder, reporter, decision_support, multi_model_inference, available_slides, slide_labels, slides_dir, embeddings_dir, slide_mean_index, slide_mean_ids, slide_mean_meta, project_registry
+        global _CUDA_AVAILABLE_AT_STARTUP
 
         from ..config import MILConfig, EvidenceConfig, EmbeddingConfig
         from ..mil.clam import CLAMClassifier, create_classifier
@@ -798,6 +817,9 @@ def create_app(
                 return 0
             exts = {'.svs', '.tiff', '.tif', '.ndpi', '.mrxs', '.vms', '.scn'}
             return sum(1 for f in p.iterdir() if f.is_file() and f.suffix.lower() in exts)
+
+        if _CUDA_AVAILABLE_AT_STARTUP is None:
+            _CUDA_AVAILABLE_AT_STARTUP = _check_cuda()
 
         primary_embeddings_dir = embeddings_dir
         primary_slides_dir = slides_dir
@@ -1141,15 +1163,17 @@ def create_app(
                 except Exception:
                     pass
         total_slides = sum(slides_by_project.values()) if slides_by_project else len(available_slides)
+        active_batch_embedding = _active_batch_embed_info()
         return {
             "status": "healthy",
             "version": "0.1.0",
             "model_loaded": classifier is not None,
-            "cuda_available": _check_cuda(),
+            "cuda_available": bool(_CUDA_AVAILABLE_AT_STARTUP),
             "slides_available": total_slides,
             "slides_by_project": slides_by_project if slides_by_project else None,
             "db_available": db_available,
             "uptime": time.time() - _STARTUP_TIME,
+            "active_batch_embedding": active_batch_embedding,
         }
 
     # ====== Tags & Groups stubs ======
@@ -5554,8 +5578,6 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
     # ====== Batch Re-Embed Endpoints ======
 
-    from .batch_embed_tasks import batch_embed_manager, BatchEmbedStatus, BatchEmbedSlideResult
-
     class BatchEmbedRequest(BaseModel):
         """Request for batch re-embedding of multiple slides."""
         level: int = Field(default=0, ge=0, le=0, description="Resolution level fixed to 0 (dense full-resolution)")
@@ -5860,6 +5882,22 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         level = request.level
         if level != 0:
             raise HTTPException(status_code=400, detail="level must be 0 (dense full-resolution policy)")
+
+        active_batch_embedding = _active_batch_embed_info()
+        if active_batch_embedding:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "SERVER_BUSY",
+                    "message": (
+                        "Level 0 batch embedding is currently running. "
+                        "Multi-model analysis is temporarily unavailable to avoid GPU contention."
+                    ),
+                    "retry_after_seconds": 30,
+                    "active_batch_embedding": active_batch_embedding,
+                },
+                headers={"Retry-After": "30"},
+            )
 
         allowed_model_ids = await _resolve_project_model_ids(request.project_id)
         if request.models is not None:
