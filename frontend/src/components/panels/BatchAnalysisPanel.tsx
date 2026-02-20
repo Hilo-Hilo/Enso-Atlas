@@ -235,14 +235,22 @@ export function BatchAnalysisPanel({
       try {
         const details = await getProjectAvailableModels(currentProject.id);
         if (!cancelled && details.length > 0) {
-          setApiModelDetails(details);
           const primaryId = currentProject.prediction_target;
-          if (primaryId && details.some((d) => d.id === primaryId)) {
-            setSelectedModelIds([primaryId]);
-          } else {
-            setSelectedModelIds([details[0].id]);
+          const includesPrimary = !primaryId || details.some((d) => d.id === primaryId);
+
+          if (includesPrimary) {
+            setApiModelDetails(details);
+            if (primaryId && details.some((d) => d.id === primaryId)) {
+              setSelectedModelIds([primaryId]);
+            } else {
+              setSelectedModelIds([details[0].id]);
+            }
+            return;
           }
-          return;
+
+          console.warn(
+            "Project model details missing project primary target; falling back to project model IDs"
+          );
         }
       } catch {
         // fall through to ID endpoint + fallback

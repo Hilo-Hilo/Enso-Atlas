@@ -165,8 +165,17 @@ export function ModelPicker({
         // Try the config-driven endpoint first
         const details = await getProjectAvailableModels(currentProject.id);
         if (!cancelled && details.length > 0) {
-          setApiModelDetails(details);
-          return;
+          const primaryId = currentProject.prediction_target;
+          const includesPrimary = !primaryId || details.some((d) => d.id === primaryId);
+
+          if (includesPrimary) {
+            setApiModelDetails(details);
+            return;
+          }
+
+          console.warn(
+            "Project model details missing project primary target; falling back to project model IDs"
+          );
         }
       } catch (err) {
         console.warn("Failed to fetch available models config:", err);
@@ -194,7 +203,7 @@ export function ModelPicker({
     return () => {
       cancelled = true;
     };
-  }, [currentProject.id]);
+  }, [currentProject.id, currentProject.prediction_target]);
 
   const fallbackModels = React.useMemo(
     () =>

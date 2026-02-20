@@ -425,9 +425,16 @@ export function MultiModelPredictionPanel({
   const { currentProject } = useProject();
   const cancerTypeLabel = currentProject.cancer_type || "Cancer";
 
-  // Prefer project-scoped API models; otherwise use a safe project-derived fallback
-  const modelsToPreview = (availableModels && availableModels.length > 0)
-    ? availableModels.map((m) => ({ id: m.id, displayName: m.name, description: m.description }))
+  // Prefer project-scoped API models; otherwise use a safe project-derived fallback.
+  // Guard against stale/unscoped catalogs by requiring the current project's primary target.
+  const hasTrustedAvailableModels =
+    !!availableModels &&
+    availableModels.length > 0 &&
+    (!currentProject.prediction_target ||
+      availableModels.some((m) => m.id === currentProject.prediction_target));
+
+  const modelsToPreview = hasTrustedAvailableModels
+    ? availableModels!.map((m) => ({ id: m.id, displayName: m.name, description: m.description }))
     : getProjectFallbackPreviewModel(currentProject);
 
   // Update elapsed time during embedding
