@@ -28,9 +28,16 @@ export async function GET(
     });
 
     if (!response.ok) {
-      return NextResponse.json(
-        { error: `Backend returned ${response.status}` },
-        { status: response.status }
+      const errorBody = await response.text();
+      return new NextResponse(
+        errorBody || JSON.stringify({ error: `Backend returned ${response.status}` }),
+        {
+          status: response.status,
+          headers: {
+            "Content-Type": response.headers.get("Content-Type") || "application/json",
+            "Cache-Control": "no-store",
+          },
+        }
       );
     }
 

@@ -203,7 +203,41 @@ export function WSIViewer({
   const [activeTool, setActiveTool] = useState<"pan" | "crosshair">("pan");
   const [heatmapLoaded, setHeatmapLoaded] = useState(false);
   const [heatmapError, setHeatmapError] = useState(false);
+  const [heatmapErrorMessage, setHeatmapErrorMessage] = useState<string | null>(null);
   const heatmapImageUrl = heatmap?.imageUrl;
+
+  const extractHeatmapErrorMessage = useCallback((status: number, rawBody: string): string => {
+    const fallback =
+      status === 409
+        ? "Patch coordinates are missing for this slide. Regenerate or recover *_coords.npy before rendering the attention heatmap."
+        : `Heatmap request failed (HTTP ${status}).`;
+
+    if (!rawBody) return fallback;
+
+    try {
+      const parsed = JSON.parse(rawBody) as {
+        detail?: string | { message?: string; error?: string };
+        message?: string;
+        error?: string;
+      };
+
+      if (typeof parsed.detail === "string" && parsed.detail.trim()) return parsed.detail;
+      if (parsed.detail && typeof parsed.detail === "object") {
+        if (typeof parsed.detail.message === "string" && parsed.detail.message.trim()) {
+          return parsed.detail.message;
+        }
+        if (typeof parsed.detail.error === "string" && parsed.detail.error.trim()) {
+          return parsed.detail.error;
+        }
+      }
+      if (typeof parsed.message === "string" && parsed.message.trim()) return parsed.message;
+      if (typeof parsed.error === "string" && parsed.error.trim()) return parsed.error;
+    } catch {
+      // ignore JSON parse errors and use fallback
+    }
+
+    return fallback;
+  }, []);
   
   // Store activeTool in ref for click handler
   const activeToolRef = useRef(activeTool);
@@ -543,6 +577,7 @@ export function WSIViewer({
 
     setHeatmapLoaded(false);
     setHeatmapError(false);
+    setHeatmapErrorMessage(null);
     clearHeatmapLayer();
 
     const loadHeatmap = async () => {
@@ -563,15 +598,18 @@ export function WSIViewer({
           console.error("Failed to fetch heatmap image:", heatmapImageUrl, err);
           setHeatmapError(true);
           setHeatmapLoaded(false);
+          setHeatmapErrorMessage("Failed to fetch attention heatmap.");
         }
         return;
       }
 
       if (!response.ok) {
+        const errorBody = await response.text();
         if (!cancelled) {
-          console.error("Heatmap fetch returned non-OK status:", response.status);
+          console.error("Heatmap fetch returned non-OK status:", response.status, errorBody);
           setHeatmapError(true);
           setHeatmapLoaded(false);
+          setHeatmapErrorMessage(extractHeatmapErrorMessage(response.status, errorBody));
         }
         return;
       }
@@ -590,6 +628,7 @@ export function WSIViewer({
           console.error("Failed to decode heatmap image dimensions", err);
           setHeatmapError(true);
           setHeatmapLoaded(false);
+          setHeatmapErrorMessage("Invalid heatmap image returned by server.");
         }
         return;
       }
@@ -655,11 +694,13 @@ export function WSIViewer({
           event.item.setOpacity(targetOpacity);
           setHeatmapLoaded(true);
           setHeatmapError(false);
+          setHeatmapErrorMessage(null);
         },
         error: () => {
           if (!cancelled) {
             setHeatmapError(true);
             setHeatmapLoaded(false);
+            setHeatmapErrorMessage("Failed to load attention heatmap image.");
             console.error("Failed to load heatmap image:", heatmapImageUrl);
           }
         },
@@ -677,7 +718,7 @@ export function WSIViewer({
         URL.revokeObjectURL(localObjectUrl);
       }
     };
-  }, [heatmapImageUrl, isReady, getSlideTiledImage]);
+  }, [heatmapImageUrl, isReady, getSlideTiledImage, extractHeatmapErrorMessage]);
 
   // Force pixelated rendering on all OSD canvas elements for discrete heatmap patches
   useEffect(() => {
@@ -1435,10 +1476,12 @@ export function WSIViewer({
                 onLoad={() => {
                   setHeatmapLoaded(true);
                   setHeatmapError(false);
+                  setHeatmapErrorMessage(null);
                 }}
                 onError={() => {
                   setHeatmapError(true);
                   setHeatmapLoaded(false);
+                  setHeatmapErrorMessage("Unable to load attention heatmap image.");
                 }}
               />
               
@@ -1450,8 +1493,11 @@ export function WSIViewer({
               )}
               
               {heatmapError && (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 gap-2 px-4">
                   <Grid3X3 className="w-12 h-12" />
+                  {heatmapErrorMessage && (
+                    <p className="text-xs text-red-500 text-center">{heatmapErrorMessage}</p>
+                  )}
                 </div>
               )}
             </div>
@@ -1759,6 +1805,10 @@ export function WSIViewer({
                     </div>
                   </div>
                 </div>
+              )}
+
+              {heatmapError && heatmapErrorMessage && (
+                <p className="text-2xs text-red-600 leading-snug mt-1">{heatmapErrorMessage}</p>
               )}
             </div>
           )}

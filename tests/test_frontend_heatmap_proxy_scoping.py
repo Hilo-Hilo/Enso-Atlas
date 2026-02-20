@@ -32,3 +32,19 @@ def test_api_client_uses_project_scoped_models_endpoint_and_heatmap_query_param(
     assert "getProjectAvailableModels" in src
     assert "getHeatmapUrl" in src
     assert "params.set('project_id', projectId)" in src or 'params.set("project_id", projectId)' in src
+
+
+def test_model_heatmap_proxy_preserves_backend_error_payload_for_ui_messages():
+    src = _read("frontend/src/app/api/heatmap/[slideId]/[modelId]/route.ts")
+
+    assert "const errorBody = await response.text();" in src
+    assert "return new NextResponse(" in src
+    assert '"Content-Type": response.headers.get("Content-Type") || "application/json"' in src
+
+
+def test_slide_heatmap_proxy_preserves_backend_error_payload_for_ui_messages():
+    src = _read("frontend/src/app/api/heatmap/[slideId]/route.ts")
+
+    assert "const errorBody = await response.text();" in src
+    assert "return new NextResponse(" in src
+    assert '"Content-Type": response.headers.get("Content-Type") || "application/json"' in src

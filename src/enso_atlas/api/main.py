@@ -3551,18 +3551,14 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 if emb_path.exists() and classifier is not None and evidence_gen is not None:
                     embeddings = np.load(emb_path)
                     
-                    # Load coordinates
+                    # Load coordinates (required for truthful localization)
                     patch_size = 224
                     if coord_path.exists():
                         coords_arr = np.load(coord_path).astype(np.int64, copy=False)
                     else:
-                        n_patches = len(embeddings)
-                        grid_size = int(np.ceil(np.sqrt(n_patches)))
-                        grid_x, grid_y = np.meshgrid(
-                            np.arange(grid_size) * patch_size,
-                            np.arange(grid_size) * patch_size,
+                        raise FileNotFoundError(
+                            f"Patch coordinates missing for {slide_id}; cannot generate truthful PDF heatmap."
                         )
-                        coords_arr = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)[:n_patches]
                     
                     coords = [tuple(map(int, c)) for c in coords_arr]
                     

@@ -55,8 +55,9 @@ def test_osd_overlay_width_scales_to_grid_coverage_ratio():
 def test_frontend_alignment_formula_present_in_viewer_regression_contract():
     src = _read("frontend/src/components/viewer/WSIViewer.tsx")
 
-    assert "const coverageW = Math.ceil(contentSize.x / PATCH_SIZE) * PATCH_SIZE;" in src
-    assert "const heatmapWidth = bounds.width * (coverageW / contentSize.x);" in src
+    assert "const fallbackCoverageW = Math.ceil(contentSize.x / DEFAULT_PATCH_SIZE_PX) * DEFAULT_PATCH_SIZE_PX;" in src
+    assert "const widthScale = bounds.width / contentSize.x;" in src
+    assert "const heatmapWorldWidth = coverageW * widthScale;" in src
 
 
 def test_backend_model_heatmap_sets_coverage_headers_from_shared_helper():
@@ -65,3 +66,9 @@ def test_backend_model_heatmap_sets_coverage_headers_from_shared_helper():
     assert "from .heatmap_grid import compute_heatmap_grid_coverage" in src
     assert '"X-Coverage-Width": str(_coverage.coverage_width)' in src
     assert '"X-Coverage-Height": str(_coverage.coverage_height)' in src
+
+
+def test_pdf_heatmap_path_does_not_fabricate_synthetic_coords_when_missing():
+    src = _read("src/enso_atlas/api/main.py")
+
+    assert "cannot generate truthful PDF heatmap" in src
