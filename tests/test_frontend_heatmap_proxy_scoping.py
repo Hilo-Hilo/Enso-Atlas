@@ -32,3 +32,12 @@ def test_api_client_uses_project_scoped_models_endpoint_and_heatmap_query_param(
     assert "getProjectAvailableModels" in src
     assert "getHeatmapUrl" in src
     assert "params.set('project_id', projectId)" in src or 'params.set("project_id", projectId)' in src
+
+
+def test_page_heatmap_model_options_are_guarded_by_current_project_scope():
+    src = _read("frontend/src/app/page.tsx")
+
+    assert "projectAvailableModelsScopeId" in src
+    assert "projectAvailableModelsScopeId === currentProject.id" in src
+    assert "normalizedHeatmapModel" in src
+    assert "!scopedProjectModelIds.has(heatmapModel)" in src
