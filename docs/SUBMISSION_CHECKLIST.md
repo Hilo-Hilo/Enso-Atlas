@@ -10,7 +10,7 @@
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| 3-minute video demo | PENDING | Script finalized (VIDEO_SCRIPT.md), needs recording |
+| 3-minute video demo | PENDING | Requirement-mapped script finalized (VIDEO_SCRIPT.md), needs recording/upload |
 | 3-page technical writeup | DONE | SUBMISSION_WRITEUP.md updated and current |
 | Reproducible source code | DONE | GitHub repo at Hilo-Hilo/med-gemma-hackathon |
 | Kaggle Writeups upload | PENDING | Needs conversion and upload to Kaggle |

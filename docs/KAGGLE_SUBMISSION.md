@@ -16,9 +16,10 @@ Platinum-based chemotherapy is the standard first-line treatment for ovarian can
 
 ## 3. Video Demo
 
-**Link:** [placeholder -- recording pending]
+**Link:** [placeholder -- recording pending upload]
 
-See `VIDEO_SCRIPT.md` for the planned demonstration walkthrough.
+Recording plan and required challenge coverage are documented in `VIDEO_SCRIPT.md`.
+Target export filename: `enso-atlas-3min-demo.mp4` (1080p, <= 3:00).
 
 ---
 
