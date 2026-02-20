@@ -807,13 +807,52 @@ def create_app(
 
         return pos_label, neg_label
 
-    def _project_slide_ids(project_id: Optional[str]) -> Optional[set[str]]:
-        """Return project-local slide IDs from that project's embeddings directory.
+    async def _project_slide_ids(project_id: Optional[str]) -> Optional[set[str]]:
+        """Resolve allowed slide IDs for a project.
+
+        Resolution order:
+        1) project_slides junction table (authoritative)
+        2) legacy slides.project_id column
+        3) project embeddings directory (flat-file fallback)
 
         Returns None when project_id is not provided.
         """
         if not project_id:
             return None
+
+        _require_project(project_id)
+
+        if db_available:
+            try:
+                assigned = [sid for sid in (await db.get_project_slides(project_id)) if sid]
+                if assigned:
+                    return set(assigned)
+            except Exception as e:
+                logger.warning(f"DB project_slides query failed for {project_id}: {e}")
+
+            try:
+                pool = await db.get_pool()
+                async with pool.acquire() as conn:
+                    col_check = await conn.fetchval(
+                        """
+                        SELECT COUNT(*) FROM information_schema.columns
+                        WHERE table_name = 'slides' AND column_name = 'project_id'
+                        """
+                    )
+                    if col_check and int(col_check) > 0:
+                        rows = await conn.fetch(
+                            """
+                            SELECT slide_id FROM slides
+                            WHERE project_id = $1
+                            ORDER BY slide_id
+                            """,
+                            project_id,
+                        )
+                        legacy_ids = {str(r["slide_id"]) for r in rows if r["slide_id"]}
+                        if legacy_ids:
+                            return legacy_ids
+            except Exception as e:
+                logger.warning(f"DB legacy project_id query failed for {project_id}: {e}")
 
         proj_emb_dir = _resolve_project_embeddings_dir(project_id, require_exists=True)
         if not proj_emb_dir.exists():
@@ -824,6 +863,23 @@ def create_app(
             if not f.name.endswith("_coords.npy"):
                 slide_ids.add(f.stem)
         return slide_ids
+
+    def _similar_case_slide_id(candidate: Any) -> Optional[str]:
+        """Extract slide_id from similar-case payloads (flat or metadata-nested)."""
+        if not isinstance(candidate, dict):
+            return None
+
+        sid = candidate.get("slide_id")
+        if sid:
+            return str(sid)
+
+        meta = candidate.get("metadata")
+        if isinstance(meta, dict):
+            meta_sid = meta.get("slide_id")
+            if meta_sid:
+                return str(meta_sid)
+
+        return None
 
     async def _resolve_project_model_ids(project_id: Optional[str]) -> Optional[set[str]]:
         """Resolve allowed model ids for a project via shared model-scope helper.
@@ -1755,7 +1811,7 @@ def create_app(
 
         # Get similar cases using slide-mean cosine similarity (same as /api/similar)
         similar_cases = []
-        allowed_slide_ids = _project_slide_ids(request.project_id)
+        allowed_slide_ids = await _project_slide_ids(request.project_id)
         if slide_mean_index is not None:
             try:
                 q = np.asarray(embeddings, dtype=np.float32).mean(axis=0)
@@ -1795,19 +1851,19 @@ def create_app(
                 )
                 seen_slides = set()
                 for s in similar_results:
-                    meta = s.get("metadata", {})
-                    sid = meta.get("slide_id", "unknown")
-                    if sid != slide_id and sid not in seen_slides:
-                        if allowed_slide_ids is not None and sid not in allowed_slide_ids:
-                            continue
-                        seen_slides.add(sid)
-                        case_label = slide_labels.get(sid)
-                        similar_cases.append({
-                            "slide_id": sid,
-                            "similarity_score": 1.0 / (1.0 + s["distance"]),
-                            "distance": float(s["distance"]),
-                            "label": case_label,
-                        })
+                    sid = _similar_case_slide_id(s)
+                    if not sid or sid == slide_id or sid in seen_slides:
+                        continue
+                    if allowed_slide_ids is not None and sid not in allowed_slide_ids:
+                        continue
+                    seen_slides.add(sid)
+                    case_label = slide_labels.get(sid)
+                    similar_cases.append({
+                        "slide_id": sid,
+                        "similarity_score": 1.0 / (1.0 + s["distance"]),
+                        "distance": float(s["distance"]),
+                        "label": case_label,
+                    })
                     if len(similar_cases) >= 5:
                         break
             except Exception as e:
@@ -2827,16 +2883,20 @@ def create_app(
 
         # Get similar cases
         similar_cases = []
-        allowed_slide_ids = _project_slide_ids(request.project_id)
+        allowed_slide_ids = await _project_slide_ids(request.project_id)
         if evidence_gen is not None:
             try:
                 similar_results = evidence_gen.find_similar(
                     embeddings, attention, k=5, top_patches=3
                 )
                 for s in similar_results:
-                    sid = s.get("slide_id") if isinstance(s, dict) else None
-                    if allowed_slide_ids is not None and sid and sid not in allowed_slide_ids:
+                    sid = _similar_case_slide_id(s)
+                    if not sid or sid == slide_id:
                         continue
+                    if allowed_slide_ids is not None and sid not in allowed_slide_ids:
+                        continue
+                    if isinstance(s, dict) and not s.get("slide_id"):
+                        s = {**s, "slide_id": sid}
                     similar_cases.append(s)
             except Exception as e:
                 logger.warning(f"Similar case search failed for report: {e}")
@@ -3270,16 +3330,20 @@ should incorporate all available clinical, pathological, and molecular data."""
             
             # Get similar cases
             similar_cases = []
-            allowed_slide_ids = _project_slide_ids(project_id)
+            allowed_slide_ids = asyncio.run(_project_slide_ids(project_id))
             if include_similar and evidence_gen is not None:
                 try:
                     similar_results = evidence_gen.find_similar(
                         embeddings, attention, k=5, top_patches=3
                     )
                     for s in similar_results:
-                        sid = s.get("slide_id") if isinstance(s, dict) else None
-                        if allowed_slide_ids is not None and sid and sid not in allowed_slide_ids:
+                        sid = _similar_case_slide_id(s)
+                        if not sid or sid == slide_id:
                             continue
+                        if allowed_slide_ids is not None and sid not in allowed_slide_ids:
+                            continue
+                        if isinstance(s, dict) and not s.get("slide_id"):
+                            s = {**s, "slide_id": sid}
                         similar_cases.append(s)
                 except Exception as e:
                     logger.warning(f"Similar case search failed: {e}")
@@ -3990,7 +4054,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             project_id,
             require_exists=project_requested,
         )
-        allowed_slide_ids = _project_slide_ids(project_id)
+        allowed_slide_ids = await _project_slide_ids(project_id)
 
         emb_path = _similar_embeddings_dir / f"{slide_id}.npy"
         if not emb_path.exists():
