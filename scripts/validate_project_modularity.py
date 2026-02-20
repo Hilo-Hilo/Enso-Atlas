@@ -7,17 +7,29 @@ Fails with non-zero exit when project dataset paths leak into shared/legacy layo
 from __future__ import annotations
 
 import argparse
+from importlib.util import module_from_spec, spec_from_file_location
 import sys
 from pathlib import Path
 from typing import List
 
-# Make `src/` importable when running as a script.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = REPO_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+PROJECTS_MODULE_PATH = SRC_DIR / "enso_atlas" / "api" / "projects.py"
 
-from enso_atlas.api.projects import PROJECTS_DATA_ROOT, ProjectRegistry  # noqa: E402
+
+def _load_projects_module():
+    spec = spec_from_file_location("enso_atlas_api_projects", PROJECTS_MODULE_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to load project config module from {PROJECTS_MODULE_PATH}")
+    module = module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_projects_module = _load_projects_module()
+PROJECTS_DATA_ROOT = _projects_module.PROJECTS_DATA_ROOT
+ProjectRegistry = _projects_module.ProjectRegistry
 
 
 def validate_project_paths(config_path: Path) -> List[str]:
@@ -52,14 +64,14 @@ def validate_project_paths(config_path: Path) -> List[str]:
                 f"got '{embeddings_dir}'"
             )
 
-        valid_label_suffixes = {".csv", ".json"}
-        if labels_file.parent != expected_root:
+        valid_labels = {
+            expected_root / "labels.csv",
+            expected_root / "labels.json",
+        }
+        if labels_file not in valid_labels:
             errors.append(
-                f"{pid}: labels_file must be under '{expected_root}', got '{labels_file}'"
-            )
-        if labels_file.suffix.lower() not in valid_label_suffixes:
-            errors.append(
-                f"{pid}: labels_file must end with .csv or .json, got '{labels_file}'"
+                f"{pid}: labels_file must be one of {sorted(str(p) for p in valid_labels)}, "
+                f"got '{labels_file}'"
             )
 
     # 2) Ensure no projects share exact dataset paths
