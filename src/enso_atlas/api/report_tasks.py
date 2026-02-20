@@ -27,6 +27,7 @@ class ReportTask:
     """Represents a background report generation task."""
     task_id: str
     slide_id: str
+    project_id: Optional[str] = None
     status: ReportTaskStatus = ReportTaskStatus.PENDING
     progress: float = 0.0  # 0-100
     message: str = "Waiting to start..."
@@ -41,6 +42,7 @@ class ReportTask:
         result = {
             "task_id": self.task_id,
             "slide_id": self.slide_id,
+            "project_id": self.project_id,
             "status": self.status.value,
             "progress": self.progress,
             "message": self.message,
@@ -61,12 +63,13 @@ class ReportTaskManager:
         self.lock = threading.Lock()
         self.max_concurrent = max_concurrent
         
-    def create_task(self, slide_id: str) -> ReportTask:
+    def create_task(self, slide_id: str, project_id: Optional[str] = None) -> ReportTask:
         """Create a new report task."""
         task_id = f"report_{slide_id}_{uuid.uuid4().hex[:8]}"
         task = ReportTask(
             task_id=task_id,
             slide_id=slide_id,
+            project_id=project_id,
         )
         with self.lock:
             self.tasks[task_id] = task
@@ -120,13 +123,19 @@ class ReportTaskManager:
             "summary_text": f"CASE ANALYSIS SUMMARY\nCase ID: {slide_id}\n\nReport generation timed out. This is a template fallback.\nPlease retry or review analysis results manually.\n\nDISCLAIMER: This is a research tool.",
         }
     
-    def get_task_by_slide(self, slide_id: str) -> Optional[ReportTask]:
-        """Get active task for a slide. Returns None if task is stale (>5 min)."""
+    def get_task_by_slide(self, slide_id: str, project_id: Optional[str] = None) -> Optional[ReportTask]:
+        """Get active task for a slide within the same project scope.
+
+        Returns None if task is stale (>5 min).
+        """
         stale_cutoff = time.time() - 300  # 5 minutes max
         with self.lock:
             for task in self.tasks.values():
-                if (task.slide_id == slide_id and 
-                    task.status in [ReportTaskStatus.PENDING, ReportTaskStatus.RUNNING]):
+                if (
+                    task.slide_id == slide_id
+                    and task.project_id == project_id
+                    and task.status in [ReportTaskStatus.PENDING, ReportTaskStatus.RUNNING]
+                ):
                     # Mark stale tasks as failed so they don't block retries
                     if task.created_at < stale_cutoff:
                         task.status = ReportTaskStatus.FAILED

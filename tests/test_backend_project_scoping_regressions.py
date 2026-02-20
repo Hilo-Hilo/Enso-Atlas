@@ -11,6 +11,11 @@ def _batch_tasks_source() -> str:
     return path.read_text()
 
 
+def _report_tasks_source() -> str:
+    report_tasks_py = Path(__file__).resolve().parents[1] / "src" / "enso_atlas" / "api" / "report_tasks.py"
+    return report_tasks_py.read_text()
+
+
 def test_models_and_multi_analysis_share_project_model_resolution():
     src = _main_source()
     assert "allowed_ids = await _resolve_project_model_ids(project_id)" in src
@@ -67,3 +72,15 @@ def test_async_batch_task_summary_uses_task_label_pair_not_hardcoded_response_la
     assert 'non_responders = [r for r in completed if r.prediction == self.negative_label]' in src
     assert 'r.prediction == "RESPONDER"' not in src
     assert 'r.prediction == "NON-RESPONDER"' not in src
+
+
+def test_async_report_preflight_is_project_scoped():
+    main_src = _main_source()
+    task_src = _report_tasks_source()
+
+    assert "existing_task = report_task_manager.get_task_by_slide(slide_id, request.project_id)" in main_src
+    assert "task = report_task_manager.create_task(slide_id, request.project_id)" in main_src
+
+    assert "project_id: Optional[str] = None" in task_src
+    assert "def get_task_by_slide(self, slide_id: str, project_id: Optional[str] = None)" in task_src
+    assert "task.project_id == project_id" in task_src

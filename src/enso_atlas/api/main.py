@@ -3219,8 +3219,8 @@ should incorporate all available clinical, pathological, and molecular data."""
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
         
-        # Check for existing task
-        existing_task = report_task_manager.get_task_by_slide(slide_id)
+        # Check for existing task in the same project scope
+        existing_task = report_task_manager.get_task_by_slide(slide_id, request.project_id)
         if existing_task:
             return AsyncReportResponse(
                 task_id=existing_task.task_id,
@@ -3231,7 +3231,7 @@ should incorporate all available clinical, pathological, and molecular data."""
             )
         
         # Create new task
-        task = report_task_manager.create_task(slide_id)
+        task = report_task_manager.create_task(slide_id, request.project_id)
         
         # Run report generation in background
         def run_report_generation():
