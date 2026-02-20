@@ -57,6 +57,17 @@ def _resolve_repo_relative(path_str: str) -> Path:
     return p if p.is_absolute() else (REPO_ROOT / p)
 
 
+def _project_root_from_dataset_path(project_id: str, path_str: str) -> Path | None:
+    """Return absolute data/projects/<project_id> root for a dataset path, if present."""
+    abs_path = _resolve_repo_relative(path_str).resolve()
+    marker = ("data", "projects", project_id)
+    parts = abs_path.parts
+    for idx in range(len(parts) - 2):
+        if parts[idx: idx + 3] == marker:
+            return Path(*parts[: idx + 3])
+    return None
+
+
 def resolve_output_dir(
     project_id: str,
     projects_config: Path,
@@ -72,12 +83,27 @@ def resolve_output_dir(
         proj = (raw.get("projects") or {}).get(project_id)
         if proj:
             dataset = proj.get("dataset") or {}
-            labels_file = dataset.get("labels_file")
-            if labels_file:
-                return _resolve_repo_relative(labels_file).parent
-            slides_dir = dataset.get("slides_dir")
-            if slides_dir:
-                return _resolve_repo_relative(slides_dir).parent
+            roots = set()
+            for field in ("slides_dir", "embeddings_dir", "labels_file"):
+                path_val = dataset.get(field)
+                if not path_val:
+                    continue
+                root = _project_root_from_dataset_path(project_id, path_val)
+                if root is None:
+                    raise ValueError(
+                        f"Project '{project_id}' has non-modular dataset.{field} path in "
+                        f"{projects_config}: {path_val}"
+                    )
+                roots.add(root)
+
+            if len(roots) > 1:
+                sorted_roots = ", ".join(str(p) for p in sorted(roots))
+                raise ValueError(
+                    f"Project '{project_id}' has inconsistent dataset roots in {projects_config}: "
+                    f"{sorted_roots}"
+                )
+            if roots:
+                return roots.pop()
 
     # Fallback for projects not yet in config
     return REPO_ROOT / "data" / "projects" / project_id

@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 
-from .projects import ProjectConfig, ProjectRegistry
+from .projects import ProjectConfig, ProjectRegistry, default_dataset_paths
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +132,7 @@ async def create_project(body: CreateProjectRequest):
     reg = get_registry()
 
     # Build config dict from the request body
+    dataset_paths = default_dataset_paths(body.id)
     config = {
         "name": body.name,
         "cancer_type": body.cancer_type,
@@ -140,9 +141,7 @@ async def create_project(body: CreateProjectRequest):
         "positive_class": body.positive_class,
         "description": body.description,
         "dataset": {
-            "slides_dir": f"data/projects/{body.id}/slides",
-            "embeddings_dir": f"data/projects/{body.id}/embeddings",
-            "labels_file": f"data/projects/{body.id}/labels.csv",
+            **dataset_paths,
             "label_column": body.prediction_target,
         },
     }
