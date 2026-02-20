@@ -1975,8 +1975,19 @@ def create_app(
                     },
                 )
 
+        task_pos_label, task_neg_label = _resolve_project_label_pair(
+            request.project_id,
+            positive_default="RESPONDER",
+            negative_default="NON-RESPONDER",
+            uppercase=True,
+        )
+
         # Create task
-        task = batch_task_manager.create_task(request.slide_ids)
+        task = batch_task_manager.create_task(
+            request.slide_ids,
+            positive_label=task_pos_label,
+            negative_label=task_neg_label,
+        )
 
         # Run batch analysis in background
         def run_batch_analysis():
@@ -3147,7 +3158,10 @@ should incorporate all available clinical, pathological, and molecular data."""
             )
             
             score, attention = classifier.predict(embeddings)
-            threshold_val = getattr(classifier.config, "threshold", 0.5)
+            threshold_val = getattr(classifier, "threshold", None)
+            if threshold_val is None:
+                threshold_val = 0.5
+            threshold_val = float(threshold_val)
             label = positive_label if score >= threshold_val else negative_label
             
             report_task_manager.update_task(task_id,
@@ -3342,8 +3356,13 @@ should incorporate all available clinical, pathological, and molecular data."""
                     similar_cases, patient_ctx, decision_support_data, cancer_type
                 )
                 summary_text = _create_template_summary(
-                    slide_id, label, float(score), len(embeddings),
-                    patient_ctx, similar_cases
+                    slide_id,
+                    label,
+                    float(score),
+                    len(embeddings),
+                    patient_ctx,
+                    similar_cases,
+                    decision_threshold=threshold_val,
                 )
             
             report_task_manager.update_task(task_id,
@@ -3421,9 +3440,17 @@ should incorporate all available clinical, pathological, and molecular data."""
             "decision_support": decision_support_data,
         }
     
-    def _create_template_summary(slide_id, label, score, num_patches, patient_ctx, similar_cases):
+    def _create_template_summary(
+        slide_id,
+        label,
+        score,
+        num_patches,
+        patient_ctx,
+        similar_cases,
+        decision_threshold: float = 0.5,
+    ):
         """Create a fallback template summary."""
-        confidence = abs(score - 0.5) * 2
+        confidence = abs(score - decision_threshold) * 2
         return f"""CASE ANALYSIS SUMMARY
 Case ID: {slide_id}
 Prediction: {label.upper()}

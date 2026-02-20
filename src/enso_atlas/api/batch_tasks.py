@@ -61,6 +61,8 @@ class BatchTask:
     current_slide_id: str = ""
     message: str = "Waiting to start..."
     results: List[BatchSlideResult] = field(default_factory=list)
+    positive_label: str = "RESPONDER"
+    negative_label: str = "NON-RESPONDER"
     error: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     started_at: Optional[float] = None
@@ -96,6 +98,8 @@ class BatchTask:
             "elapsed_seconds": self.elapsed_seconds,
             "cancel_requested": self.cancel_requested,
             "results_count": len(self.results),
+            "positive_label": self.positive_label,
+            "negative_label": self.negative_label,
         }
     
     def to_full_dict(self) -> Dict[str, Any]:
@@ -130,8 +134,8 @@ class BatchTask:
         # Calculate summary
         completed = [r for r in self.results if r.error is None]
         failed = [r for r in self.results if r.error is not None]
-        responders = [r for r in completed if r.prediction == "RESPONDER"]
-        non_responders = [r for r in completed if r.prediction == "NON-RESPONDER"]
+        responders = [r for r in completed if r.prediction == self.positive_label]
+        non_responders = [r for r in completed if r.prediction == self.negative_label]
         uncertain = [r for r in completed if r.requires_review]
         avg_confidence = (
             sum(r.confidence for r in completed) / len(completed)
@@ -146,6 +150,8 @@ class BatchTask:
             "uncertain": len(uncertain),
             "avg_confidence": round(avg_confidence, 3),
             "requires_review_count": sum(1 for r in self.results if r.requires_review),
+            "positive_label": self.positive_label,
+            "negative_label": self.negative_label,
         }
         data["processing_time_ms"] = self.elapsed_seconds * 1000
         return data
@@ -159,12 +165,20 @@ class BatchTaskManager:
         self.lock = threading.Lock()
         self.max_concurrent = max_concurrent
         
-    def create_task(self, slide_ids: List[str]) -> BatchTask:
+    def create_task(
+        self,
+        slide_ids: List[str],
+        *,
+        positive_label: str = "RESPONDER",
+        negative_label: str = "NON-RESPONDER",
+    ) -> BatchTask:
         """Create a new batch analysis task."""
         task_id = f"batch_{uuid.uuid4().hex[:12]}"
         task = BatchTask(
             task_id=task_id,
             slide_ids=slide_ids,
+            positive_label=positive_label or "RESPONDER",
+            negative_label=negative_label or "NON-RESPONDER",
         )
         with self.lock:
             self.tasks[task_id] = task
