@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable, Mapping, Optional, Sequence
 
+from fastapi import HTTPException
+
 
 @dataclass(frozen=True)
 class ProjectModelScope:
@@ -78,3 +80,29 @@ def is_model_allowed_for_scope(model_id: str, scope: ProjectModelScope) -> bool:
     """Return whether model_id is allowed under a resolved project scope."""
 
     return scope.project_exists and model_id in scope.allowed_model_ids
+
+
+def require_model_allowed_for_scope(
+    model_id: str,
+    scope: ProjectModelScope,
+    *,
+    project_id: str,
+) -> None:
+    """Enforce project-scoped model access for heatmap/model endpoints.
+
+    Raises:
+        HTTPException(404): when project_id is unknown
+        HTTPException(403): when model_id is not assigned to the project
+    """
+
+    if not scope.project_exists:
+        raise HTTPException(status_code=404, detail=f"Unknown project_id: {project_id}")
+
+    if model_id not in scope.allowed_model_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Model '{model_id}' is not assigned to project '{project_id}'. "
+                f"Use /api/models?project_id={project_id} to fetch allowed model IDs."
+            ),
+        )

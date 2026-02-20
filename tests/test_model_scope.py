@@ -4,6 +4,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODEL_SCOPE_PATH = REPO_ROOT / "src" / "enso_atlas" / "api" / "model_scope.py"
 _spec = importlib.util.spec_from_file_location("model_scope", MODEL_SCOPE_PATH)
@@ -12,8 +15,10 @@ _model_scope = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _model_scope
 _spec.loader.exec_module(_model_scope)
 
+ProjectModelScope = _model_scope.ProjectModelScope
 filter_models_for_scope = _model_scope.filter_models_for_scope
 is_model_allowed_for_scope = _model_scope.is_model_allowed_for_scope
+require_model_allowed_for_scope = _model_scope.require_model_allowed_for_scope
 resolve_project_model_scope = _model_scope.resolve_project_model_scope
 
 
@@ -34,22 +39,82 @@ async def _db_models_factory(data: dict[str, list[str]], project_id: str) -> lis
     return data.get(project_id, [])
 
 
-def test_resolve_project_model_scope_falls_back_to_yaml_when_db_empty():
-    registry = _FakeRegistry({"lung-stage": _FakeProject(classification_models=["lung_stage"])})
+def _all_models() -> list[dict[str, str]]:
+    return [
+        {"id": "lung_stage", "name": "Lung Stage"},
+        {"id": "platinum_sensitivity", "name": "Platinum Sensitivity"},
+        {"id": "survival_5y", "name": "Survival 5Y"},
+        {"id": "survival_3y", "name": "Survival 3Y"},
+        {"id": "survival_1y", "name": "Survival 1Y"},
+    ]
 
-    async def get_project_models(project_id: str):
-        return await _db_models_factory({}, project_id)
+
+def _visible_models_for_project(
+    project_id: str,
+    *,
+    registry: _FakeRegistry,
+    db_assignments: dict[str, list[str]],
+) -> tuple[list[dict[str, str]], object]:
+    async def get_project_models(pid: str):
+        return await _db_models_factory(db_assignments, pid)
 
     scope = asyncio.run(
         resolve_project_model_scope(
-            "lung-stage",
+            project_id,
             project_registry=registry,
             get_project_models=get_project_models,
         )
     )
+    return filter_models_for_scope(_all_models(), scope.allowed_model_ids), scope
+
+
+def test_project_scoped_model_list_unknown_project_is_empty():
+    models, scope = _visible_models_for_project(
+        "unknown-project",
+        registry=_FakeRegistry({}),
+        db_assignments={},
+    )
+
+    assert scope.project_exists is False
+    assert models == []
+
+
+def test_project_scoped_model_list_lung_stage_only_includes_lung_model():
+    models, scope = _visible_models_for_project(
+        "lung-stage",
+        registry=_FakeRegistry({"lung-stage": _FakeProject(classification_models=["lung_stage"])}),
+        db_assignments={},
+    )
 
     assert scope.project_exists is True
-    assert scope.allowed_model_ids == {"lung_stage"}
+    assert [m["id"] for m in models] == ["lung_stage"]
+
+
+def test_project_scoped_model_list_ovarian_project_returns_ovarian_models():
+    models, scope = _visible_models_for_project(
+        "ovarian-platinum",
+        registry=_FakeRegistry(
+            {
+                "ovarian-platinum": _FakeProject(
+                    classification_models=[
+                        "platinum_sensitivity",
+                        "survival_5y",
+                        "survival_3y",
+                        "survival_1y",
+                    ]
+                )
+            }
+        ),
+        db_assignments={},
+    )
+
+    assert scope.project_exists is True
+    assert {m["id"] for m in models} == {
+        "platinum_sensitivity",
+        "survival_5y",
+        "survival_3y",
+        "survival_1y",
+    }
 
 
 def test_resolve_project_model_scope_prefers_db_assignments_when_present():
@@ -119,6 +184,21 @@ def test_filter_models_for_scope_filters_by_id_and_model_id_fields():
         {"id": "lung_stage", "name": "Lung Stage"},
         {"model_id": "tumor_grade", "name": "Tumor Grade"},
     ]
+
+
+def test_require_model_allowed_for_scope_rejects_disallowed_model_with_403():
+    scope = ProjectModelScope(project_exists=True, allowed_model_ids={"lung_stage"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_model_allowed_for_scope("survival_5y", scope, project_id="lung-stage")
+
+    assert exc_info.value.status_code == 403
+
+
+def test_require_model_allowed_for_scope_allows_assigned_model():
+    scope = ProjectModelScope(project_exists=True, allowed_model_ids={"lung_stage"})
+
+    require_model_allowed_for_scope("lung_stage", scope, project_id="lung-stage")
 
 
 def test_is_model_allowed_for_scope_rejects_ovarian_model_for_lung_scope():

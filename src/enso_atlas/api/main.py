@@ -28,7 +28,7 @@ from .projects import ProjectRegistry
 from .project_routes import router as project_router, set_registry as set_project_registry
 from .model_scope import (
     filter_models_for_scope,
-    is_model_allowed_for_scope,
+    require_model_allowed_for_scope,
     resolve_project_model_scope,
 )
 from .heatmap_grid import compute_heatmap_grid_coverage
@@ -6240,33 +6240,13 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 get_project_models=db.get_project_models,
                 logger=logger,
             )
-            if not scope.project_exists:
-                raise HTTPException(status_code=404, detail=f"Unknown project_id: {project_id}")
-            if not is_model_allowed_for_scope(model_id, scope):
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        f"Model '{model_id}' is not assigned to project '{project_id}'. "
-                        f"Use /api/models?project_id={project_id} to fetch allowed model IDs."
-                    ),
-                )
-        
+            require_model_allowed_for_scope(model_id, scope, project_id=project_id)
+
         project_requested = project_id is not None
         _model_heatmap_embeddings_dir = _resolve_project_embeddings_dir(
             project_id,
             require_exists=project_requested,
         )
-
-        allowed_model_ids = await _resolve_project_model_ids(project_id)
-        if allowed_model_ids is not None and model_id not in allowed_model_ids:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "MODEL_NOT_ALLOWED_FOR_PROJECT",
-                    "project_id": project_id,
-                    "model_id": model_id,
-                },
-            )
 
         emb_path, searched_dirs = _resolve_embedding_path(
             slide_id,
