@@ -88,6 +88,24 @@ def test_resolve_project_model_scope_unknown_project():
     assert scope.allowed_model_ids == set()
 
 
+def test_resolve_project_model_scope_treats_db_assignments_as_existing_project():
+    registry = _FakeRegistry({})
+
+    async def get_project_models(project_id: str):
+        return await _db_models_factory({"db-only-project": ["tumor_grade"]}, project_id)
+
+    scope = asyncio.run(
+        resolve_project_model_scope(
+            "db-only-project",
+            project_registry=registry,
+            get_project_models=get_project_models,
+        )
+    )
+
+    assert scope.project_exists is True
+    assert scope.allowed_model_ids == {"tumor_grade"}
+
+
 def test_filter_models_for_scope_filters_by_id_and_model_id_fields():
     models = [
         {"id": "lung_stage", "name": "Lung Stage"},

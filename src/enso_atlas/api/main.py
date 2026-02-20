@@ -757,22 +757,25 @@ def create_app(
         return slide_ids
 
     async def _resolve_project_model_ids(project_id: Optional[str]) -> Optional[set[str]]:
-        """Resolve allowed model ids for a project (DB first, YAML fallback)."""
+        """Resolve allowed model ids for a project via shared model-scope helper.
+
+        Resolution order is centralized in model_scope.resolve_project_model_scope:
+        1) DB project_models assignments
+        2) YAML classification_models fallback
+        """
         if not project_id:
             return None
 
-        proj_cfg = _require_project(project_id)
-        allowed: set[str] = set()
+        scope = await resolve_project_model_scope(
+            project_id,
+            project_registry=project_registry,
+            get_project_models=db.get_project_models,
+            logger=logger,
+        )
+        if not scope.project_exists:
+            raise HTTPException(status_code=404, detail=f"Unknown project_id: {project_id}")
 
-        try:
-            allowed.update(await db.get_project_models(project_id))
-        except Exception as e:
-            logger.warning(f"DB model query failed for {project_id}: {e}")
-
-        if not allowed and proj_cfg and proj_cfg.classification_models:
-            allowed.update(proj_cfg.classification_models)
-
-        return allowed
+        return scope.allowed_model_ids
 
 
     @app.on_event("startup")

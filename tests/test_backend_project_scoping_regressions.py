@@ -10,6 +10,7 @@ def test_models_and_multi_analysis_share_project_model_resolution():
     src = _main_source()
     assert "allowed_ids = await _resolve_project_model_ids(project_id)" in src
     assert "allowed_model_ids = await _resolve_project_model_ids(request.project_id)" in src
+    assert "scope = await resolve_project_model_scope(" in src
 
 
 def test_async_batch_propagates_project_id_to_background_worker():
