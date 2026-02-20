@@ -4,59 +4,74 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-**On-Premise Pathology Evidence Engine for Treatment-Response Prediction**
+**On-Premise Multi-Cancer Pathology Evidence Platform for Project-Scoped Clinical AI**
 
-Enso Atlas is an on-premise pathology evidence engine that analyzes whole-slide images (WSIs) using TransMIL attention-based classification, Path Foundation embeddings, and MedGemma clinical reporting to predict treatment response with interpretable, auditable evidence.
+Enso Atlas is an on-premise pathology evidence platform that analyzes whole-slide images (WSIs) using TransMIL attention-based classification, Path Foundation embeddings, MedSigLIP retrieval, and MedGemma reporting across multiple cancer projects with strict project isolation.
+
+**Last Updated:** February 20, 2026
 
 ---
 
 ## Highlights
 
-- **Local-first**: Runs entirely on-premise; no PHI leaves the hospital network
-- **Evidence-based**: Attention heatmaps, evidence patches, semantic search, and structured reports provide auditable clinical evidence
-- **Trained models**: 5 TransMIL classifiers trained on 208 TCGA ovarian cancer slides with best AUC of 0.907 (platinum sensitivity)
-- **Foundation-model powered**: Path Foundation embeddings, MedGemma report generation, MedSigLIP semantic search
-- **Production-ready**: FastAPI backend + Next.js frontend + PostgreSQL with Docker Compose deployment
+- **Multi-project platform**: Project definitions are driven by `config/projects.yaml`.
+  - `ovarian-platinum` — **Ovarian Cancer - Platinum Sensitivity**
+  - `lung-stage` — **Lung Adenocarcinoma - Stage Classification**
+- **Strict project isolation**: Slide listing, model selection, heatmaps, similar-case retrieval, report generation, batch analysis, and async tasks are scoped by `project_id` with no cross-project fallback.
+- **Project-scoped model visibility**: 6 total classification models (5 ovarian + 1 lung), and each project only exposes assigned models.
+- **Level-0 dense embeddings by default**: Analysis and multi-model workflows default to full-resolution level-0 embeddings.
+- **Explicit backend error behavior**: Heatmap and multi-model endpoints return explicit errors for missing prerequisites:
+  - `LEVEL0_EMBEDDINGS_REQUIRED`
+  - `COORDS_REQUIRED_FOR_HEATMAP`
+- **Heatmap rendering modes**: Truthful patch-grid overlays plus optional interpolated/smoothed view.
+- **Project-aware frontend UX**: ModelPicker prunes stale model IDs on project switch; prediction panels, AI assistant, and patch zoom use project-specific language.
+- **Local-first deployment**: Runs on-premise; no PHI leaves the hospital network.
 
 ---
 
 ## Screenshots
 
-### Main Dashboard
+### Ovarian Project Dashboard (Oncologist)
 
-![Main Dashboard](docs/screenshots/01-main-dashboard.png)
+![Ovarian Project Dashboard - Oncologist](docs/screenshots/02-oncologist-view.png)
 
-*3-panel layout with case selection sidebar (208 cases), WSI viewer, and analysis results. Resizable panels adapt to clinical workflow.*
+*`ovarian-platinum` project dashboard with model predictions, attention heatmap overlay, and project-scoped evidence review.*
 
-### Oncologist View
+### Ovarian Project Dashboard (Pathologist)
 
-![Oncologist View](docs/screenshots/02-oncologist-view.png)
+![Ovarian Project Dashboard - Pathologist](docs/screenshots/03-pathologist-view.png)
 
-*Treatment-focused view showing cached prediction (SENSITIVE 100%), TransMIL attention heatmap overlay with jet colormap, multi-model analysis results, and scale bar for spatial reference.*
+*Pathologist workspace in the ovarian project with annotation tools, magnification presets, and patch-level inspection.*
 
-### Pathologist View
+### Lung Project Dashboard (Oncologist)
 
-![Pathologist View](docs/screenshots/03-pathologist-view.png)
+![Lung Project Dashboard - Oncologist](docs/screenshots/dashboard-lung-oncologist.png)
 
-*Annotation tools (Pointer, Circle, Rectangle, Freehand, Measure, Note), tumor grading assistant, magnification presets from 5x to 100x, and mitotic figure counter for detailed slide review.*
+*`lung-stage` dashboard configured for stage classification, with project-scoped model options and report context.*
 
-### Batch Analysis
+### Lung Project Dashboard (Pathologist)
 
-![Batch Analysis](docs/screenshots/04-batch-view.png)
+![Lung Project Dashboard - Pathologist](docs/screenshots/dashboard-lung-pathologist.png)
 
-*Batch processing with model and embedding configuration (L0/L1 resolution selection), 5 TransMIL models grouped by category (Ovarian Cancer, General Pathology), and parallel execution.*
+*Lung adenocarcinoma review workflow showing project-aware copy and model-scoped interpretation UI.*
+
+### Lung Batch Analysis
+
+![Lung Batch Analysis](docs/screenshots/batch-analysis-lung.png)
+
+*Batch analysis in `lung-stage`, scoped by `project_id` for model access, embeddings, and result tracking.*
 
 ### Slide Manager
 
-![Slide Manager](docs/screenshots/05-slide-manager.png)
+![Slide Manager](docs/screenshots/slide-manager.png)
 
-*Grid view of 208 slides with filtering by labels, embeddings, patch count, date, and favorites. Pagination controls and Sensitive/Resistant classification badges per slide.*
+*Project-scoped slide inventory with filtering, readiness metadata, and per-project organization controls.*
 
 ### Project Management
 
-![Project Management](docs/screenshots/06-projects.png)
+![Project Management](docs/screenshots/project-management.png)
 
-*Project cards showing readiness status (slides, embeddings, MIL model, labels), CRUD operations for multi-study organization, and slide upload interface.*
+*Project configuration and assignment workflow backed by `config/projects.yaml` and project-specific data/model mappings.*
 
 ---
 
@@ -109,51 +124,61 @@ npm run dev
 ## Architecture
 
 ```
-                           Enso Atlas Architecture
+                        Enso Atlas Multi-Project Architecture
 
-    +------------------+     +------------------+     +------------------+
-    |   WSI Input      |     |   FastAPI        |     |   Next.js 14     |
-    |   (.svs, .ndpi)  |---->|   Backend :8003  |<----|   Frontend :3002 |
-    +------------------+     +------------------+     +------------------+
-                                    |
-           +------------+-----------+-----------+------------+
-           |            |           |           |            |
-           v            v           v           v            v
-    +----------+  +-----------+  +-------+  +----------+  +--------+
-    |   Path   |  | TransMIL  |  | FAISS |  | MedGemma |  |MedSig- |
-    |Foundation|  | Classifier|  | Index |  | Reporter |  |  LIP   |
-    |  (CPU)   |  |  (GPU)    |  |       |  |  (GPU)   |  | (GPU)  |
-    +----------+  +-----------+  +-------+  +----------+  +--------+
-                                    |
-                             +-------------+
-                             | PostgreSQL  |
-                             |    :5433    |
-                             +-------------+
+  config/projects.yaml
+          |
+          v
++----------------------+      +-------------------------+      +------------------+
+|  Project Registry    |----->|   FastAPI Backend       |<-----|   Next.js 14     |
+|  (project metadata,  |      |   project-scoped APIs   |      |   Frontend :3002 |
+|  dataset + model map)|      |        :8003            |      +------------------+
++----------------------+      +-------------------------+
+                                        |
+                 +----------------------+-----------------------------+
+                 |                      |                             |
+                 v                      v                             v
+          +-------------+        +--------------+              +-------------+
+          | Path        |        | TransMIL     |              | MedGemma    |
+          | Foundation  |        | Classifiers  |              | Reporting   |
+          | (level-0)   |        | (project set)|              | (async)     |
+          +-------------+        +--------------+              +-------------+
+                 |                      |                             |
+                 +----------------------+-----------------------------+
+                                        |
+                                 +-------------+
+                                 | PostgreSQL  |
+                                 | project_*   |
+                                 | junctions   |
+                                 +-------------+
 ```
 
 ### Core Components
 
 | Component | Description |
 |-----------|-------------|
+| **Project Registry** | Loads `config/projects.yaml`, including project IDs, dataset paths, and per-project model assignments |
+| **Project-Scoped Routing** | Endpoints enforce `project_id` scope for slides, models, analysis, retrieval, and reports |
 | **WSI Processing** | OpenSlide-based processing with tissue detection |
-| **Path Foundation** | 384-dim patch embeddings from Google's foundation model (CPU) |
+| **Path Foundation** | 384-dim patch embeddings; level-0 dense embeddings are the default analysis path |
 | **TransMIL** | Transformer-based MIL for slide-level classification |
-| **MedSigLIP** | Text-to-patch semantic search (GPU) |
-| **FAISS Retrieval** | Similar case search from reference cohort |
-| **MedGemma 1.5 4B** | Structured clinical report generation (GPU, ~20s/report) |
-| **PostgreSQL** | Slide metadata, analysis results, and result caching |
+| **MedSigLIP** | Text-to-patch semantic search (project-scoped availability) |
+| **FAISS Retrieval** | Similar case search constrained to slides in the selected project |
+| **MedGemma 1.5 4B** | Structured clinical report generation with project-aware context |
+| **PostgreSQL** | Slide metadata, result caching, and project-model / project-slide assignments |
 
-### Model Performance
+### Classification Results
 
-| Model | Task | AUC |
-|-------|------|-----|
-| platinum_sensitivity | Platinum treatment response | 0.907 |
-| tumor_grade | Tumor grade classification | 0.752 |
-| survival_5y | 5-year survival prediction | 0.697 |
-| survival_3y | 3-year survival prediction | 0.645 |
-| survival_1y | 1-year survival prediction | 0.639 |
+| Model | Project Scope | Task | AUC |
+|-------|---------------|------|-----|
+| platinum_sensitivity | ovarian-platinum | Platinum treatment response | 0.907 |
+| tumor_grade | ovarian-platinum | Tumor grade classification | 0.752 |
+| survival_5y | ovarian-platinum | 5-year survival prediction | 0.697 |
+| survival_3y | ovarian-platinum | 3-year survival prediction | 0.645 |
+| survival_1y | ovarian-platinum | 1-year survival prediction | 0.639 |
+| lung_stage | lung-stage | Lung adenocarcinoma stage classification (early vs advanced) | 0.648 |
 
-Best single model AUC on full dataset: 0.879 with optimal threshold 0.917 (Youden's J index).
+Total: **6 project-scoped classification models** (5 ovarian + 1 lung).
 
 ### Tech Stack
 
@@ -183,28 +208,29 @@ All endpoints are served at `http://localhost:8003` (Docker) or `http://localhos
 # Health check
 curl http://localhost:8003/api/health
 
-# List slides (optionally filtered by project)
-curl http://localhost:8003/api/slides?project_id=1
+# List slides in ovarian project
+curl "http://localhost:8003/api/slides?project_id=ovarian-platinum"
 
-# Analyze a slide
-curl -X POST http://localhost:8003/api/analyze \
+# List project-scoped models
+curl "http://localhost:8003/api/models?project_id=lung-stage"
+
+# Multi-model analysis (renamed endpoint)
+curl -X POST http://localhost:8003/api/analyze-multi \
   -H "Content-Type: application/json" \
-  -d '{"slide_id": "TCGA-XX-XXXX", "model_id": "platinum_sensitivity"}'
+  -d '{"slide_id": "TCGA-XX-XXXX", "project_id": "lung-stage"}'
 
-# Batch analysis
-curl -X POST http://localhost:8003/api/analyze/batch \
+# Batch analysis (project-scoped)
+curl -X POST http://localhost:8003/api/analyze-batch \
   -H "Content-Type: application/json" \
-  -d '{"slide_ids": ["slide_1", "slide_2"], "model_id": "platinum_sensitivity"}'
+  -d '{"slide_ids": ["slide_1", "slide_2"], "project_id": "ovarian-platinum"}'
 
-# Generate clinical report
+# Generate clinical report (project-scoped)
 curl -X POST http://localhost:8003/api/report \
   -H "Content-Type: application/json" \
-  -d '{"slide_id": "TCGA-XX-XXXX"}'
+  -d '{"slide_id": "TCGA-XX-XXXX", "project_id": "ovarian-platinum"}'
 
-# Semantic search via MedSigLIP
-curl -X POST http://localhost:8003/api/semantic-search \
-  -H "Content-Type: application/json" \
-  -d '{"slide_id": "TCGA-XX-XXXX", "query": "tumor infiltrating lymphocytes", "top_k": 10}'
+# Similar-case retrieval (project-scoped)
+curl "http://localhost:8003/api/similar?slide_id=TCGA-XX-XXXX&project_id=lung-stage"
 ```
 
 ### Full Endpoint List
@@ -212,21 +238,30 @@ curl -X POST http://localhost:8003/api/semantic-search \
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | /api/health | Health check |
-| GET | /api/slides | List slides (with ?project_id= filtering) |
-| GET | /api/slides/{id}/dzi | DZI metadata for OpenSeadragon |
-| GET | /api/slides/{id}/thumbnail | Slide thumbnail |
-| GET | /api/slides/{id}/cached-results | Cached analysis results |
-| POST | /api/analyze | Single slide analysis |
-| POST | /api/analyze/batch | Multi-slide batch analysis |
-| POST | /api/analyze/multi-model | Multi-model ensemble analysis |
-| GET | /api/models | List models (with ?project_id= filtering) |
+| GET | /api/slides?project_id={project_id} | List slides scoped to a project |
+| GET | /api/models?project_id={project_id} | List models assigned to a project |
+| POST | /api/analyze | Single-slide analysis (`project_id` in request body) |
+| POST | /api/analyze-multi | Multi-model analysis (`project_id` in request body) |
+| POST | /api/analyze-batch | Synchronous batch analysis (`project_id` in request body) |
+| POST | /api/analyze-batch/async | Async batch analysis task (`project_id` in request body) |
+| GET | /api/analyze-batch/status/{task_id} | Check async batch task status |
+| POST | /api/report | Generate report (`project_id` in request body) |
+| POST | /api/report/async | Async report generation (`project_id` in request body) |
+| GET | /api/report/status/{task_id} | Check async report task status |
+| GET | /api/similar?slide_id={id}&project_id={project_id} | Similar-case retrieval within project scope |
+| POST | /api/semantic-search | MedSigLIP semantic search (`project_id` in request body) |
+| GET | /api/heatmap/{slide_id}?project_id={project_id}&smooth={bool} | Slide heatmap with optional interpolation |
+| GET | /api/heatmap/{slide_id}/{model_id}?project_id={project_id}&smooth={bool} | Model-specific attention heatmap |
 | GET/POST/PUT/DELETE | /api/projects | Project CRUD |
-| GET/POST/DELETE | /api/projects/{id}/slides | Assign/unassign slides |
-| GET/POST/DELETE | /api/projects/{id}/models | Assign/unassign models |
-| POST | /api/semantic-search | MedSigLIP text-to-patch search |
-| GET | /api/heatmap/{slide_id}/{model_id} | TransMIL attention heatmap |
-| POST | /api/report | Generate MedGemma clinical report |
-| GET | /api/slides/{id}/report/pdf | Export report as PDF |
+| GET/POST/DELETE | /api/projects/{project_id}/slides | Assign/unassign slides per project |
+| GET/POST/DELETE | /api/projects/{project_id}/models | Assign/unassign models per project |
+
+### Error Behavior for Missing Prerequisites
+
+Heatmap and multi-model analysis paths return explicit errors instead of silent fallback behavior:
+
+- `LEVEL0_EMBEDDINGS_REQUIRED` when level-0 embeddings are unavailable
+- `COORDS_REQUIRED_FOR_HEATMAP` when `*_coords.npy` is missing
 
 ### Interactive Documentation
 
@@ -250,12 +285,29 @@ med-gemma-hackathon/
 |-- docker/            # Docker Compose configuration
 |-- config/            # projects.yaml and configuration
 |-- data/
-|   |-- tcga_full/slides/    # TCGA ovarian cancer WSIs
-|   |-- embeddings/level0/   # Path Foundation embeddings
+|   |-- projects/
+|   |   |-- ovarian-platinum/
+|   |   |   |-- slides/
+|   |   |   |-- embeddings/
+|   |   |   \-- labels.csv
+|   |   \-- lung-stage/
+|   |       |-- slides/
+|   |       |-- embeddings/
+|   |       \-- labels.csv
 |-- models/            # Trained TransMIL weights
 |-- tests/             # Unit tests
 |-- docs/              # Documentation and screenshots
 ```
+
+### Data Layout
+
+Per-project datasets follow a modular structure:
+
+- `data/projects/{project-id}/slides/`
+- `data/projects/{project-id}/embeddings/`
+- `data/projects/{project-id}/labels.csv`
+
+This replaces earlier flat dataset assumptions and enables independent project lifecycle management.
 
 ---
 
@@ -270,13 +322,24 @@ med-gemma-hackathon/
 
 ### Project Configuration
 
-Projects are managed via `config/projects.yaml` and the `/api/projects` CRUD endpoints. Each project scopes slides and models via PostgreSQL junction tables (project_slides, project_models), enabling multi-cancer support from a single deployment.
+Projects are managed via `config/projects.yaml` and `/api/projects` CRUD endpoints.
+
+Configured projects:
+- `ovarian-platinum`: Ovarian Cancer - Platinum Sensitivity
+- `lung-stage`: Lung Adenocarcinoma - Stage Classification
+
+Project isolation is enforced in API routing and task execution, including batch analysis and async report generation.
 
 ---
 
 ## Dataset
 
-The system is trained and evaluated on **208 TCGA ovarian cancer whole-slide images** with level 0 (full resolution) Path Foundation embeddings. Classification targets include platinum sensitivity, tumor grade, and survival at 1, 3, and 5 year horizons.
+The platform currently supports two project datasets:
+
+- **Ovarian cancer cohort** for platinum sensitivity, tumor grade, and survival classification
+- **Lung adenocarcinoma cohort** for stage classification
+
+Both use Path Foundation embeddings, with level-0 dense embeddings as the default analysis path.
 
 ---
 
@@ -320,7 +383,7 @@ cd frontend && npm run lint
 
 - **Google Health AI** for Path Foundation, MedGemma, and MedSigLIP
 - **NVIDIA** for DGX Spark compute resources
-- **TCGA** for the ovarian cancer whole-slide image dataset
+- **TCGA** for ovarian and lung whole-slide image datasets
 - [TransMIL](https://github.com/szc19990412/TransMIL) for the Transformer-based MIL architecture
 
 ---
