@@ -43,11 +43,11 @@ Enso Atlas is an on-premise pathology evidence platform that analyzes whole-slid
 
 *Current UI in Pathologist mode with project-aware interpretation workflow and tool visibility.*
 
-### Lung Batch Analysis
+### Batch Analysis
 
-![Lung Batch Analysis](docs/screenshots/batch-analysis-lung.png)
+![Batch Analysis](docs/screenshots/batch-analysis-lung.png)
 
-*Batch analysis in `lung-stage`, scoped by `project_id` for model access, embeddings, and result tracking.*
+*Batch analysis view showing project-scoped model selection, resolution controls, and cohort-level run setup.*
 
 ### Slide Manager
 
