@@ -31,29 +31,17 @@ Enso Atlas is an on-premise pathology evidence platform that analyzes whole-slid
 
 ## Screenshots
 
-### Ovarian Project Dashboard (Oncologist)
+### Dashboard (Oncologist View)
 
-![Ovarian Project Dashboard - Oncologist](docs/screenshots/02-oncologist-view.png)
+![Dashboard - Oncologist](docs/screenshots/dashboard-lung-oncologist.png)
 
-*`ovarian-platinum` project dashboard with model predictions, attention heatmap overlay, and project-scoped evidence review.*
+*Current UI in Oncologist mode with project-scoped model selection and evidence panels.*
 
-### Ovarian Project Dashboard (Pathologist)
+### Dashboard (Pathologist View)
 
-![Ovarian Project Dashboard - Pathologist](docs/screenshots/03-pathologist-view.png)
+![Dashboard - Pathologist](docs/screenshots/dashboard-lung-pathologist.png)
 
-*Pathologist workspace in the ovarian project with annotation tools, magnification presets, and patch-level inspection.*
-
-### Lung Project Dashboard (Oncologist)
-
-![Lung Project Dashboard - Oncologist](docs/screenshots/dashboard-lung-oncologist.png)
-
-*`lung-stage` dashboard configured for stage classification, with project-scoped model options and report context.*
-
-### Lung Project Dashboard (Pathologist)
-
-![Lung Project Dashboard - Pathologist](docs/screenshots/dashboard-lung-pathologist.png)
-
-*Lung adenocarcinoma review workflow showing project-aware copy and model-scoped interpretation UI.*
+*Current UI in Pathologist mode with project-aware interpretation workflow and tool visibility.*
 
 ### Lung Batch Analysis
 
