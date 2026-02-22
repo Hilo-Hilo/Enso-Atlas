@@ -12,7 +12,7 @@
 |-------------|--------|-------|
 | 3-minute video demo | PENDING | Requirement-mapped script finalized (VIDEO_SCRIPT.md), needs recording/upload |
 | 3-page technical writeup | DONE | SUBMISSION_WRITEUP.md updated for multi-project architecture |
-| Reproducible source code | DONE | GitHub repo at Hilo-Hilo/med-gemma-hackathon |
+| Reproducible source code | DONE | GitHub repo at Hilo-Hilo/enso-atlas |
 | Kaggle Writeups upload | PENDING | Needs conversion and upload to Kaggle |
 
 ---

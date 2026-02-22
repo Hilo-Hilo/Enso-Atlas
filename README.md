@@ -69,7 +69,7 @@ Enso Atlas is an on-premise pathology evidence platform that analyzes whole-slid
 
 ```bash
 # Clone the repository
-git clone https://github.com/Hilo-Hilo/med-gemma-hackathon.git
+git clone https://github.com/Hilo-Hilo/enso-atlas.git
 cd med-gemma-hackathon
 
 # Build and start backend + database

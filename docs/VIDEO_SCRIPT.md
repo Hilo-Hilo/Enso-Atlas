@@ -129,7 +129,7 @@
 
 **Screen actions**
 - Return to dashboard with prediction + heatmap visible
-- End card with repo URL: `github.com/Hilo-Hilo/med-gemma-hackathon`
+- End card with repo URL: `github.com/Hilo-Hilo/enso-atlas`
 
 ---
 

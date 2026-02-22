@@ -1641,7 +1641,7 @@ With 24 GB VRAM: MedGemma 4B (~8 GB) + MedSigLIP (~800 MB) + TransMIL (~200 MB) 
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/Hilo-Hilo/med-gemma-hackathon.git
+git clone https://github.com/Hilo-Hilo/enso-atlas.git
 cd med-gemma-hackathon
 ```
 
@@ -2484,7 +2484,7 @@ This section provides a step-by-step guide for hospital IT teams to deploy Enso 
 ### Step 2: Install and Start
 
 ```bash
-git clone https://github.com/Hilo-Hilo/med-gemma-hackathon.git
+git clone https://github.com/Hilo-Hilo/enso-atlas.git
 cd med-gemma-hackathon/docker
 docker compose up -d
 ```

@@ -3,7 +3,7 @@
 ## MedGemma Impact Challenge Submission
 
 **Author:** Hanson Wen, UC Berkeley
-**Repository:** https://github.com/Hilo-Hilo/med-gemma-hackathon
+**Repository:** https://github.com/Hilo-Hilo/enso-atlas
 
 ---
 

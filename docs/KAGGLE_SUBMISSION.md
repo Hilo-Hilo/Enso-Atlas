@@ -29,7 +29,7 @@ Target export filename: `enso-atlas-3min-demo.mp4` (1080p, <= 3:00).
 
 ## 4. GitHub Repository
 
-**https://github.com/Hilo-Hilo/med-gemma-hackathon**
+**https://github.com/Hilo-Hilo/enso-atlas**
 
 Repository includes:
 - Complete source code (FastAPI backend + Next.js frontend)
