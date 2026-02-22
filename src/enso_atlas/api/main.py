@@ -690,6 +690,27 @@ def create_app(
                 cand = d / f"{slide_id}{ext}"
                 if cand.exists():
                     return cand
+
+        # Fallback: tolerate UUID-suffixed filenames when the request uses
+        # a base slide_id without UUID (e.g. TCGA-...-TS1 vs TCGA-...-TS1.<uuid>). 
+        # Only return a match when unambiguous.
+        slide_base = slide_id.split(".", 1)[0]
+        for d in candidates_dirs:
+            if not d.exists():
+                continue
+            matches: list[Path] = []
+            for ext in exts:
+                matches.extend(sorted(d.glob(f"{slide_base}.*{ext}")))
+            matches = [m for m in matches if m.is_file()]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                logger.warning(
+                    "Ambiguous WSI fallback match for %s in %s (%d matches)",
+                    slide_id,
+                    d,
+                    len(matches),
+                )
         return None
 
     def has_wsi_file(slide_id: str, project_id: Optional[str] = None) -> bool:
@@ -1532,6 +1553,39 @@ def create_app(
                 for f in sorted(_emb_dir.glob("*.npy")):
                     if not f.name.endswith("_coords.npy"):
                         _project_slide_ids_set.add(f.stem)
+
+            # Prefer authoritative project assignments when available.
+            _assigned_ids = await _project_slide_ids(project_id)
+            if _assigned_ids:
+                _assigned_base_ids = {sid.split(".", 1)[0] for sid in _assigned_ids}
+                _project_slide_ids_set = {
+                    sid
+                    for sid in _project_slide_ids_set
+                    if sid in _assigned_ids or sid.split(".", 1)[0] in _assigned_base_ids
+                }
+
+            # Guardrail against shared embedding directory contamination:
+            # only keep slide IDs whose base id exists in project labels or
+            # in project-scoped slide files.
+            _allowed_base_ids: set[str] = {sid.split(".", 1)[0] for sid in slide_data.keys()}
+            _slide_exts = {".svs", ".tiff", ".tif", ".ndpi", ".mrxs", ".vms", ".scn"}
+            if _fallback_slides_dir.exists():
+                for _slide_file in _fallback_slides_dir.iterdir():
+                    if _slide_file.is_file() and _slide_file.suffix.lower() in _slide_exts:
+                        _allowed_base_ids.add(_slide_file.stem.split(".", 1)[0])
+
+            if _allowed_base_ids:
+                _before_filter = len(_project_slide_ids_set)
+                _project_slide_ids_set = {
+                    sid for sid in _project_slide_ids_set if sid.split(".", 1)[0] in _allowed_base_ids
+                }
+                _removed = _before_filter - len(_project_slide_ids_set)
+                if _removed > 0:
+                    logger.warning(
+                        "Filtered %d contaminated slide IDs from project '%s' listing",
+                        _removed,
+                        project_id,
+                    )
 
             fallback_slide_ids = sorted(_project_slide_ids_set)
         else:
