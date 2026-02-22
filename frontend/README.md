@@ -6,6 +6,13 @@ Next.js 14.2 frontend for the Enso Atlas pathology evidence engine.
 
 The frontend provides a clinical-grade interface for whole-slide image analysis, treatment-response prediction, and evidence-based clinical reporting. It connects to the FastAPI backend (port 8003) and PostgreSQL database for slide management, model execution, and result caching.
 
+## Competition Context
+
+This frontend is part of the submission for the **Kaggle-Google Med Gemma Impact Challenge**:
+
+- Writeups page: https://www.kaggle.com/competitions/med-gemma-impact-challenge/writeups
+- Challenge prompt: **The MedGemma Impact Challenge — Build human-centered AI applications with MedGemma and other open models from Google’s Health AI Developer Foundations (HAI-DEF).**
+
 ## Technology Stack
 
 - **Framework**: Next.js 14.2 with App Router

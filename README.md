@@ -8,7 +8,14 @@
 
 Enso Atlas is an on-premise pathology evidence platform that analyzes whole-slide images (WSIs) using TransMIL attention-based classification, Path Foundation embeddings, MedSigLIP retrieval, and MedGemma reporting across multiple cancer projects with strict project isolation.
 
-**Last Updated:** February 20, 2026
+## Competition Context
+
+This repository is developed for the **Kaggle-Google Med Gemma Impact Challenge**:
+
+- Writeups page: https://www.kaggle.com/competitions/med-gemma-impact-challenge/writeups
+- Challenge prompt: **The MedGemma Impact Challenge — Build human-centered AI applications with MedGemma and other open models from Google’s Health AI Developer Foundations (HAI-DEF).**
+
+**Last Updated:** February 22, 2026
 
 ---
 
