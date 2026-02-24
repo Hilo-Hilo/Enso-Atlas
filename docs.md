@@ -2730,19 +2730,21 @@ These two numbers are retained because they correspond to explicit behavior docu
 
 ## 17.1 Overview
 
-Enso Atlas supports on-premise deployment on consumer hardware. A modern Mac mini (M4 Pro/Max with 16-32 GB unified memory) can run the complete system:
+Enso Atlas supports on-premise deployment on consumer Apple hardware. The 2024 Mac mini ships in two configurations: M4 (16 GB unified memory, configurable to 32 GB) and M4 Pro (24 GB unified memory, configurable to 64 GB). There is no M4 Max Mac mini; that chip is limited to MacBook Pro and Mac Studio. The M4 Pro with at least 24 GB is the recommended minimum for running the full inference stack, since the combined model footprint leaves little room on a 16 GB machine once the OS and application overhead are accounted for.
 
 ## 17.2 Model Memory Requirements
 
 | Model | Memory Required | Notes |
 |---|---|---|
-| Path Foundation | ~2 GB | TensorFlow on CPU -- works natively on Apple Silicon |
+| Path Foundation | ~2 GB | TensorFlow on CPU; runs natively on Apple Silicon via tensorflow-macos |
 | TransMIL (6 project-scoped models) | ~240 MB | PyTorch MPS or CPU, ~3.2M params each |
-| MedGemma 4B | ~8 GB (bfloat16) | Fits in 16 GB unified memory via MPS |
+| MedGemma 4B | ~8 GB (bfloat16) | 4B params x 2 bytes; requires MPS backend on Apple Silicon |
 | MedSigLIP | ~3 GB | SigLIP-so400m full model |
 | FAISS Index | ~50 MB | 208 slides, CPU-only |
-| PostgreSQL | ~200 MB | Standard footprint |
-| **Total** | **~13.5 GB** | Fits in 16 GB Mac mini with headroom |
+| PostgreSQL | ~200 MB | Standard working-set footprint |
+| **Total** | **~13.5 GB** | Fits on M4 Pro (24 GB) with headroom for OS and services |
+
+On the base M4 (16 GB), the models technically fit, but macOS itself consumes 4-6 GB at idle. Sustained inference with all models loaded simultaneously will trigger memory pressure and swap. For reliable operation, use the M4 Pro or configure the M4 with 24 GB or more.
 
 ## 17.3 Performance Expectations
 
@@ -2754,23 +2756,28 @@ Enso Atlas supports on-premise deployment on consumer hardware. A modern Mac min
 | Heatmap generation | 50-100ms | 100-200ms |
 | PostgreSQL queries | 2-5ms | 2-5ms |
 
+The MPS backend on M4 Pro provides roughly 2-5x slower throughput than a Blackwell GPU for these workloads. For single-user clinical review, this latency is acceptable. Batch processing large slide cohorts is better suited to server hardware.
+
 ## 17.4 Deployment Configuration
 
-For Mac mini deployment:
-- Use `device: "mps"` for PyTorch models (MedGemma, TransMIL)
-- Path Foundation remains on CPU (TensorFlow)
-- PostgreSQL via Homebrew or Docker
-- Frontend via Node.js (native ARM64)
-- No Docker GPU passthrough needed -- run directly
+- Set `device: "mps"` for PyTorch models (MedGemma, TransMIL). The MPS backend is stable on PyTorch 2.1+ with macOS Sonoma or later.
+- Path Foundation remains on CPU (TensorFlow). The tensorflow-metal plugin can offload to GPU, but Path Foundation's TensorFlow graph runs faster on Apple Silicon CPU cores for this workload.
+- PostgreSQL via Homebrew (`brew install postgresql@16`) or Docker. No GPU passthrough is involved.
+- Frontend via Node.js (native ARM64 builds available).
+- All services run as native processes; Docker is optional and only needed for PostgreSQL isolation.
 
 ## 17.5 Comparison
 
-- **Cost:** Mac mini M4 Pro (~$1,600) vs DGX Spark (~$3,999+)
-- **Noise:** Silent operation, suitable for clinical environments
-- **Power:** ~40W vs ~500W
-- **Size:** Desktop form factor
-- **Maintenance:** macOS with automatic updates
-- **Data locality:** Data does not leave the device
+| Attribute | Mac mini M4 Pro | DGX Spark |
+|---|---|---|
+| Cost | ~$1,600 | ~$3,999+ |
+| Peak power draw | 155W (Apple spec) | ~500W |
+| Noise at idle | 5 dBA (near-silent) | Active cooling |
+| Form factor | 12.7 cm x 12.7 cm x 5.0 cm | Desktop workstation |
+| Maintenance | macOS with automatic updates | Ubuntu/NVIDIA stack |
+| Data locality | All data stays on-device | All data stays on-device |
+
+The Mac mini draws significantly less power than the DGX Spark, though Apple's rated maximum of 155W is well above the ~40W sometimes cited for idle operation. Under sustained ML inference, expect 50-100W depending on MPS and CPU load.
 
 ---
 
