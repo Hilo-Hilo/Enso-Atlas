@@ -958,86 +958,99 @@ The patch preview endpoint (`GET /api/slides/{slide_id}/patches/{patch_id}`) acc
 
 # 6. Agentic Workflow
 
-## 6.1 Overview
+## 6.1 Current Implementation Status
 
-The agentic workflow implements a seven-step AI pipeline that performs slide analysis with visible reasoning, retrieval-augmented generation, and structured report production.
+The agent workflow is implemented in `src/enso_atlas/agent/workflow.py` and exposed through `src/enso_atlas/agent/routes.py`.
 
-### Design Principles
+At startup, the API creates a single `AgentWorkflow` instance and injects shared dependencies (embeddings directory, multi-model inference, MedSigLIP embedder, MedGemma reporter, and FAISS mean-slide index metadata).
 
-1. **Transparency:** Every step produces visible reasoning that clinicians can inspect
-2. **Streaming:** Results are streamed via Server-Sent Events (SSE) for real-time progress
-3. **Session Memory:** Sessions persist analysis state for follow-up questions
-4. **Graceful Degradation:** Dependency-bound steps can be skipped or downgraded; initialization failures surface as explicit errors
+Two practical details matter for operations:
 
-## 6.2 Seven-Step Pipeline
+1. Agent routes are registered only when the agent module imports successfully (`AGENT_AVAILABLE`).
+2. Session state is in-memory only (`workflow._sessions`), so it is cleared on process restart.
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant API
-    participant Agent
-    participant TransMIL
-    participant FAISS
-    participant MedSigLIP
-    participant MedGemma
+## 6.2 API Surface
 
-    Client->>API: POST /api/agent/analyze
-    API->>Agent: run_workflow()
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/agent/analyze` | Run full seven-step workflow as SSE stream |
+| `POST` | `/api/agent/followup` | Ask a follow-up question against an existing session |
+| `GET` | `/api/agent/session/{session_id}` | Fetch full session state, outputs, and reasoning chain |
+| `GET` | `/api/agent/sessions` | List active in-memory sessions |
+| `DELETE` | `/api/agent/session/{session_id}` | Delete a session from memory |
 
-    Note over Agent: Step 1: INITIALIZE
-    Agent->>Agent: Load embeddings + coordinates
-    Agent-->>Client: SSE: initialize complete (~50ms)
+All streaming responses use `text/event-stream` and emit `data: <json>` events.
 
-    Note over Agent: Step 2: ANALYZE
-    Agent->>TransMIL: predict_all(embeddings)
-    TransMIL-->>Agent: predictions + attention
-    Agent-->>Client: SSE: analyze complete (~200ms)
+## 6.3 Seven-Step Execution Path (Backend)
 
-    Note over Agent: Step 3: RETRIEVE
-    Agent->>FAISS: search(mean_embedding, k=10)
-    FAISS-->>Agent: similar cases
-    Agent-->>Client: SSE: retrieve complete (~10ms)
+`run_workflow()` executes steps in this fixed order:
 
-    Note over Agent: Step 4: SEMANTIC SEARCH
-    Agent->>MedSigLIP: search(queries, embeddings)
-    MedSigLIP-->>Agent: tissue pattern matches
-    Agent-->>Client: SSE: semantic_search complete (~100ms)
+1. `initialize`
+2. `analyze`
+3. `retrieve`
+4. `semantic_search`
+5. `compare`
+6. `reason`
+7. `report`
+8. final `complete` event
 
-    Note over Agent: Step 5: COMPARE
-    Agent->>Agent: Analyze similar case patterns
-    Agent-->>Client: SSE: compare complete (~5ms)
+### Step behavior summary
 
-    Note over Agent: Step 6: REASON
-    Agent->>Agent: Synthesize evidence
-    Agent-->>Client: SSE: reason complete (~10ms)
+| Step | What it does now | Skip/Error behavior |
+|---|---|---|
+| `initialize` | Loads `<slide_id>.npy` embeddings and optional `<slide_id>_coords.npy` | If embeddings file is missing, emits `error` and stops workflow |
+| `analyze` | Calls `multi_model_inference.predict_all(..., return_attention=True)` and extracts top attention patches | If inference module is unavailable, emits `skipped` |
+| `retrieve` | Computes normalized mean embedding for slide and queries FAISS slide-mean index for up to 10 non-self matches | If index is unavailable, emits `skipped` |
+| `semantic_search` | Loads cached MedSigLIP patch embeddings from `embeddings_dir/medsiglip_cache/{slide_id}_siglip.npy` and runs 5 fixed pathology text queries | If MedSigLIP model or cache is missing, emits `skipped` |
+| `compare` | Summarizes responder/non-responder distribution in retrieved neighbors and computes similarity-weighted vote | If no similar cases were retrieved, emits `skipped` |
+| `reason` | Builds a textual evidence summary from predictions, top evidence, similar cases, semantic hits, and optional user questions | Emits `complete` unless unexpected exception |
+| `report` | Uses MedGemma reporter when available (run in `asyncio.to_thread`); otherwise builds structured fallback report from collected workflow artifacts | Emits `error` on failure, otherwise `complete` |
 
-    Note over Agent: Step 7: REPORT
-    alt MedGemma available
-      Agent->>MedGemma: generate_report()
-      MedGemma-->>Agent: structured report
-    else fallback
-      Agent->>Agent: build structured report from predictions/evidence/retrieval
-    end
-    Agent-->>Client: SSE: report complete
-```
+## 6.4 SSE Event Contract
 
-## 6.3 SSE Streaming Format
+Each step is streamed as a JSON object with this shape:
 
 ```json
 {
   "step": "analyze",
   "status": "complete",
   "message": "Ran 3 models on 6,234 patches",
-  "reasoning": "Model predictions:\n- Platinum Sensitivity: sensitive (score: 0.94)...",
-  "data": {"predictions": {}, "top_evidence": []},
-  "timestamp": "2025-02-06T23:57:42.123Z",
+  "reasoning": "Model predictions: ...",
+  "data": {
+    "predictions": {},
+    "top_evidence": []
+  },
+  "timestamp": "2026-02-24T22:32:10.123Z",
   "duration_ms": 187.3
 }
 ```
 
-## 6.4 Session Management
+Notes tied to the current implementation:
 
-Sessions are stored in-memory with the `AgentState` dataclass. Follow-up questions can reference previous analysis results without re-running the full workflow.
+- The backend emits one event per completed/skipped/error step (it does not currently emit intermediate `running` step events).
+- The final `complete` event includes `data.session_id` and total workflow duration.
+- Nginx buffering is explicitly disabled for `/api/agent/analyze` via `X-Accel-Buffering: no`.
+
+## 6.5 Session and Follow-up Semantics
+
+Session objects are `AgentState` dataclasses keyed by `session_id`.
+
+A follow-up request (`/api/agent/followup`) appends user/assistant messages to `conversation_history` and returns a streamed reasoning response generated from stored workflow artifacts, not by rerunning the seven-step pipeline.
+
+`GET /api/agent/session/{session_id}` returns:
+
+- core identifiers and status
+- predictions, similar cases, top evidence, semantic search results
+- generated report
+- reasoning chain
+- conversation history
+- summed per-step duration
+
+## 6.6 Frontend Behavior (Current)
+
+The `AIAssistantPanel` component implements SSE parsing for `/api/agent/analyze` and `/api/agent/followup`, updates step cards incrementally, and hydrates report state when a `report` step arrives.
+
+In the current main page (`frontend/src/app/page.tsx`), that panel is intentionally not rendered (commented as removed for demo readiness). The backend workflow and endpoints are still implemented and callable.
 
 ---
 
