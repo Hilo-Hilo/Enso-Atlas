@@ -1729,83 +1729,169 @@ Audit logging:
 
 ## 12.1 Attention Heatmaps (OSD Layer)
 
-Attention heatmaps are generated from the active MIL model attention weights (TransMIL in the current deployment) and rendered as OpenSeadragon overlays:
+The viewer supports two heatmap paths:
 
-### Per-Model Heatmaps
+- **Model-specific endpoint (primary):** `GET /api/heatmap/{slide_id}/{model_id}`
+- **Legacy endpoint (compatibility):** `GET /api/heatmap/{slide_id}`
 
-Each project-scoped model produces its own attention heatmap (6 models in the current deployment):
-- Endpoint: `GET /api/heatmap/{slide_id}/{model_id}`
-- Force-regeneration controls: `refresh=true` or `analysis_run_id=<nonce>`
-- Format: PNG with RGBA (transparent background)
-- Resolution: 1 pixel per patch in the embedding grid (`grid_w x grid_h`; patch size inferred from coordinates)
-- Alignment: Coverage-based -- `ceil(slide_dim / patch_size) * patch_size` ensures the heatmap covers exactly the patch grid area
+The model-specific path is the one used for project-scoped multi-model analysis.
+
+### Model-Specific Heatmaps (`/api/heatmap/{slide_id}/{model_id}`)
+
+Key behavior in the current implementation:
+
+- Works with project-scoped models (not a fixed model count).
+- Requires level-0 embeddings and `*_coords.npy` coordinates.
+  - If level-0 embeddings are missing: `400 LEVEL0_EMBEDDINGS_REQUIRED`
+  - If coordinates are missing: `409 COORDS_REQUIRED_FOR_HEATMAP`
+- Renders PNG RGBA with transparent background.
+- Uses patch-resolution output: **1 heatmap pixel = 1 patch cell**.
+- Uses `patch_size=224` for grid coverage math.
+- Supports:
+  - `alpha_power` (default `0.7`)
+  - `smooth` (default `false`; blurred/interpolated visualization)
+  - `refresh` (default `false`)
+  - `analysis_run_id` (optional nonce)
+
+### Refresh and Regeneration Controls
+
+Regeneration is forced when either of the following is present:
+
+- `refresh=true`
+- `analysis_run_id=<non-empty value>`
+
+Frontend behavior is aligned with this contract:
+
+- The UI increments an `analysisRunId` whenever users run, retry, or re-run analysis.
+- That nonce is appended to model heatmap URLs as `analysis_run_id`.
+- The proxy also sets `refresh=true` whenever `analysis_run_id` is provided.
+
+Result: model heatmaps are recomputed for each analysis run even when embeddings are reused from cache.
 
 ### Coverage-Based Alignment
 
-The heatmap dimensions are computed to match the coverage area of 224px patches:
+Heatmap sizing uses deterministic coverage math:
 
 ```python
-grid_w = int(np.ceil(slide_w / patch_size))
-grid_h = int(np.ceil(slide_h / patch_size))
+grid_w = ceil(slide_width / 224)
+grid_h = ceil(slide_height / 224)
+coverage_w = grid_w * 224
+coverage_h = grid_h * 224
 ```
 
-Response headers include both slide dimensions and coverage dimensions:
-```
-X-Slide-Width: 80000
-X-Slide-Height: 40000
-X-Coverage-Width: 80136    # grid_w * 224
-X-Coverage-Height: 40096   # grid_h * 224
-```
+Model heatmap responses include:
 
-The frontend uses coverage dimensions for positioning the heatmap overlay to ensure pixel-perfect alignment with patch boundaries.
+- `X-Slide-Width`, `X-Slide-Height`
+- `X-Coverage-Width`, `X-Coverage-Height`
 
-### Disk-Based Caching and Regeneration Policy
+The viewer uses these coverage headers to compute overlay world-space width/height, so the heatmap and patch grid stay aligned to extraction boundaries.
 
-Model heatmaps are cached under `<embedding_dir>/heatmap_cache/` with scoped/versioned keys that include a checkpoint signature (for example `{project_or_global}_{slide_id}_{model_id}_{truthful|smooth}_{ckpt_sig}_v4.png`). This prevents stale overlays from being reused after model checkpoint updates.
+### Checkpoint-Aware Disk Cache
 
-Regeneration rules:
-- `refresh=true` or `analysis_run_id=<nonce>` bypasses disk-cache reads and recomputes the heatmap.
-- The frontend sends an analysis-run nonce on every Run Analysis so model heatmaps are regenerated even when embeddings are cached.
-- Heatmap responses are returned with `Cache-Control: no-store` to prevent browser/proxy stale reuse.
+Model heatmaps are cached under:
 
-### Configurable Rendering
+- `<embedding_dir>/heatmap_cache/`
 
-The default (non-model-specific) heatmap endpoint supports:
-- `level`: 0=2048px, 1=1024px, 2=512px (default), 3=256px, 4=128px
-- `smooth`: Gaussian blur (default true)
-- `blur`: Kernel size (default 31, odd number)
+Cache key fields include:
+
+- scope (`project_id` or `global`)
+- `slide_id`
+- `model_id`
+- rendering mode (`truthful` vs `smooth`)
+- checkpoint signature (`mtime_ns + file size`)
+- version suffix (`v4`)
+
+Example shape:
+
+- `{scope}_{slide}_{model}_{truthful|smooth}_{checkpoint_sig}_v4.png`
+
+Additional cache rules:
+
+- Disk cache is read/written only for default `alpha_power` (~`0.7`).
+- Checkpoint signature changes force refresh and clear in-memory model entries so inference reloads the updated checkpoint.
+
+### No-Store Response Policy
+
+Model heatmap responses (cached or regenerated) are returned with no-store semantics (`Cache-Control: no-store, max-age=0`, plus `Pragma: no-cache`, `Expires: 0`).
+
+The Next.js heatmap proxy also uses no-store fetch/response behavior for model heatmaps to avoid stale browser or intermediary reuse.
+
+### Legacy Heatmap Endpoint (`/api/heatmap/{slide_id}`)
+
+The legacy single-model endpoint remains available and supports:
+
+- `level`: `0..4` mapped to thumbnail target sizes (`2048, 1024, 512, 256, 128`)
+- `smooth` (default `true`)
+- `blur` kernel size (default `31`)
+
+This path is compatibility-oriented; the project-scoped model heatmap route above is the primary overlay path.
 
 ## 12.2 Canvas-Based Patch Overlays
 
-Outlier detection and few-shot classification produce per-patch data that is rendered on a separate HTML canvas overlaid on the viewer, independent of the OSD heatmap system:
+Outlier and few-shot classifier overlays are rendered on a separate HTML canvas (independent of the OSD heatmap image layer).
 
-### Outlier Heatmap
-- Data: Array of {x, y, score} where score is normalized distance [0, 1]
-- Only outlier patches are highlighted (filtered by z-score threshold)
-- Color: Warm palette (yellow to red) based on score
+### Outlier Overlay
 
-### Classifier Heatmap
-- Data: Array of {x, y, class_idx, confidence}
-- Each class assigned a distinct color from 8 predefined colors
-- Opacity modulated by confidence
+Backend outlier detection returns normalized scores for all patches. In the UI, only coordinates flagged as outliers are rendered.
+
+Overlay payload (rendered subset):
+
+- `{ x, y, score }`
+- score range: `[0, 1]`
+- color ramp: warm yellow → red
+
+### Few-Shot Classifier Overlay
+
+Few-shot classification trains a logistic regression model from user-provided labeled patch indices, then predicts all patches.
+
+Overlay payload:
+
+- `{ x, y, class_idx, confidence }`
+- class colors are selected from a fixed 8-color palette
+- alpha is scaled by confidence
 
 ### PatchOverlay Type
+
 ```typescript
 interface PatchOverlay {
-    type: "outlier" | "classifier";
-    data: Array<{ x: number; y: number; score?: number; classIdx?: number; confidence?: number }>;
-    classes?: string[];
+  type: "outlier" | "classifier";
+  data: Array<{ x: number; y: number; score?: number; classIdx?: number; confidence?: number }>;
+  classes?: string[];
 }
 ```
 
 ## 12.3 Patch Grid Overlay
 
-A dedicated canvas renders 224px patch boundaries:
-- Toggle via toolbar button (Grid icon)
-- Configurable opacity (0-1 range via slider)
-- Configurable color (default cyan #00ffff)
-- Lines drawn at every 224px interval aligned to the patch extraction grid
-- Helps pathologists understand which regions map to which patches
+A dedicated canvas draws the patch grid in viewer coordinates.
+
+Controls in the viewer:
+
+- toggle on/off
+- opacity slider
+- color picker (default cyan `#00ffff`)
+
+Alignment behavior:
+
+- Grid spacing uses heatmap metadata-derived patch width/height when available.
+- Fallback spacing is `224px`.
+- Drawing is clipped to slide bounds to prevent lines from extending outside the image area.
+
+## 12.4 Coordinate-Space Alignment Notes (Including Semantic Paths)
+
+Coordinate consistency matters because multiple systems share patch coordinates:
+
+- attention heatmap generation
+- patch overlay canvases
+- semantic search previews and patch extraction
+- click-to-navigate / click-to-select interactions
+
+Current rule set:
+
+- Canonical coordinate space is level-0 pixel space.
+- Heatmaps require explicit coordinate files (`*_coords.npy`) and do not synthesize fallback grids.
+- Legacy SigLIP semantic caches can contain lower-level coordinates; backend normalization upscales them to level-0 when slide-coverage checks indicate misalignment.
+
+This keeps semantic patch previews and viewer overlays operating in the same coordinate frame.
 
 ---
 
