@@ -1244,154 +1244,183 @@ Project-scoped list views are the deliberate exception: they prioritize live fil
 
 ## 8.1 Tech Stack
 
-| Technology | Version | Purpose |
+| Technology | Version (repo) | Purpose |
 |---|---|---|
-| Next.js | 14.2 | React framework with SSR, routing, API proxying |
-| React | 18 | UI component library |
-| TypeScript | 5.x | Type-safe frontend development |
-| Tailwind CSS | 3.x | Utility-first CSS with dark mode support |
-| OpenSeadragon | 4.1 | Tile-based whole-slide image viewer |
-| react-resizable-panels | 4.x | Resizable and collapsible layout panels |
-| Lucide React | - | Icon library |
+| Next.js | 14.2.22 | App Router shell and page routing (`/`, `/slides`, `/projects`) |
+| React | 18.2.0 | Component and state model for all UI flows |
+| TypeScript | 5.7.x | Typed contracts for panels, API responses, and viewer state |
+| Tailwind CSS | 3.4.17 | Utility-first styling and design tokens from `globals.css` |
+| OpenSeadragon | 5.0.1 | Whole-slide tile rendering and viewport controls |
+| react-resizable-panels | 4.6.2 | Desktop three-column split layout with collapsible sidebars |
+| Lucide React | 0.469.0 | Icons across layout, panels, and modals |
+| react-joyride | 2.9.3 | Demo/tutorial walkthrough UI |
+| jsPDF | 4.0.0 | Client-side PDF export pipeline |
+
+Notes:
+- The viewer currently uses OpenSeadragon runtime from npm, but still references the 4.1 CDN image sprite assets (`prefixUrl`) for control icons.
+- Most pages are client components (`"use client"`) with backend access via `fetch` calls.
 
 ## 8.2 Component Hierarchy
 
-```
-App (layout.tsx)
-  +-- ProjectProvider (ProjectContext.tsx)
-      +-- HomePage (page.tsx, ~2472 lines)
+```text
+RootLayout (src/app/layout.tsx)
+  +-- ToastProvider
+  +-- ProjectProvider
+  +-- DisclaimerBanner
+  +-- ErrorBoundary
+      +-- App routes
+
+Home route (/src/app/page.tsx)
+  +-- HomePageWrapper (Suspense)
+      +-- HomePage (~2485 lines)
           +-- Header
           |   +-- ProjectSwitcher
-          |   +-- ViewModeToggle (oncologist/pathologist/batch)
-          |   +-- DemoModeToggle
-          |   +-- Settings menu (opens SettingsModal theme selector)
-          +-- PanelGroup (react-resizable-panels)
-              +-- Left Panel (collapsible)
-              |   +-- SlideSelector (25,527 bytes)
-              |   +-- CaseNotesPanel
-              |   +-- AnalysisControls
-              +-- Center Panel
-              |   +-- WSIViewer (61,161 bytes)
-              |   |   +-- OpenSeadragon Canvas
-              |   |   +-- SVG Annotation Overlay
-              |   |   +-- Canvas Patch Overlay (outlier/classifier heatmaps)
-              |   |   +-- Patch Grid Overlay (224px boundaries)
-              |   |   +-- Real-Time Scale Bar
-              |   |   +-- Navigator Minimap
-              |   |   +-- Heatmap Model Selector
-              +-- Right Panel (collapsible)
-              |   +-- PredictionPanel
-              |   +-- MultiModelPredictionPanel
-              |   +-- EvidencePanel
-              |   +-- SimilarCasesPanel
-              |   +-- SemanticSearchPanel
-              |   +-- ReportPanel
-              |   +-- BatchAnalysisPanel (~45,905 bytes)
-              |   +-- AIAssistantPanel
-              |   +-- OutlierDetectorPanel (11,988 bytes)
-              |   +-- (PatchClassifierPanel currently disabled on home page)
-              |   +-- CaseNotesPanel
-              |   +-- (Uncertainty panel not mounted by default in current home layout)
-              +-- Footer
-              +-- Modals
-                  +-- PatchZoomModal
-                  +-- KeyboardShortcutsModal
-                  +-- SettingsModal
-                  +-- SystemStatusModal
-                  +-- WelcomeModal
+          |   +-- Nav links (/slides, /projects)
+          |   +-- View-mode toggle (oncologist/pathologist/batch)
+          |   +-- Demo toggle
+          |   +-- Utility menu (System Status, Shortcuts, Docs, Settings)
+          |   +-- SettingsModal + SystemStatusModal (mounted in Header)
+          +-- Main
+          |   +-- Batch mode: BatchAnalysisPanel (full width)
+          |   +-- Non-batch mode:
+          |       +-- Mobile tabs (Slides / Results)
+          |       +-- Desktop PanelGroup (react-resizable-panels)
+          |           +-- Left sidebar
+          |           |   +-- SlideSelector
+          |           |   +-- AnalysisControls
+          |           |   +-- Inline error card
+          |           |   +-- CaseNotesPanel
+          |           +-- Center panel
+          |           |   +-- WSIViewer (dynamic import; SSR disabled)
+          |           |   +-- OncologistSummaryView (summary mode)
+          |           +-- Right sidebar
+          |               +-- PathologistView (pathologist mode)
+          |               +-- or oncologist stack:
+          |                   +-- PredictionPanel
+          |                   +-- MultiModelPredictionPanel (conditional)
+          |                   +-- EvidencePanel
+          |                   +-- SemanticSearchPanel
+          |                   +-- SimilarCasesPanel
+          |                   +-- OutlierDetectorPanel
+          |                   +-- ReportPanel
+          +-- Footer
+          +-- Page-level modals
+              +-- PatchZoomModal
+              +-- KeyboardShortcutsModal
+              +-- DemoMode
+              +-- WelcomeModal
 
-Slides Page (/slides/page.tsx)
-  +-- Page-level state (no SlideManager wrapper)
-      +-- SlideGrid / SlideTable (with thumbnails)
-      +-- FilterPanel (label, embeddings, patches, date, search)
-      +-- BulkActions
-      +-- Pagination
+Slides route (/src/app/slides/page.tsx)
+  +-- Header
+  +-- Toolbar (refresh, filters toggle, grid/table switch)
+  +-- FilterPanel (collapsible side column)
+  +-- SlideGrid or SlideTable
+  +-- BulkActions bar
+  +-- Pagination
+  +-- Modals: CreateTag, CreateGroup, ConfirmDelete, AddToGroup
+  +-- Footer
 
-Projects Page (/projects/page.tsx)
-  +-- Page-level project CRUD/status (no ProjectManager wrapper)
-      +-- ProjectList (CRUD cards with readiness status)
-      +-- SlideUpload
-      +-- ProjectFormModal (create/edit)
-      +-- SlideUploadModal
-      +-- DeleteConfirmModal
+Projects route (/src/app/projects/page.tsx)
+  +-- Header
+  +-- Project cards with readiness status
+  +-- ProjectFormModal (create/edit)
+  +-- UploadModal
+  +-- DeleteConfirmModal
+  +-- Footer
 ```
 
-## 8.3 WSI Viewer (74,056 bytes)
+Components present in `src/components/panels` but currently not mounted in the home layout:
+- `AIAssistantPanel`
+- `PatchClassifierPanel`
+- `UncertaintyPanel`
 
-The WSI viewer (`frontend/src/components/viewer/WSIViewer.tsx`) is the central component:
+## 8.3 WSI Viewer (74,056 bytes, 1,940 lines)
 
-### Features
+`src/components/viewer/WSIViewer.tsx` remains the most complex frontend component.
 
-- **OpenSeadragon Integration:** DZI tile-based rendering with navigator minimap, double-click zoom, scroll zoom
-- **Attention Heatmap Overlay:** Per-model heatmaps loaded as OSD `addSimpleImage` overlays with configurable opacity and model selection dropdown
-- **Canvas-Based Patch Overlay:** Separate HTML canvas for outlier detection and few-shot classifier heatmaps, rendered independently from OSD heatmaps
-- **Patch Grid Overlay:** 224px boundary grid drawn on a dedicated canvas with configurable opacity and color (cyan default), toggled via toolbar
-- **SVG Annotation Layer:** Real-time drawing of circle, rectangle, freehand, and point annotations using SVG overlay positioned in OSD viewport coordinates
-- **Spatial Patch Selection (viewer support only):** WSIViewer contains nearest-patch click selection logic, but the few-shot classifier panel is currently disabled on the home page
-- **Real-Time Scale Bar:** Imperative DOM updates (bypassing React render) on every OSD animation frame for smooth magnification and scale display
-- **Canvas2D Optimization:** Patches HTMLCanvasElement.getContext to add `willReadFrequently: true` for OpenSeadragon pixel data access
+### Current behavior
 
-### Scale Bar Implementation
+- **OpenSeadragon initialization:** tile source loading, navigator minimap, zoom/pan controls, and fullscreen support.
+- **Heatmap overlay via `addSimpleImage`:** attention maps are aligned in world coordinates using backend metadata (coverage bounds and patch size), not CSS overlays.
+- **Heatmap controls:** model selection, resolution level, alpha-power tuning, smoothing toggle, opacity slider, and heatmap-only mode.
+- **Patch overlays on canvas:** outlier scores and few-shot classifier outputs render on a dedicated canvas layer independent of OSD tile rendering.
+- **Patch grid overlay:** grid is drawn with requestAnimationFrame and synchronized to heatmap geometry; defaults to 224px when metadata is missing.
+- **Annotation layer:** SVG-based drawing/selection for point, circle, rectangle, and freehand annotations.
+- **Spatial patch selection hooks:** nearest-patch click selection is implemented in viewer callbacks for few-shot workflows.
+- **Realtime scale bar:** magnification + distance labels are updated through direct DOM refs on animation frames to avoid React render churn.
+- **Canvas2D patching:** context creation is patched to include `willReadFrequently: true` to avoid browser warnings and improve pixel-read paths.
 
-The scale bar uses direct DOM manipulation for zero-latency updates:
+## 8.4 Resizable Layout Behavior
 
-```typescript
-const updateScaleDisplay = useCallback((z: number) => {
-    const info = computeScaleBar(z);
-    if (scaleTextRef.current) {
-        scaleTextRef.current.textContent = `${info.displayValue} ${info.displayUnit}`;
-    }
-    if (magTextRef.current) {
-        magTextRef.current.textContent = `${info.effectiveMag.toFixed(1)}x`;
-    }
-}, [computeScaleBar]);
-```
+Desktop layout uses `react-resizable-panels` with three panes (left/center/right):
 
-This avoids React re-renders during continuous zoom/pan operations.
+- Left sidebar: default 22%, min 10%, max 35%, collapsible.
+- Center viewer: default 50%, min 30%.
+- Right sidebar: default 28%, min 5%, max 45%, collapsible.
 
-## 8.4 Resizable Panels
+Important implementation detail: the current `PanelGroup` uses an `id` but no `autoSaveId`, so pane sizes are **not persisted across browser sessions** by default.
 
-All major layout panels use react-resizable-panels v4:
+On mobile, this is replaced with a tabbed Slides/Results pattern instead of draggable panel resizing.
 
-- **Three-panel layout:** Left sidebar (slide selector), center (WSI viewer), right sidebar (analysis results)
-- **Collapsible:** Each sidebar can be collapsed via toggle buttons with smooth animation
-- **Persistent:** Panel sizes are remembered across sessions
-- **Responsive:** Mobile view switches to tabbed panels (Slides / Results)
+## 8.5 Theme and Dark Mode Status
 
-## 8.5 Dark Mode
+Theme settings live in `SettingsModal` and use localStorage key `atlas-theme`.
 
-Theme preference is available in SettingsModal and persisted to localStorage (`atlas-theme`).
+- `light`, `dark`, and `system` options are implemented.
+- A `.dark` CSS variable theme exists in `globals.css`.
+- Tailwind `dark:` utility usage is currently absent, so dark mode coverage is partial.
+- Saved theme preference is stored reliably, but startup-wide theme bootstrapping is still lightweight (theme behavior is mostly driven from modal logic).
 
-A `.dark` variable theme exists in global CSS, but component-level `dark:` Tailwind variants are not broadly implemented yet.
+## 8.6 State Management and UI Flow
 
-## 8.6 State Management
+### Global context
 
-### ProjectContext
+`ProjectContext` provides:
+- `projects`
+- `currentProject`
+- `switchProject(id)`
+- loading/error state
 
-Global project configuration providing `currentProject` and `switchProject()`. Selected project persisted to localStorage.
+Project selection priority is: URL `?project=` -> localStorage (`enso-atlas-selected-project`) -> first returned project.
 
-### useAnalysis Hook
+### Home page flow
 
-Manages analysis state (loading, results, error) with retry support.
+`src/app/page.tsx` keeps most interaction state local and coordinates several flows:
 
-### Key State Variables in page.tsx
+- **Project change reset:** clears selected slide, cached analysis/report state, selected models, and repopulates project-scoped model options.
+- **Deep-link bootstrapping:** `?slide=<id>` autoselects a slide; `?analyze=true` triggers analysis once the slide is loaded.
+- **Analysis orchestration:** combines single-model and multi-model runs, embedding generation (including level-0 polling), cache reuse, and report generation.
+- **Viewer state bridging:** WSI viewer controls are exposed through refs for keyboard shortcuts and panel actions.
+- **Annotation lifecycle:** fetch, create, delete, and selection state are synced with backend annotation APIs.
 
-- `outlierHeatmapData` / `showOutlierHeatmap`: Canvas-based outlier visualization
-- `classifyResult` / `showClassifyHeatmap`: Canvas-based classifier visualization
-- `patchSelectionMode` / `patchCoordinates`: Spatial selection for few-shot classifier
-- `annotations` / `activeAnnotationTool`: Pathologist annotation state
-- `multiModelResult` / `selectedModels`: Multi-model analysis
-- `resolutionLevel` / `forceReembed`: Batch analysis configuration
-- `heatmapModel` / `heatmapLevel`: Per-model heatmap selection
+### Hooks in active use
 
-## 8.7 API Client (3,054 lines)
+- `useAnalysis`: analysis/report loading state, progress simulation, retry flows.
+- `useKeyboardShortcuts`: global shortcuts with input-field guardrails.
 
-The API client (`frontend/src/lib/api.ts`) implements:
+## 8.7 API Client (3,079 lines)
 
-- **Retry Logic:** 3 retries with exponential backoff for 408, 429, 500, 502, 503, 504
-- **Typed Errors:** `AtlasApiError` with `getUserMessage()` for display
-- **SSE Streaming:** `frontend/src/lib/api.ts` does not implement AsyncGenerator/SSE helpers for agent/chat; SSE parsing currently lives in `AIAssistantPanel.tsx`
-- **Functions:** `detectOutliers()`, `classifyPatches()`, `getPatchCoords()`, `getAnnotations()`, `saveAnnotation()`, `deleteAnnotation()`, `getSlideCachedResults()`, `embedSlideWithPolling()`, `analyzeSlideMultiModel()`, `visualSearch()`, plus all standard CRUD operations
+`src/lib/api.ts` is the typed transport layer used by most frontend surfaces.
+
+### Core client behavior
+
+- Central `fetchApi<T>()` wrapper with timeout + retries.
+- Retry policy: 3 retries with exponential backoff + jitter for 408/429/5xx/network/timeout classes.
+- `AtlasApiError` carries status, retryability, network/timeout flags, and user-friendly message helpers.
+
+### Functional coverage
+
+- Slides: listing, search/filtering, metadata updates, stars, tags/groups bulk operations.
+- Analysis: single-model, multi-model, semantic search, visual search, outlier detection, patch classification, patch coordinates.
+- Reports: sync and async report generation with polling progress.
+- Embeddings and batch: async task start/status/cancel/poll helpers.
+- Project scoping: available models per project and assign/unassign operations.
+- Connectivity: health checks and connection-state listeners.
+
+### Known split responsibilities
+
+- SSE parsing for chat/agent streams lives in `AIAssistantPanel.tsx` (`/api/agent/analyze`, `/api/agent/followup`, `/api/chat`), not in `lib/api.ts`.
+- `projects/page.tsx` still uses local page-level fetch helpers for project CRUD/upload instead of `lib/api.ts` wrappers.
 
 ---
 
