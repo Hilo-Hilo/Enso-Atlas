@@ -333,7 +333,7 @@ export function Header({
   };
 
   const handleOpenDocs = () => {
-    window.open("https://github.com/Hilo-Hilo/enso-atlas/blob/main/TECHNICAL_SPECIFICATION.md", "_blank");
+    window.open("https://github.com/Hilo-Hilo/Enso-Atlas/blob/main/docs.md", "_blank");
   };
 
   const showDisconnectionBanner = !isConnected && !bannerDismissed;

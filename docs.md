@@ -2,8 +2,8 @@
 
 ## A Modular, Model-Agnostic Pathology Evidence Platform
 
-**Version:** 2.2.0
-**Date:** February 20, 2026
+**Version:** 2.3.0
+**Date:** February 24, 2026
 **Authors:** Enso Labs
 **Classification:** Technical Documentation -- Hackathon Submission / Investor Review
 
@@ -41,7 +41,7 @@ Enso Atlas is a modular, model-agnostic pathology evidence platform for on-premi
 
 The platform is built around four independently swappable layers: a **foundation model layer** (any patch-level embedding model), a **classification layer** (any attention-based MIL architecture), an **evidence layer** (heatmaps, retrieval, semantic search, outlier detection), and a **UI layer** (WSI viewer, annotations, reports). Hospitals bring their own foundation models, train task-specific classification heads, and deploy within existing infrastructure. No code changes are required to add new cancer types, swap models, or adjust feature sets. Everything is driven by a single YAML configuration file.
 
-The current deployment uses Google's HAI-DEF models (Path Foundation, MedGemma 4B, MedSigLIP) across two active projects: ovarian platinum-response prediction and lung adenocarcinoma stage classification. The HAI-DEF models are interchangeable examples. The platform itself is the primary contribution: an on-premise system that makes any pathology AI model deployable, interpretable, and usable in clinical workflows.
+In this repository, the reference deployment uses Google's HAI-DEF models (Path Foundation, MedGemma 4B, MedSigLIP) across two demonstration projects: ovarian platinum-response prediction and lung adenocarcinoma stage classification. Those projects are included examples, and the model choices are interchangeable. The platform itself is the primary contribution: an on-premise system that makes any pathology AI model deployable, interpretable, and usable in clinical workflows.
 
 The platform addresses a gap in precision oncology: determining which patients will respond to specific chemotherapy regimens before treatment begins. Treatment response can currently only be assessed after multiple cycles of therapy, exposing non-responding patients to unnecessary toxicity and delays in receiving effective alternatives. Enso Atlas provides morphology-based predictions from standard H&E-stained tissue slides already collected during routine clinical care.
 
@@ -55,7 +55,7 @@ Enso Atlas is a modular platform, not a single-purpose tool. Every component can
 
 - **Foundation model metadata is config-defined.** This repo currently executes Path Foundation-specific embedding code paths. Swapping to a different backbone requires code integration plus config updates.
 - **Classification models are pluggable within implemented architectures.** Current implementation supports TransMIL and CLAM; additional MIL variants (for example ABMIL) require implementation before registration.
-- **Cancer types are project-defined.** Ovarian, lung, breast, prostate, colorectal, or any other cancer type can be added by creating a new project block in the configuration. Labels, thresholds, model assignments, class names, and dataset paths are all per-project.
+- **Cancer types are project-defined.** The ovarian and lung projects in this repo are demonstration project blocks; breast, prostate, colorectal, or any other cancer type can be added by creating a new project block in the configuration. Labels, thresholds, model assignments, class names, and dataset paths are all per-project.
 - **Feature toggles are per-project in config.** Report generation, semantic search, and similar case retrieval toggles are defined per project, but backend/frontend enforcement is partial and should be treated as in-progress.
 - **The UI is mostly project-aware.** Labels, categories, and model lists are primarily derived from project configuration, but some demo/test frontend files still contain hardcoded example model IDs.
 - **Report generators are swappable.** The structured report system works with MedGemma, but any LLM that accepts a prompt and returns JSON can be substituted. A template-based fallback provides reports even without a language model.
@@ -66,7 +66,7 @@ Enso Atlas is a modular platform, not a single-purpose tool. Every component can
 - **Pluggable Classification Heads:** Implemented MIL architectures (TransMIL, CLAM) can be registered by adding weights + config. Additional architectures (for example ABMIL) require implementation before use.
 - **Config-Driven Cancer Types:** Each cancer type is a project definition in YAML. Lung, breast, prostate, or any other cancer can be added by specifying dataset paths, labels, thresholds, and model assignments. The entire UI (labels, categories, model lists, workflows) reconfigures per project.
 - **Per-Project Feature Toggles:** Feature toggles are declared per project. Enforcement across backend/frontend panels is partial and should be validated per deployment.
-- **Evidence Generation:** Per-model attention heatmaps overlaid on WSIs with coverage-based alignment, top-K evidence patches with coordinates, and FAISS-based similar case retrieval
+- **Evidence Generation:** Per-model attention heatmaps overlaid on WSIs with coverage-based alignment (regenerated each analysis run with checkpoint-aware invalidation), top-K evidence patches with coordinates, and FAISS-based similar case retrieval
 - **Semantic Tissue Search:** Vision-language model text-to-patch search for queries like "tumor infiltrating lymphocytes" or "necrotic tissue" with on-the-fly embedding
 - **Outlier Tissue Detector:** Centroid distance analysis on foundation model embeddings identifies morphologically unusual patches, including rare tissue patterns, artifacts, or atypical regions for pathologist review
 - **Few-Shot Patch Classifier:** Pathologists define custom tissue classes by selecting example patches on the viewer; a LogisticRegression trained on the active foundation model's embeddings classifies all patches in the slide with per-class heatmap overlay
@@ -631,7 +631,7 @@ The platform supports any number of classification models per project. The curre
 | `survival_1y` | 1-Year Survival | Ovarian Cancer | 0.639 | 1,135 | 0.5 (default) |
 | `lung_stage` | Tumor Stage | Lung Cancer | 0.648 | 130 | 0.5 (default) |
 
-Multi-model inference runs only the models allowed for the request scope (`project_id`) and caches results to PostgreSQL's `analysis_results` table for instant retrieval on subsequent views (~0.8ms).
+Multi-model inference runs only the models allowed for the request scope (`project_id`) and caches results to PostgreSQL's `analysis_results` table for instant retrieval on subsequent views (~0.8ms). On cached reads, label/confidence are recomputed from the cached score and the current YAML threshold so threshold updates apply immediately without waiting for cache invalidation.
 
 ## 4.4 Inference Runtime Behavior
 
@@ -641,6 +641,7 @@ The inference runtime includes several safeguards and configuration-driven contr
 2. **Per-model threshold resolution:** Threshold precedence is `MULTIMODEL_THRESHOLD_<MODEL_ID>` env override -> model `decision_threshold`/`threshold` in YAML -> model default.
 3. **CUDA OOM fallback:** If a bag is too large for GPU memory, inference retries with uniform patch subsampling (`N -> N/2 -> ...`) down to `MULTIMODEL_MIN_PATCHES_FOR_ATTENTION`.
 4. **Threshold-relative confidence normalization:** Confidence is measured as distance from each model's own decision boundary (not from 0.5 midpoint).
+5. **Threshold-visible API output:** `POST /api/analyze-multi` includes `decision_threshold` per prediction so frontend/UI layers can display and debug model-specific thresholds.
 
 Confidence scaling:
 
@@ -734,7 +735,7 @@ The FastAPI application is created via `create_app()` in `src/enso_atlas/api/mai
 | `GET` | `/api/slides/{id}/dzi_files/{level}/{tile}` | DZI tile image |
 | `GET` | `/api/slides/{id}/thumbnail` | Slide thumbnail (disk-cached) |
 | `GET` | `/api/slides/{id}/info` | Detailed slide info (dimensions, levels) |
-| `GET` | `/api/slides/{id}/patches/{patch_id}` | Patch image (from WSI or placeholder) |
+| `GET` | `/api/slides/{id}/patches/{patch_id}` | Patch image (supports `project_id`, and explicit `x`,`y`,`patch_size` query for coordinate-accurate previews) |
 | `GET` | `/api/slides/{id}/qc` | Slide quality control metrics |
 | `GET` | `/api/slides/{id}/cached-results` | All cached analysis results per model |
 | `GET` | `/api/slides/{id}/embedding-status` | Embedding and analysis cache status |
@@ -745,7 +746,7 @@ The FastAPI application is created via `create_app()` in `src/enso_atlas/api/mai
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/analyze` | Single-slide prediction with evidence (`project_id` in request body scopes labels/dataset) |
-| `POST` | `/api/analyze-multi` | Multi-model ensemble (project-scoped model set, with caching) |
+| `POST` | `/api/analyze-multi` | Multi-model ensemble (project-scoped model set, with caching; response includes per-model `decision_threshold`) |
 | `POST` | `/api/analyze-uncertainty` | MC Dropout uncertainty quantification |
 | `POST` | `/api/analyze-batch` | Synchronous batch analysis (`project_id` body field scopes model execution) |
 | `POST` | `/api/analyze-batch/async` | Async batch with model selection and `project_id` scoping (stores project-resolved labels) |
@@ -773,7 +774,7 @@ The FastAPI application is created via `create_app()` in `src/enso_atlas/api/mai
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/similar` | Similar case search (slide-mean cosine FAISS, filtered by `project_id` slide set) |
-| `POST` | `/api/semantic-search` | MedSigLIP text-to-patch search (`project_id` scopes embedding lookup) |
+| `POST` | `/api/semantic-search` | MedSigLIP text-to-patch search (`project_id` scopes embedding lookup; returns level-0 normalized coords + `patch_size`) |
 | `POST` | `/api/search/visual` | Image-to-image FAISS search |
 | `POST` | `/api/classify-region` | Tissue type classification at coordinates |
 
@@ -782,7 +783,7 @@ The FastAPI application is created via `create_app()` in `src/enso_atlas/api/mai
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/heatmap/{slide_id}` | Default attention heatmap (`project_id` query scopes embedding source) |
-| `GET` | `/api/heatmap/{slide_id}/{model_id}` | Per-model heatmap (project-gated model access, disk-cached PNG) |
+| `GET` | `/api/heatmap/{slide_id}/{model_id}` | Per-model heatmap (`refresh=true` or `analysis_run_id` forces regeneration; checkpoint-aware cache key; `Cache-Control: no-store`) |
 
 ### Outlier Detection and Few-Shot Classification
 
@@ -1544,15 +1545,16 @@ Annotation create/delete operations are logged to the audit trail; update/list/s
 
 ## 12.1 Attention Heatmaps (OSD Layer)
 
-Attention heatmaps are generated from TransMIL attention weights and rendered as OpenSeadragon overlays:
+Attention heatmaps are generated from the active MIL model attention weights (TransMIL in the current deployment) and rendered as OpenSeadragon overlays:
 
 ### Per-Model Heatmaps
 
-Each project-scoped TransMIL model produces its own attention heatmap (6 models in the current deployment):
+Each project-scoped model produces its own attention heatmap (6 models in the current deployment):
 - Endpoint: `GET /api/heatmap/{slide_id}/{model_id}`
+- Force-regeneration controls: `refresh=true` or `analysis_run_id=<nonce>`
 - Format: PNG with RGBA (transparent background)
-- Resolution: 1 pixel per 224px patch (grid_w x grid_h)
-- Alignment: Coverage-based -- `ceil(slide_dim / 224) * 224` ensures the heatmap covers exactly the patch grid area
+- Resolution: 1 pixel per patch in the embedding grid (`grid_w x grid_h`; patch size inferred from coordinates)
+- Alignment: Coverage-based -- `ceil(slide_dim / patch_size) * patch_size` ensures the heatmap covers exactly the patch grid area
 
 ### Coverage-Based Alignment
 
@@ -1573,9 +1575,14 @@ X-Coverage-Height: 40096   # grid_h * 224
 
 The frontend uses coverage dimensions for positioning the heatmap overlay to ensure pixel-perfect alignment with patch boundaries.
 
-### Disk-Based Caching
+### Disk-Based Caching and Regeneration Policy
 
-Model heatmaps are cached under `<embedding_dir>/heatmap_cache/` with scoped/versioned keys (for example `{project_or_global}_{slide_id}_{model_id}_{truthful|smooth}_v3.png`). Cache reads are used only for default `alpha_power≈0.7`; non-default alpha requests are regenerated.
+Model heatmaps are cached under `<embedding_dir>/heatmap_cache/` with scoped/versioned keys that include a checkpoint signature (for example `{project_or_global}_{slide_id}_{model_id}_{truthful|smooth}_{ckpt_sig}_v4.png`). This prevents stale overlays from being reused after model checkpoint updates.
+
+Regeneration rules:
+- `refresh=true` or `analysis_run_id=<nonce>` bypasses disk-cache reads and recomputes the heatmap.
+- The frontend sends an analysis-run nonce on every Run Analysis so model heatmaps are regenerated even when embeddings are cached.
+- Heatmap responses are returned with `Cache-Control: no-store` to prevent browser/proxy stale reuse.
 
 ### Configurable Rendering
 

@@ -11,7 +11,7 @@
 # 3) Add a project under projects with dataset paths under data/projects/<project_id>/...
 #    and list the project's allowed classification_models.
 #
-# Keep path/layout conventions aligned with TECHNICAL_SPECIFICATION.md.
+# Keep path/layout conventions aligned with docs.md.
 #
 # Operational guardrails:
 # - Use project-scoped paths only: data/projects/<project_id>/{slides,embeddings,labels.*}

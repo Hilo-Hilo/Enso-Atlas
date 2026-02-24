@@ -41,7 +41,7 @@ export function Footer({ version = "0.1.0", buildDate }: FooterProps) {
         </div>
         <div className="h-4 w-px bg-gray-200 hidden sm:block" />
         <a
-          href="https://github.com/Hilo-Hilo/enso-atlas/blob/main/TECHNICAL_SPECIFICATION.md"
+          href="https://github.com/Hilo-Hilo/Enso-Atlas/blob/main/docs.md"
           target="_blank"
           rel="noopener noreferrer"
           className="hidden sm:flex items-center gap-1.5 hover:text-clinical-600 transition-colors duration-150 group"
