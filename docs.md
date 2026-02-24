@@ -378,156 +378,162 @@ The backend still enables CORS for direct API access in development and integrat
 
 # 3. Foundation Model Layer
 
-The foundation model layer is the bottom of the abstraction stack. It converts 224x224 pixel tissue patches into fixed-dimensional embedding vectors. The platform imposes a single contract on foundation models: **input a patch image, output a D-dimensional vector.** Everything above this layer (classification, retrieval, outlier detection, few-shot learning) operates on the embedding vectors and is agnostic to which model produced them.
+The foundation model layer maps image patches to fixed-length vectors. Downstream components (MIL classification, retrieval, outlier detection, and semantic tools) consume vectors and do not depend on model internals.
 
-Foundation models are registered in `config/projects.yaml` under `foundation_models`. To add a new foundation model, specify its name, embedding dimension, and description. Then re-embed slides with the new model and update project configurations to reference it. No backend code changes are required.
+The core interface is simple:
+
+- input: RGB patch
+- output: `D`-dimensional embedding
+
+At the configuration level, foundation models are defined in `config/projects.yaml` under `foundation_models`.
 
 ```yaml
 foundation_models:
   path_foundation:
     name: "Path Foundation"
     embedding_dim: 384
+  dinov2:
+    name: "DINOv2"
+    embedding_dim: 768
   uni:
     name: "UNI"
     embedding_dim: 1024
-  virchow:
-    name: "Virchow"
-    embedding_dim: 768
-  your_custom_model:
-    name: "Institutional Fine-Tuned ViT"
+  conch:
+    name: "CONCH"
     embedding_dim: 512
 ```
 
-The demo deployment uses three Google HAI-DEF models. The following subsections document their specifications as reference implementations.
+This registry is model-agnostic metadata. Current runtime behavior is narrower:
 
-## 3.1 Path Foundation (Google) -- Demo Foundation Model
+- production API embedding endpoints are wired to Path Foundation
+- MedSigLIP is used for optional text-to-patch semantic search
+- MedGemma is used for optional report generation
 
-### Overview
+Additional foundation backends require explicit runtime wiring (model loader + endpoint routing + re-embedding workflow), even if their metadata already exists in `projects.yaml`.
 
-Path Foundation is Google's histopathology foundation model, based on a DINOv2-style self-supervised learning architecture trained on millions of pathology images. It produces 384-dimensional feature vectors from 224x224 pixel tissue patches. In the demo configuration, these embeddings are the universal tissue representation for:
+## 3.1 Path Foundation (Google) -- Primary Embedding Backbone
 
-1. TransMIL slide-level classification (project-scoped model set)
-2. FAISS similar-case retrieval (slide-mean cosine similarity)
-3. Outlier tissue detection (centroid distance analysis)
-4. Few-shot patch classification (LogisticRegression on embeddings)
-5. Attention heatmap generation (per-model, coverage-aligned)
-6. Image-to-image visual search (patch-level L2 FAISS)
+### Integration Points in This Repo
 
-### Architecture Specifications
+- `config/projects.yaml`
+  - `foundation_models.path_foundation`
+  - each demo project sets `foundation_model: path_foundation`
+  - each demo project sets `models.embedder: path-foundation`
+- `src/enso_atlas/embedding/embedder.py`
+  - `PathFoundationEmbedder` for `/api/embed` (Transformers runtime)
+- `src/enso_atlas/api/main.py`
+  - `/api/embed`: patch batch embedding via `PathFoundationEmbedder`
+  - `/api/embed-slide`: dense level-0 slide re-embedding via TensorFlow SavedModel
+  - `/api/embed/status`: model/device status
 
-| Parameter | Value |
-|---|---|
-| Model ID | `google/path-foundation` |
-| Architecture | Vision Transformer (DINOv2-based) |
-| Input Size | 224 x 224 x 3 (RGB) |
-| Output Dimension | 384 |
-| Framework | Mixed runtime: Transformers AutoModel (for `/api/embed`) and TensorFlow SavedModel (for `/api/embed-slide` re-embedding) |
-| Inference Function | `model.signatures["serving_default"]` |
-| Preprocessing | Float32, normalize to [0, 1] |
+### Runtime Modes
 
-### Patching Strategy
+| Endpoint | Runtime | Model Source | Notes |
+|---|---|---|---|
+| `/api/embed` | PyTorch + Transformers (`AutoModel`, `AutoImageProcessor`) | `google/path-foundation` | Device auto-selects CUDA/MPS/CPU |
+| `/api/embed-slide` | TensorFlow SavedModel (`tf.saved_model.load`, `serving_default`) | Local Hugging Face cache snapshot for `google/path-foundation` | CPU-forced (`CUDA_VISIBLE_DEVICES=""`) |
 
-Whole-slide images are divided into non-overlapping 224x224 pixel patches at level 0 (full resolution, typically 40x) using a dense grid policy. The patching process includes tissue masking for offline pipelines:
-
-1. **Grid Generation:** Regular grid with step size 224 pixels
-2. **Patch Selection:** `/api/embed-slide` uses a dense level-0 grid with no tissue filtering (all 224x224 tiles kept). Optional offline scripts use stricter patch-level filters (mean intensity 30-230, std >= 15, non-white ratio threshold).
-3. **Batch Embedding:** Tissue patches batched (64 patches per batch) through Path Foundation on CPU
-4. **Storage:** Embeddings saved as `{slide_id}.npy` (N x 384) with coordinates saved as `{slide_id}_coords.npy` (N x 2)
-
-For a typical ovarian cancer slide (~80,000 x 40,000 pixels at level 0), this produces between 3,000 and 8,000 tissue patches.
-
-### Performance Benchmarks
-
-| Metric | Value |
-|---|---|
-| Model Loading Time | ~15 seconds |
-| Batch Inference (64 patches, CPU) | ~2.5 seconds |
-| Per-Patch Latency (amortized) | ~39 ms |
-| Memory Usage (CPU) | ~2 GB |
-| Full Slide Embedding (6,000 patches, level 0) | ~4 minutes |
-| Embedding Dimension | 384 floats = 1.5 KB per patch |
-
-### TensorFlow on CPU
-
-Path Foundation uses TensorFlow, which does not support NVIDIA Blackwell GPUs (compute capability sm_121). The system runs Path Foundation on CPU. This is acceptable because embeddings are pre-computed offline. On-demand embedding is supported for new slides via background tasks with progress tracking.
-
-## 3.2 MedGemma 4B -- Demo Report Generator
-
-### Overview
-
-The reporting layer accepts any LLM that can produce structured JSON from a clinical prompt. The demo uses MedGemma, Google's medical language model: a 4-billion parameter instruction-tuned variant of Gemma optimized for medical text generation. Alternative LLMs (Llama 3 Med, BioMistral, or proprietary clinical LLMs) can be substituted by implementing the same prompt/response contract. A template-based fallback provides reports even without any LLM.
-
-### Architecture Specifications
+### Model and I/O Contract
 
 | Parameter | Value |
 |---|---|
-| Model ID | `/app/models/medgemma-4b-it` (default local path); `google/medgemma-4b-it` when configured |
-| Architecture | Gemma-2 Causal LM |
-| Parameters | 4 billion |
-| Precision | bfloat16 (GPU) |
-| VRAM Usage | ~8 GB |
-| Max Input Tokens | 512 |
-| Max Output Tokens | 384 |
-| Temperature | 0.1 |
+| Model | `google/path-foundation` |
+| Input patch size | 224 x 224 RGB |
+| Output dimension | 384 |
+| Batch size for slide embedding | 64 |
+| On-disk output | `{slide_id}.npy` and `{slide_id}_coords.npy` |
+
+### Patching Policy in `/api/embed-slide`
+
+The API enforces a dense level-0 grid:
+
+1. `level` must be `0`
+2. stride is fixed at `224` (non-overlapping patches)
+3. all grid patches are kept (no tissue filtering)
+4. coordinates are saved in level-0 space
+
+This is intentionally different from some offline scripts in `scripts/`, where optional tissue filters may be applied.
+
+Because level-0 uses full resolution and no filtering, patch count scales directly with slide area and can be large on whole-slide scans.
+
+### Current Boundary
+
+`foundation_models` can list many model families, but the API embedding path currently assumes Path Foundation outputs (`D=384`) for the main MIL pipeline. There is a `DINOv2Embedder` scaffold in `src/enso_atlas/embedding/embedder_dinov2.py`, but it is not the active API backend.
+
+## 3.2 MedGemma 4B -- Optional Structured Report Generation
+
+### Integration Points in This Repo
+
+- `config/projects.yaml`
+  - `models.report_generator: medgemma-4b`
+  - feature flag: `features.medgemma_reports`
+- `src/enso_atlas/reporting/medgemma.py`
+  - `MedGemmaReporter` and `ReportingConfig`
+  - local-first model resolution (`MEDGEMMA_MODEL_PATH`, `/app/models/medgemma-4b-it`, repo `models/medgemma-4b-it`, then HF id)
+- `src/enso_atlas/api/main.py`
+  - reporter initialization at startup
+  - warmup inference on startup
+  - background report generation with timeout handling
+
+### Runtime Defaults (current implementation)
+
+| Parameter | Value |
+|---|---|
+| Default model target | `/app/models/medgemma-4b-it` (fallback to `google/medgemma-4b-it`) |
+| Precision | bfloat16 on CUDA when available (fallback to CPU path as needed) |
+| `max_input_tokens` | 1024 |
+| `max_output_tokens` | 1024 |
+| `max_generation_time_s` | 300 |
+| Temperature | 0.0 |
 | Top-p | 0.9 |
 
-### Inference Pipeline
+### Execution Path
 
-1. **Model Loading:** Lazy-loaded with thread-safe locking in bfloat16 on GPU
-2. **Warmup:** Test inference at startup pre-compiles CUDA kernels (60-120s)
-3. **Prompt Engineering:** JSON-first prompt with explicit section-level requirements (overview, key findings, patch significance, next steps, optional decision-support block)
-4. **Generation:** `torch.inference_mode()` with configurable max tokens and time limits via `max_time` or custom `StoppingCriteria`
-5. **Non-Blocking:** Inference runs in worker threads: `asyncio.to_thread()` in async paths and dedicated `threading.Thread` + timeout in report-task execution
-6. **Structured Parsing:** Multi-stage parser handles code-fenced JSON, truncated JSON repair, field alias normalization, list coercion, and regex extraction fallback when parsing fails
-7. **Safety Constraints:** Validation enforces required fields and rejects prohibited treatment-directive phrases (e.g., "start treatment", "prescribe")
-8. **Fallback Handling:** If generation/validation still fails after retries, the system emits a deterministic fallback report with safety language and manual-review guidance
+1. Reporter is initialized and warmed at API startup to reduce first-request latency.
+2. Report generation runs off the main async loop (threaded execution with timeout control).
+3. The response parser attempts structured JSON recovery and normalizes fields.
+4. Validation rejects missing required fields and prohibited treatment-directive phrases.
+5. If generation fails or times out, the API returns a deterministic template fallback report.
 
-### Report Schema
+### Current Boundary
 
-```json
-{
-  "case_id": "TCGA-04-1331-01A-01-BS1",
-  "task": "Platinum treatment response prediction",
-  "model_output": {
-    "label": "responder",
-    "probability": 0.94,
-    "calibration_note": "Uncalibrated research model"
-  },
-  "evidence": [...],
-  "limitations": [...],
-  "suggested_next_steps": [...],
-  "safety_statement": "Research tool only...",
-  "decision_support": {...}
-}
-```
+The reporting layer is pluggable at the contract level (structured JSON in, structured JSON out), but this repo currently ships with MedGemma-specific implementation and safety/validation logic.
 
-## 3.3 MedSigLIP -- Demo Vision-Language Model
+## 3.3 MedSigLIP -- Optional Semantic Search Encoder
 
-### Overview
+### Integration Points in This Repo
 
-The semantic search layer accepts any vision-language model that can encode both text and images into a shared embedding space. The demo uses MedSigLIP, Google's medical vision-language model based on the SigLIP architecture. Alternative models (BiomedCLIP, PLIP, OpenCLIP fine-tuned on pathology data) can be substituted. Semantic search is an optional feature toggle. Projects can disable it entirely if no vision-language model is available.
+- `config/projects.yaml`
+  - `models.semantic_search: medsiglip`
+  - feature flags: `features.medsiglip_search`, `features.semantic_search`
+- `src/enso_atlas/embedding/medsiglip.py`
+  - `MedSigLIPEmbedder`, `MedSigLIPConfig`
+  - model resolution from `MEDSIGLIP_MODEL_PATH` or local model directories, fallback to `google/siglip-so400m-patch14-384`
+- `src/enso_atlas/api/main.py`
+  - startup preload for semantic search model
+  - `/api/semantic-search`
+  - `/api/semantic-search/status`
 
-### Architecture Specifications
+### Model Characteristics
 
 | Parameter | Value |
 |---|---|
-| Model ID | Auto-resolved local path (`MEDSIGLIP_MODEL_PATH`, `/app/models/medsiglip`, etc.); fallback `google/siglip-so400m-patch14-384` |
-| Architecture | SigLIP (dual encoder: vision + text) |
-| Vision Input | 448 x 448 (MedSigLIP) or 384 x 384 (SigLIP) |
-| Embedding Dimension | 1152 |
-| Precision | fp16 (GPU) |
-| VRAM Usage | ~800 MB |
+| Architecture | SigLIP dual encoder (text + image) |
+| Embedding dimension | 1152 |
+| Input size | model-dependent (commonly 384 or 448) |
+| Precision | fp16 on CUDA when enabled |
+| Cache location | `<embeddings_dir>/medsiglip_cache` |
 
-### Capabilities
+### Search Behavior in `/api/semantic-search`
 
-- **Text-to-Patch Search:** Natural language queries matched against patch embeddings via cosine similarity
-- **On-the-Fly Embedding + Fallback:** If cached embeddings are missing, the service attempts real-time MedSigLIP embedding from WSI patches; if unavailable or failed, it falls back to query-aware tissue-type ranking (`model_used: tissue-type-fallback`)
-- **Image-to-Image Search:** Visual similarity search via FAISS using Path Foundation embeddings across the entire database
-- **Predefined Query Sets:** Curated queries for tumor, inflammation, necrosis, stroma, mitosis, and vessels
+1. Load cached MedSigLIP patch embeddings if available (`{slide_id}_siglip.npy`).
+2. If missing, attempt on-the-fly patch extraction from WSI and embed at request time.
+3. If MedSigLIP embeddings still cannot be produced, fall back to query-aware tissue-type ranking (`model_used: tissue-type-fallback`).
+4. When available, MIL attention weights are added as metadata but are not required for endpoint success.
 
-### VRAM Sharing
+### Scope Boundary
 
-MedSigLIP shares GPU with MedGemma. At fp16, SigLIP requires ~800 MB alongside MedGemma's ~8 GB, fitting within typical GPU memory.
+MedSigLIP supports text-to-patch semantic retrieval. It does not replace the main Path Foundation embeddings used by MIL prediction and standard patch-level visual search.
 
 ---
 
