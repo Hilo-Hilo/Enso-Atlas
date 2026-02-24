@@ -2,7 +2,7 @@
 """
 Comprehensive API Test Suite for Enso Atlas
 
-Tests all endpoints and functionality against the spec in technical_specification.md.
+Tests all endpoints and functionality against the spec in docs.md.
 Run against DGX Spark backend at http://100.111.126.23:8003
 
 Usage:
