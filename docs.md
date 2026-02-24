@@ -718,225 +718,241 @@ A CLAM in-repo training path (`CLAMClassifier.fit`) is still present, but the sh
 
 ## 5.1 Startup and Initialization
 
-The FastAPI application is created via `create_app()` in `src/enso_atlas/api/main.py` (7,072 lines as of this revision). Startup orchestrates model loading:
+The FastAPI app is built in `create_app()` in `src/enso_atlas/api/main.py` (**7,401 lines** at this audit). The startup work is centralized in `@app.on_event("startup")` and executes in a fixed, dependency-aware order.
 
-```
-1.  MIL classifier load (~2s): architecture from `MIL_ARCHITECTURE` (default `clam`); TransMIL checkpoint when `MIL_ARCHITECTURE=transmil`
-2.  Multi-Model Inference (project-scoped models)     ~5s
-3.  Evidence Generator (FAISS index)                 ~3s
-4.  Path Foundation Embedder Init (lazy, CPU)        ~0s
-5.  MedGemma Reporter (GPU, bfloat16)               ~30s
-6.  MedGemma Warmup (CUDA kernel compilation)        ~60-120s
-7.  MedSigLIP Embedder (GPU, fp16)                   ~10s
-8.  Clinical Decision Support Engine                  ~0.1s
-9.  FAISS Patch Index Build                          ~3s
-10. Slide-Mean FAISS Index (cosine similarity)        ~1s
-11. Label Loading (CSV parsing)                       ~0.5s
-12. PostgreSQL Schema Init + Population               ~5-60s (first run)
-13. Project Registry (YAML loading)                   ~0.1s
-14. Agent Workflow Initialization                     ~0.1s
-15. (Route wiring) ChatManager initialization occurs during app construction, outside `@app.on_event("startup")`
-```
+### Startup sequence (code-audited)
 
-### Timing Benchmarks (DGX Spark, Blackwell GPU)
+| Order | Component | What happens |
+|---|---|---|
+| 1 | Embedding/slide directory resolution | Validates configured directories; falls back to `data/demo/...` if primary embeddings are empty. |
+| 2 | MIL classifier | Loads CLAM/TransMIL base classifier from env-driven config (`MIL_ARCHITECTURE`, optional threshold config). |
+| 3 | Multi-model inference | Initializes project model inference service from `outputs/*` checkpoints (when dependencies exist). |
+| 4 | Evidence generator | Initializes FAISS-backed evidence engine. |
+| 5 | Path Foundation embedder | Instantiates embedder object (model is lazy-loaded on first embedding call). |
+| 6 | MedGemma reporter | Instantiates reporter, then performs warmup inference to compile CUDA kernels. |
+| 7 | Clinical decision support | Initializes decision support helper service. |
+| 8 | MedSigLIP embedder | Initializes and eagerly loads MedSigLIP for semantic search. |
+| 9 | In-memory slide inventory + FAISS indices | Loads available slide embeddings and builds patch-level and slide-mean FAISS indices. |
+| 10 | Label loading | Loads labels from CSV candidates and maps short/full slide IDs. |
+| 11 | PostgreSQL initialization | Creates schema; populates from flat files on first run. |
+| 12 | Project registry | Loads `config/projects.yaml`, injects registry, and syncs project metadata to DB if available. |
+| 13 | Agent workflow | Initializes workflow after models/indices are ready. |
 
-| Step | Duration |
-|---|---|
-| TransMIL Loading (5 checkpoints) | 2.1s |
-| MedGemma Loading (4B params, bfloat16) | 28.4s |
-| MedGemma Warmup (CUDA kernels) | 62.3s |
-| MedSigLIP Loading (SigLIP-so400m, fp16) | 9.7s |
-| FAISS Index Build (208 slides, ~1M patches) | 3.2s |
-| PostgreSQL Init (schema + population) | 4.8s |
-| **Total Startup** | **~120s** |
+**Outside startup hook:** route wiring occurs in app construction; `ChatManager` initialization happens after router registration logic (still during app creation, not inside the startup event body).
 
-## 5.2 Complete API Endpoint Reference
+## 5.2 Complete API Endpoint Reference (Audited)
 
-### Health and Status
+This section is audited against:
+- `src/enso_atlas/api/main.py`
+- `src/enso_atlas/api/project_routes.py`
+- `src/enso_atlas/api/slide_metadata.py`
+- `src/enso_atlas/agent/routes.py`
+
+### Core service and compatibility routes
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/health` | Health check (model status, CUDA, slide count, DB, uptime) |
-| `GET` | `/api/db/status` | Database connection and population status |
-| `POST` | `/api/db/repopulate` | Force re-population from flat files |
-| `GET` | `/api/embed/status` | Path Foundation embedder status |
-| `GET` | `/api/semantic-search/status` | MedSigLIP model status |
-| `GET` | `/api/search/visual/status` | Visual search FAISS index status |
+| `GET` | `/health` | Canonical health probe (status, CUDA, slide counts, DB, uptime). |
+| `GET` | `/api/health` | Health alias used by frontend compatibility code. |
+| `GET` | `/` | API root metadata (`name`, `version`, docs path). |
+| `GET` | `/docs` | Redirects to `/api/docs`. |
+| `GET` | `/redoc` | Redirects to `/api/redoc`. |
+| `GET` | `/api/tags` | Legacy stub endpoint (returns empty tag list). |
+| `POST` | `/api/tags` | Legacy stub tag-create endpoint. |
+| `GET` | `/api/groups` | Legacy stub endpoint (returns empty groups list). |
+| `POST` | `/api/groups` | Legacy stub group-create endpoint. |
 
-### Slide Management
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/slides` | List slides (`?project_id=` filters to project-assigned slides) |
-| `GET` | `/api/slides/search` | Search slides with filtering and pagination |
-| `GET` | `/api/slides/{id}/dzi` | DZI XML for OpenSeadragon |
-| `GET` | `/api/slides/{id}/dzi_files/{level}/{tile}` | DZI tile image |
-| `GET` | `/api/slides/{id}/thumbnail` | Slide thumbnail (disk-cached) |
-| `GET` | `/api/slides/{id}/info` | Detailed slide info (dimensions, levels) |
-| `GET` | `/api/slides/{id}/patches/{patch_id}` | Patch image (supports `project_id`, and explicit `x`,`y`,`patch_size` query for coordinate-accurate previews) |
-| `GET` | `/api/slides/{id}/qc` | Slide quality control metrics |
-| `GET` | `/api/slides/{id}/cached-results` | All cached analysis results per model |
-| `GET` | `/api/slides/{id}/embedding-status` | Embedding and analysis cache status |
-| `PATCH` | `/api/slides/{id}` | Rename slide (update display_name) |
-
-### Analysis
+### Database and model status
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/analyze` | Single-slide prediction with evidence (`project_id` in request body scopes labels/dataset) |
-| `POST` | `/api/analyze-multi` | Multi-model ensemble (project-scoped model set, with caching; response includes per-model `decision_threshold`) |
-| `POST` | `/api/analyze-uncertainty` | MC Dropout uncertainty quantification |
-| `POST` | `/api/analyze-batch` | Synchronous batch analysis (`project_id` body field scopes model execution) |
-| `POST` | `/api/analyze-batch/async` | Async batch with model selection and `project_id` scoping (stores project-resolved labels) |
-| `GET` | `/api/analyze-batch/status/{task_id}` | Batch progress |
-| `POST` | `/api/analyze-batch/cancel/{task_id}` | Cancel running batch task |
-| `GET` | `/api/analyze-batch/tasks` | List all batch tasks |
+| `GET` | `/api/db/status` | Database availability and population state. |
+| `POST` | `/api/db/repopulate` | Force DB repopulation from flat files. |
+| `GET` | `/api/embed/status` | Path Foundation embedder runtime status. |
+| `GET` | `/api/semantic-search/status` | MedSigLIP semantic-search status. |
+| `GET` | `/api/search/visual/status` | Visual search FAISS index status. |
 
-**Endpoint note:** The canonical multi-model endpoint is `POST /api/analyze-multi` (not `/api/analyze/multi-model`).
-
-### Embedding
+### Slide management and imagery
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/embed` | Embed base64-encoded patches |
-| `POST` | `/api/embed-slide` | On-demand slide embedding (level 0 dense-only policy) |
-| `GET` | `/api/embed-slide/status/{task_id}` | Embedding task progress |
-| `GET` | `/api/embed-slide/tasks` | List embedding tasks |
-| `POST` | `/api/embed-slides/batch` | Batch re-embedding (all or selected slides) |
-| `GET` | `/api/embed-slides/batch/status/{id}` | Batch embed progress |
-| `POST` | `/api/embed-slides/batch/cancel/{id}` | Cancel batch embed |
-| `GET` | `/api/embed-slides/batch/active` | Currently active batch embed |
+| `GET` | `/api/slides` | List slides (`project_id` optionally scopes to project assignments). |
+| `GET` | `/api/slides/search` | Search/filter/paginate slides. |
+| `GET/HEAD` | `/api/slides/{slide_id}/dzi` | Deep Zoom descriptor for OpenSeadragon. |
+| `GET` | `/api/slides/{slide_id}/dzi_files/{level}/{tile_spec}` | Deep Zoom tile image. |
+| `GET` | `/api/slides/{slide_id}/thumbnail` | Slide thumbnail (disk-cached). |
+| `GET` | `/api/slides/{slide_id}/info` | Detailed slide/WSI metadata. |
+| `GET` | `/api/slides/{slide_id}/patches/{patch_id}` | Patch preview; supports `project_id` and explicit `x`,`y`,`patch_size` for coordinate-accurate extraction. |
+| `GET` | `/api/slides/{slide_id}/qc` | Slide QC metrics. |
+| `GET` | `/api/slides/{slide_id}/embedding-status` | Embedding status and related task state. |
+| `GET` | `/api/slides/{slide_id}/cached-results` | Cached analysis results for a slide. |
+| `PATCH` | `/api/slides/{slide_id}` | Rename slide (`display_name`). |
 
-### Search and Retrieval
+### Analysis and batch inference
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/similar` | Similar case search (slide-mean cosine FAISS, filtered by `project_id` slide set) |
-| `POST` | `/api/semantic-search` | MedSigLIP text-to-patch search (`project_id` scopes embedding lookup; returns level-0 normalized coords + `patch_size`) |
-| `POST` | `/api/search/visual` | Image-to-image FAISS search |
-| `POST` | `/api/classify-region` | Tissue type classification at coordinates |
+| `POST` | `/api/analyze` | Single-slide prediction + evidence retrieval. |
+| `POST` | `/api/analyze-multi` | Multi-model inference with project-aware model authorization and per-model `decision_threshold` in response. |
+| `POST` | `/api/analyze-uncertainty` | MC Dropout uncertainty analysis. |
+| `POST` | `/api/analyze-batch` | Synchronous multi-slide analysis. |
+| `POST` | `/api/analyze-batch/async` | Async batch analysis with task tracking. |
+| `GET` | `/api/analyze-batch/status/{task_id}` | Batch task progress/details. |
+| `POST` | `/api/analyze-batch/cancel/{task_id}` | Cancel running batch task. |
+| `GET` | `/api/analyze-batch/tasks` | List batch tasks. |
 
 ### Heatmaps
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/heatmap/{slide_id}` | Default attention heatmap (`project_id` query scopes embedding source) |
-| `GET` | `/api/heatmap/{slide_id}/{model_id}` | Per-model heatmap (`refresh=true` or `analysis_run_id` forces regeneration; checkpoint-aware cache key; `Cache-Control: no-store`) |
+| `GET` | `/api/heatmap/{slide_id}` | Default MIL attention heatmap. Requires level-0 embeddings + coords for truthful localization. |
+| `GET` | `/api/heatmap/{slide_id}/{model_id}` | Model-specific attention heatmap; supports cache bypass via `refresh=true` or `analysis_run_id`, checkpoint-aware cache invalidation, and response `Cache-Control: no-store`. |
 
-### Outlier Detection and Few-Shot Classification
+### Embedding and embedding tasks
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/slides/{id}/outlier-detection` | Detect outlier patches (centroid distance) |
-| `POST` | `/api/slides/{id}/patch-classify` | Few-shot classification (LogisticRegression) |
-| `GET` | `/api/slides/{id}/patch-coords` | Patch coordinates for spatial selection |
+| `POST` | `/api/embed` | Embed base64 patch images. |
+| `POST` | `/api/embed-slide` | On-demand slide embedding (level fixed to 0 in current policy). |
+| `GET` | `/api/embed-slide/status/{task_id}` | Per-slide embedding task status. |
+| `GET` | `/api/embed-slide/tasks` | List embedding tasks. |
+| `POST` | `/api/embed-slides/batch` | Start batch embedding job. |
+| `GET` | `/api/embed-slides/batch/status/{batch_task_id}` | Batch embedding progress/details. |
+| `POST` | `/api/embed-slides/batch/cancel/{batch_task_id}` | Cancel batch embedding job. |
+| `GET` | `/api/embed-slides/batch/active` | Active batch embedding job (if any). |
+
+### Search and retrieval
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/similar` | Slide-mean FAISS similar-case search (`project_id` filters candidate cohort). |
+| `POST` | `/api/semantic-search` | Text-to-patch semantic search (MedSigLIP or tissue-type fallback). Returns patch-level coordinates/size metadata for viewer alignment. |
+| `POST` | `/api/search/visual` | Image-to-image patch similarity search via FAISS. |
+| `POST` | `/api/classify-region` | Tissue-type classification for given coordinates. |
+
+### Outlier detection and few-shot patch classification
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/slides/{slide_id}/outlier-detection` | Distance-based outlier patch detection. |
+| `POST` | `/api/slides/{slide_id}/patch-classify` | Few-shot patch classification (logistic regression on embeddings). |
+| `GET` | `/api/slides/{slide_id}/patch-coords` | Patch coordinate retrieval for spatial workflows. |
 
 ### Annotations
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/slides/{id}/annotations` | List all annotations for a slide |
-| `POST` | `/api/slides/{id}/annotations` | Create annotation |
-| `PUT` | `/api/slides/{id}/annotations/{ann_id}` | Update annotation |
-| `DELETE` | `/api/slides/{id}/annotations/{ann_id}` | Delete annotation |
-| `GET` | `/api/slides/{id}/annotations/summary` | Annotation summary by label |
+| `GET` | `/api/slides/{slide_id}/annotations` | List annotations for a slide. |
+| `POST` | `/api/slides/{slide_id}/annotations` | Create annotation. |
+| `PUT` | `/api/slides/{slide_id}/annotations/{annotation_id}` | Update annotation. |
+| `DELETE` | `/api/slides/{slide_id}/annotations/{annotation_id}` | Delete annotation. |
+| `GET` | `/api/slides/{slide_id}/annotations/summary` | Annotation summary by label/type. |
 
-### Reports and Export
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/report` | Generate MedGemma report (sync) |
-| `POST` | `/api/report/async` | Async report generation |
-| `GET` | `/api/report/status/{task_id}` | Report generation status |
-| `GET` | `/api/report/tasks` | List report tasks |
-| `POST` | `/api/report/pdf` | Generate PDF from report JSON (fpdf2) |
-| `POST` | `/api/export/pdf` | Full PDF export with heatmap (reportlab) |
-
-### Projects
+### Reports and export
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/projects` | List all projects |
-| `POST` | `/api/projects` | Create project |
-| `GET` | `/api/projects/{id}` | Get project details |
-| `PUT` | `/api/projects/{id}` | Update project |
-| `DELETE` | `/api/projects/{id}` | Delete project |
-| `GET` | `/api/projects/{id}/slides` | List project slides |
-| `POST` | `/api/projects/{id}/slides` | Assign slides (body: {"slide_ids": ["..."]}) |
-| `DELETE` | `/api/projects/{id}/slides` | Unassign slides (body: {"slide_ids": ["..."]}) |
-| `GET` | `/api/projects/{id}/models` | List project models |
-| `GET` | `/api/projects/{id}/available-models` | List project-compatible model metadata (ModelPicker source-of-truth) |
-| `POST` | `/api/projects/{id}/models` | Assign models (body: {"model_ids": ["..."]}) |
-| `DELETE` | `/api/projects/{id}/models` | Unassign models (body: {"model_ids": ["..."]}) |
-| `POST` | `/api/projects/{id}/upload` | Upload slide file |
-| `GET` | `/api/projects/{id}/status` | Project readiness status |
-| `GET` | `/api/models` | List available models (with ?project_id= filtering) |
+| `POST` | `/api/report` | Synchronous MedGemma report generation. |
+| `POST` | `/api/report/async` | Async report generation task. |
+| `GET` | `/api/report/status/{task_id}` | Report task status. |
+| `GET` | `/api/report/tasks` | List report tasks. |
+| `POST` | `/api/report/pdf` | Render PDF from report JSON (`fpdf2`). |
+| `POST` | `/api/export/pdf` | Full export PDF with optional heatmap/evidence (`reportlab`). |
 
-### Agent Workflow
+### Projects and model scoping
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/agent/analyze` | Start 7-step agent analysis (SSE) |
-| `POST` | `/api/agent/followup` | Follow-up questions (SSE) |
-| `GET` | `/api/agent/session/{id}` | Get session details |
-| `GET` | `/api/agent/sessions` | List active sessions |
-| `DELETE` | `/api/agent/session/{id}` | Delete session |
+| `GET` | `/api/projects` | List projects. |
+| `POST` | `/api/projects` | Create project. |
+| `GET` | `/api/projects/{project_id}` | Get project details. |
+| `PUT` | `/api/projects/{project_id}` | Update project config. |
+| `DELETE` | `/api/projects/{project_id}` | Delete project config (data retention policy depends on backend config). |
+| `GET` | `/api/projects/{project_id}/slides` | List slides assigned to project. |
+| `POST` | `/api/projects/{project_id}/slides` | Assign slides to project. |
+| `DELETE` | `/api/projects/{project_id}/slides` | Unassign slides from project. |
+| `GET` | `/api/projects/{project_id}/models` | List project model assignments. |
+| `POST` | `/api/projects/{project_id}/models` | Assign models to project. |
+| `DELETE` | `/api/projects/{project_id}/models` | Unassign models from project. |
+| `GET` | `/api/projects/{project_id}/available-models` | List models compatible with this project configuration. |
+| `POST` | `/api/projects/{project_id}/upload` | Upload slide into project-scoped dataset path. |
+| `GET` | `/api/projects/{project_id}/status` | Project readiness/status summary. |
+| `GET` | `/api/models` | List available models (optionally scoped by `project_id`). |
 
-### Chat
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/chat` | RAG-based conversational AI (SSE) |
-| `GET` | `/api/chat/session/{id}` | Get chat session history |
-
-### History and Audit
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/history` | Analysis history with filtering |
-| `GET` | `/api/slides/{id}/history` | Per-slide history |
-| `GET` | `/api/audit-log` | Compliance audit trail |
-
-### Metadata, Tags, and Groups
+### Agent workflow and chat
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/metadata/tags` | List all tags with usage counts |
-| `GET` | `/api/metadata/groups` | List all groups |
-| `POST` | `/api/metadata/groups` | Create a group |
-| `GET` | `/api/metadata/groups/{group_id}` | Get group details |
-| `PATCH` | `/api/metadata/groups/{group_id}` | Update group metadata |
-| `DELETE` | `/api/metadata/groups/{group_id}` | Delete group |
-| `POST` | `/api/metadata/groups/{group_id}/slides` | Add slides to group |
-| `DELETE` | `/api/metadata/groups/{group_id}/slides` | Remove slides from group |
-| `GET` | `/api/metadata/slides/{slide_id}` | Get slide metadata |
-| `POST` | `/api/metadata/slides/{slide_id}/tags` | Add tags to a slide |
-| `DELETE` | `/api/metadata/slides/{slide_id}/tags` | Remove tags from a slide |
-| `PATCH` | `/api/metadata/slides/{slide_id}` | Update slide metadata |
-| `POST` | `/api/metadata/slides/{slide_id}/star` | Toggle slide star status |
-| `GET` | `/api/metadata/search` | Search slides by metadata |
-| `POST` | `/api/metadata/bulk/metadata` | Bulk metadata update |
+| `POST` | `/api/agent/analyze` | Start streaming agent workflow analysis (SSE). |
+| `POST` | `/api/agent/followup` | Follow-up question in existing workflow session (SSE). |
+| `GET` | `/api/agent/session/{session_id}` | Retrieve one agent session. |
+| `GET` | `/api/agent/sessions` | List active agent sessions. |
+| `DELETE` | `/api/agent/session/{session_id}` | Delete agent session. |
+| `POST` | `/api/chat` | Streaming RAG chat endpoint (SSE). |
+| `GET` | `/api/chat/session/{session_id}` | Retrieve chat session history/context. |
 
-## 5.3 Project Scope Resolution and Isolation Guarantees
+### History, audit, and slide metadata
 
-Multi-project safety is enforced as a first-class backend contract. The API never assumes global model or dataset visibility when a `project_id` is present.
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/history` | Analysis history with filters. |
+| `GET` | `/api/slides/{slide_id}/history` | Slide-scoped history view. |
+| `GET` | `/api/audit-log` | Audit/event log feed. |
+| `GET` | `/api/metadata/tags` | List metadata tags with usage counts. |
+| `GET` | `/api/metadata/groups` | List metadata groups. |
+| `POST` | `/api/metadata/groups` | Create metadata group. |
+| `GET` | `/api/metadata/groups/{group_id}` | Get metadata group details. |
+| `PATCH` | `/api/metadata/groups/{group_id}` | Update metadata group. |
+| `DELETE` | `/api/metadata/groups/{group_id}` | Delete metadata group. |
+| `POST` | `/api/metadata/groups/{group_id}/slides` | Add slides to metadata group. |
+| `DELETE` | `/api/metadata/groups/{group_id}/slides` | Remove slides from metadata group. |
+| `GET` | `/api/metadata/slides/{slide_id}` | Get metadata for one slide. |
+| `POST` | `/api/metadata/slides/{slide_id}/tags` | Add tags to a slide. |
+| `DELETE` | `/api/metadata/slides/{slide_id}/tags` | Remove tags from a slide. |
+| `POST` | `/api/metadata/slides/{slide_id}/star` | Toggle starred state for a slide. |
+| `PATCH` | `/api/metadata/slides/{slide_id}` | Update notes/custom metadata for a slide. |
+| `GET` | `/api/metadata/search` | Search slides by metadata predicates. |
+| `POST` | `/api/metadata/bulk/metadata` | Fetch metadata for multiple slides in one request. |
 
-### Scope resolution pipeline
+## 5.3 Scope and Behavioral Contracts
 
-1. **Model scope resolution** uses `_resolve_project_model_ids()` to centralize project model visibility rules.
-2. **Embedding path resolution** uses `_resolve_embedding_path()` to enforce level-0 dense-only routing and deterministic search order.
-3. **Model authorization** is enforced in `model_scope.py` through `require_model_allowed_for_scope()`, returning explicit 403/404 responses for cross-project access attempts.
-4. **Batch analysis scoping** in `batch_tasks.py` stores project-resolved label pairs passed by the API (`positive_label` / `negative_label`).
-5. **Report generation scoping** in `report_tasks.py` carries `project_id` through async task payloads so report content remains project-aware.
-6. **Similar-case retrieval** (`GET /api/similar`) filters candidates to the requesting project's slide set before returning matches.
+### Project scope resolution and isolation
 
-### Frontend isolation behavior
+When `project_id` is present, backend behavior is intentionally scoped instead of global:
 
-- `ModelPicker` prunes stale model IDs after project switches to prevent cross-project residue in selections.
-- `projectAvailableModelsScopeId` in `frontend/src/app/page.tsx` guards model caches against leakage between projects.
-- Panels render project-aware copy (`prediction_target`, class labels, and display strings) from project config rather than hardcoded ovarian defaults.
+1. **Model visibility** is resolved via `_resolve_project_model_ids()` and enforced through `resolve_project_model_scope()` + `require_model_allowed_for_scope()`.
+2. **Embedding lookup** is routed through `_resolve_project_embeddings_dir()` and `_resolve_embedding_path()` so analysis/search reads project-scoped arrays.
+3. **Similar-case retrieval** (`/api/similar`) filters candidate slides to the project assignment set.
+4. **Batch/report jobs** carry project context so async execution preserves project-specific labels and display semantics.
 
-These checks provide defense in depth across config, API, task queues, and UI state.
+### `POST /api/analyze-multi`: threshold and cache behavior
+
+- Response payload includes `decision_threshold` for each model (`ModelPrediction.decision_threshold`).
+- Cached scores are **re-evaluated against current YAML threshold config** before returning results, so threshold updates take effect without requiring cache invalidation.
+- Freshly computed results are persisted with threshold context in DB cache.
+
+### Heatmap refresh and cache-control behavior
+
+For `GET /api/heatmap/{slide_id}/{model_id}`:
+
+- Regeneration is forced when any of the following is true:
+  - `refresh=true`
+  - non-empty `analysis_run_id`
+  - model checkpoint signature changes (mtime/size-based)
+- Disk cache key includes project scope, slide, model, render mode, and checkpoint signature.
+- Responses are deliberately non-cacheable client-side (`Cache-Control: no-store, max-age=0`, plus `Pragma: no-cache`, `Expires: 0`) even when served from server-side disk cache.
+
+### Semantic patch field contract
+
+`POST /api/semantic-search` returns patch-level fields designed to support deterministic patch preview and viewer navigation:
+
+- `patch_index`
+- `similarity_score`
+- `coordinates` (normalized to level-0 when SigLIP cache coordinates originate from lower pyramid levels)
+- `patch_size` (level-0 pixel span for extraction)
+- `attention_weight` (when available)
+
+The patch preview endpoint (`GET /api/slides/{slide_id}/patches/{patch_id}`) accepts explicit `x`, `y`, and `patch_size`, which allows the frontend to request the exact semantic patch crop that corresponds to these fields.
 
 ---
 
