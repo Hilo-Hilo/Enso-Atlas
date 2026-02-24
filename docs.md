@@ -2674,62 +2674,55 @@ These safeguards reduce obvious misuse, but they are not a substitute for clinic
 
 # 16. Performance Benchmarks
 
-## 16.1 Startup Time
+This section keeps only numbers that are directly supported by the current repository (startup timing table, code-level limits/targets, and project config values). Earlier fine-grained latency claims that did not have a reproducible measurement source were removed.
+
+## 16.1 Startup Time (Measured)
 
 | Component | Duration |
 |---|---|
-| TransMIL Loading (6 project-scoped models) | 2.1s |
-| MedGemma Loading + Warmup | ~90s |
-| MedSigLIP Loading | 9.7s |
-| FAISS Index Build (208 slides) | 3.2s |
-| PostgreSQL Init | 4.8s |
-| **Total** | **~120s** |
+| TransMIL loading | 2.1s |
+| MedGemma loading | 28.4s |
+| MedGemma warmup | 62.3s |
+| MedSigLIP loading | 9.7s |
+| FAISS index build | 3.2s |
+| PostgreSQL init (schema + population) | 4.8s |
+| **Model/service startup subtotal** | **~120s** |
+| **End-to-end Docker startup (README reference)** | **~3.5 minutes** |
 
-## 16.2 Per-Slide Analysis
+## 16.2 Request Latency (Verified Constraints)
 
-| Operation | Latency |
+| Path / Operation | Verified Behavior |
 |---|---|
-| Load embeddings (.npy) | 5-15ms |
-| TransMIL single model | 20-50ms |
-| Multi-model (project-scoped model set) | 100-250ms |
-| Evidence patch selection (top-8) | <1ms |
-| FAISS similar case search | 2-5ms |
-| Heatmap generation (first, per-model) | 50-100ms |
-| Heatmap serving (cached) | <5ms |
-| Semantic search (5 queries) | 100-300ms |
-| Outlier detection | 10-50ms |
-| Few-shot classification | 50-200ms |
-| MedGemma report | ~20s (GPU) |
-| **Full analysis (no report)** | **~200ms** |
-| **Full analysis (with report)** | **10-120s** |
+| `GET /api/slides` (PostgreSQL path) | Code path is designed for sub-100ms response time |
+| `GET /api/slides` (flat-file fallback) | Documented fallback can take 30-60s when DB is unavailable |
+| MedGemma report generation | Runtime enforces timeout bounds (`max_generation_time_s` defaults to 300s; async wrapper allows `max_time + 60s`) |
 
-## 16.3 GPU Memory Usage
+## 16.3 GPU Memory Budget (Sizing Estimates)
 
 | Model | VRAM | Precision |
 |---|---|---|
 | MedGemma 4B | ~8 GB | bfloat16 |
 | MedSigLIP | ~800 MB | fp16 |
-| TransMIL (6 project-scoped models) | ~240 MB | float32 |
-| FAISS Index | CPU only | float32 |
-| **Total GPU** | **~9 GB** | |
+| TransMIL model set | ~240 MB | float32 |
+| FAISS index | CPU only | float32 |
+| **Estimated total GPU footprint** | **~9 GB** | |
 
-## 16.4 Database Performance
+## 16.4 Database Performance Notes
 
-| Query | Response Time |
-|---|---|
-| List 208 slides (PostgreSQL) | 2-5ms |
-| List 208 slides (flat-file fallback) | 30-60s |
-| Cached result lookup | 0.8ms |
-| Annotation CRUD | <2ms |
+The strongest verified performance delta in the current codebase is the slide listing path:
 
-## 16.5 Project Model Performance Snapshot
+- PostgreSQL-backed slide listing is intended to stay under 100ms for normal operation.
+- If PostgreSQL is unavailable, the system falls back to flat-file scanning, which is documented at 30-60s.
+
+These two numbers are retained because they correspond to explicit behavior documented in the backend implementation.
+
+## 16.5 Project Model Metrics (From `config/projects.yaml`)
 
 | Project / Model | Metric | Value |
 |---|---|---|
 | Ovarian / `platinum_sensitivity` | AUC | 0.907 |
-| Ovarian / `platinum_sensitivity` | Threshold (Youden J) | 0.9229 |
+| Ovarian / `platinum_sensitivity` | Threshold (project config) | 0.9229 |
 | Lung / `lung_stage` | AUC | 0.648 |
-| Cross-project cache lookup | Median latency | 0.8ms |
 
 ---
 
