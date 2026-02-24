@@ -2834,187 +2834,130 @@ Slides must be manually placed as files in the project data directory. There is 
 
 # 19. Appendices
 
-## Appendix A: Environment Variables
+## Appendix A: Environment Variables (Current)
 
-| Variable | Default | Description |
-|---|---|---|
-| `DATABASE_URL` | `postgresql://enso:enso_atlas_2024@atlas-db:5432/enso_atlas` | PostgreSQL connection |
-| `MIL_ARCHITECTURE` | `clam` (compose overrides to `transmil`) | MIL model type |
-| `MIL_THRESHOLD` | (from config) | Classification threshold |
-| `MIL_THRESHOLD_CONFIG` | `models/threshold_config.json` | Threshold config |
-| `MIL_MODEL_PATH` | (auto) | Model checkpoint path |
-| `TRANSFORMERS_OFFLINE` | `0` | Air-gapped mode |
-| `HF_HUB_OFFLINE` | `0` | Air-gapped mode |
-| `HF_HOME` | `/app/cache/huggingface` | HuggingFace cache |
-| `ENSO_CONFIG` | `/app/config/default.yaml` | Config file |
-| `NVIDIA_VISIBLE_DEVICES` | `all` | GPU selection |
-| `NEXT_PUBLIC_API_URL` | *(empty, same-origin `/api`)* | Frontend API URL (recommended for public tunnel access) |
+| Variable | Default / Example | Used By | Notes |
+|---|---|---|---|
+| `DATABASE_URL` | `postgresql://enso:enso_atlas_2024@atlas-db:5432/enso_atlas` | Backend DB pool (`src/enso_atlas/api/database.py`) | Compose value matches code fallback. |
+| `ENSO_CONFIG` | `config/default.yaml` (local) / `/app/config/default.yaml` (container) | UI launcher + backend config loading | Compose pins container path; code supports local fallback. |
+| `MIL_ARCHITECTURE` | `clam` (code default), commonly `transmil` in Compose | MIL classifier initialization | Controls architecture selection at startup. |
+| `MIL_THRESHOLD` | *(unset by default)* | MIL classifier initialization | Optional explicit threshold override; otherwise model/config threshold is used. |
+| `MIL_THRESHOLD_CONFIG` | Auto-resolved to `threshold_config.json` near model checkpoint | MIL classifier initialization | Compose typically sets `/app/models/threshold_config.json`. |
+| `MIL_MODEL_PATH` | *(auto-resolved)* | MIL classifier initialization | Optional explicit checkpoint path override. |
+| `MIL_MIN_PATCHES_FOR_ATTENTION` | `128` | MIL inference (`src/enso_atlas/mil/clam.py`) | Lower bound used when subsampling very large bags. |
+| `TRANSFORMERS_OFFLINE` | `0` | Embedding + reporting model loaders | Set to `1` for fully offline HuggingFace behavior. |
+| `HF_HUB_OFFLINE` | `0` | Embedding + reporting model loaders | Same operational intent as `TRANSFORMERS_OFFLINE`. |
+| `HF_HOME` | `~/.cache/huggingface` (local fallback) / `/app/cache/huggingface` (Compose) | Embedding + reporting model cache | Primary HuggingFace cache location. |
+| `TRANSFORMERS_CACHE` | *(unset unless provided)* | Embedding loader fallback path | Used if `HF_HOME` is not set. |
+| `HF_TOKEN` / `HUGGINGFACE_TOKEN` / `HUGGINGFACE_HUB_TOKEN` | *(optional)* | MedGemma model loading | Required only for gated/private HuggingFace assets. |
+| `NVIDIA_VISIBLE_DEVICES` | `all` (Compose) | Container GPU visibility | Relevant in GPU container deployments. |
+| `NEXT_PUBLIC_API_URL` | `""` in frontend client code; route handlers/rewrites fall back to `http://127.0.0.1:8003` | Next.js frontend | Leave empty for same-origin deployments through `/api`. |
 
-## Appendix B: File Tree
+## Appendix B: Repository Map (Audited)
 
-```
-med-gemma-hackathon/
+```text
+<repo-root>/
++-- .github/
 +-- config/
 |   +-- default.yaml
-|   +-- projects.yaml                    # Project + model definitions
+|   +-- projects.yaml
++-- data/
+|   +-- brca/
+|   +-- luad/
+|   +-- tcga_full/
+|   +-- labels.csv
+|   +-- slide_metadata.json
 +-- docker/
 |   +-- Dockerfile
 |   +-- docker-compose.yaml
 +-- frontend/
-|   +-- next.config.mjs
-|   +-- tailwind.config.ts
-|   +-- src/
-|       +-- app/
-|       |   +-- layout.tsx
-|       |   +-- page.tsx                 # Main page (2142 lines)
-|       |   +-- slides/page.tsx          # Slide manager
-|       +-- components/
-|       |   +-- layout/
-|       |   |   +-- Header.tsx           # Project switcher, view mode, dark mode
-|       |   |   +-- Footer.tsx
-|       |   |   +-- UserDropdown.tsx
-|       |   +-- panels/
-|       |   |   +-- AIAssistantPanel.tsx        (38,056 bytes)
-|       |   |   +-- AnalysisControls.tsx
-|       |   |   +-- BatchAnalysisPanel.tsx      (43,366 bytes)
-|       |   |   +-- CaseNotesPanel.tsx
-|       |   |   +-- EvidencePanel.tsx
-|       |   |   +-- ModelPicker.tsx
-|       |   |   +-- MultiModelPredictionPanel.tsx
-|       |   |   +-- OncologistSummaryView.tsx
-|       |   |   +-- OutlierDetectorPanel.tsx    (11,988 bytes)
-|       |   |   +-- PatchClassifierPanel.tsx    (16,135 bytes)
-|       |   |   +-- PathologistView.tsx         (30,114 bytes)
-|       |   |   +-- PredictionPanel.tsx
-|       |   |   +-- CaseNotesPanel.tsx
-|       |   |   +-- ReportPanel.tsx
-|       |   |   +-- SemanticSearchPanel.tsx
-|       |   |   +-- SimilarCasesPanel.tsx
-|       |   |   +-- SlideSelector.tsx           (25,527 bytes)
-|       |   |   +-- (Uncertainty panel not mounted by default in current home layout).tsx
-|       |   +-- viewer/
-|       |   |   +-- WSIViewer.tsx               (61,161 bytes)
-|       |   +-- slides/
-|       |   |   +-- FilterPanel.tsx
-|       |   |   +-- SlideGrid.tsx
-|       |   |   +-- SlideTable.tsx
-|       |   |   +-- BulkActions.tsx
-|       |   |   +-- SlideModals.tsx
-|       |   +-- modals/
-|       |   |   +-- PatchZoomModal.tsx
-|       |   |   +-- KeyboardShortcutsModal.tsx
-|       |   |   +-- SettingsModal.tsx
-|       |   |   +-- SystemStatusModal.tsx
-|       |   +-- demo/
-|       |   |   +-- DemoMode.tsx
-|       |   +-- ui/
-|       |       +-- Badge, Button, Card, Logo, NetworkStatus,
-|       |           PredictionGauge, ProgressStepper, Skeleton,
-|       |           Slider, Spinner, Toast, Toggle
-|       +-- contexts/
-|       |   +-- ProjectContext.tsx
-|       +-- hooks/
-|       |   +-- useAnalysis.ts
-|       |   +-- useKeyboardShortcuts.ts
-|       +-- lib/
-|       |   +-- api.ts                         (2,625 lines)
-|       |   +-- pdfExport.ts
-|       |   +-- utils.ts
-|       +-- types/
-|           +-- index.ts                       (561 lines)
+|   +-- src/app/
+|   |   +-- page.tsx
+|   |   +-- slides/page.tsx
+|   |   +-- projects/page.tsx
+|   +-- src/components/
+|   |   +-- layout/
+|   |   +-- panels/
+|   |   +-- viewer/
+|   |   +-- slides/
+|   |   +-- modals/
+|   |   +-- demo/
+|   |   +-- ui/
+|   +-- src/contexts/ProjectContext.tsx
+|   +-- src/hooks/
+|   +-- src/lib/
+|   +-- src/types/
 +-- models/
 |   +-- transmil.py
-|   +-- transmil_best.pt
 |   +-- threshold_config.json
+|   +-- medgemma-4b-it/
+|   +-- path-foundation/
 +-- scripts/
-|   +-- train_transmil.py
+|   +-- download_models.py
 |   +-- embed_level0_pipelined.py
+|   +-- batch_reembed_level0.py
 |   +-- multi_model_inference.py
-|   +-- optimize_threshold.py
-|   +-- download_ovarian_fixed.py
+|   +-- train_transmil*.py
+|   +-- evaluate_transmil.py
+|   +-- setup_luad_project.py
+|   +-- setup_brca_project.py
+|   +-- validate_project_modularity.py
+|   +-- validate_project_scoping.py
+|   +-- start.sh
 +-- src/enso_atlas/
 |   +-- api/
-|   |   +-- main.py                        (6,119 lines)
-|   |   +-- database.py                    (1,234 lines)
-|   |   +-- projects.py
-|   |   +-- project_routes.py
-|   |   +-- batch_tasks.py
-|   |   +-- batch_embed_tasks.py
-|   |   +-- report_tasks.py
-|   |   +-- embedding_tasks.py
-|   |   +-- pdf_export.py
-|   |   +-- slide_metadata.py
 |   +-- agent/
-|   |   +-- workflow.py                    (1,227 lines)
-|   |   +-- routes.py
-|   +-- llm/
-|   |   +-- chat.py                        (RAG-based chat)
 |   +-- embedding/
-|   |   +-- embedder_pathfound.py
-|   |   +-- medsiglip.py
-|   |   +-- embedder.py
 |   +-- evidence/
-|   |   +-- generator.py
+|   +-- llm/
 |   +-- mil/
-|   |   +-- clam.py
 |   +-- reporting/
-|   |   +-- medgemma.py                    (908 lines)
-|   |   +-- decision_support.py
-|   +-- config.py
+|   +-- ui/
 |   +-- wsi/
-|       +-- processor.py
-+-- data/
-|   +-- projects/
-|   |   +-- ovarian-platinum/
-|   |   |   +-- slides/
-|   |   |   +-- embeddings/
-|   |   |   +-- labels.csv
-|   |   +-- lung-stage/
-|   |       +-- slides/
-|   |       +-- embeddings/
-|   |       +-- labels.json
-|   +-- embeddings/
-|       +-- heatmap_cache/                 (cached PNG heatmaps)
-|       +-- medsiglip_cache/               (cached MedSigLIP embeddings)
-|       +-- thumbnail_cache/               (cached slide thumbnails)
-+-- outputs/                               (TransMIL training outputs)
+|   +-- cli.py
+|   +-- config.py
+|   +-- core.py
 +-- tests/
-+-- docs/
-    +-- screenshots/
-    +-- reproduce.md
++-- docs.md
++-- README.md
++-- pyproject.toml
++-- requirements.txt
 ```
+
+Runtime convention from `config/projects.yaml` remains project-scoped (`data/projects/<project-id>/{slides,embeddings,labels.*}`), even though this repository snapshot also includes dataset-specific directories under `data/` for training and setup workflows.
 
 ## Appendix C: Key Design Decisions
 
-### 1. Raw SQL over ORM
-asyncpg with raw SQL for maximum performance and query transparency. No migration framework for small schema.
+### 1. Configuration-Driven Project Scoping
+`config/projects.yaml` is the source of truth for project IDs, dataset paths, model compatibility, and feature flags. API behavior is intentionally scoped by `project_id` to prevent cross-project leakage.
 
-### 2. Coverage-Based Heatmap Alignment
-Heatmap dimensions use `ceil(dim/224)*224` to ensure pixel-perfect alignment with the 224px patch grid. Coverage dimensions are returned as response headers.
+### 2. Raw SQL over ORM
+The backend uses `asyncpg` with explicit SQL for predictable performance and clear operational behavior. This keeps schema and query paths transparent during debugging.
 
-### 3. Disk-Based Heatmap Cache
-Per-model heatmaps cached to PNG files. First generation takes 50-100ms; subsequent requests serve cached files in <5ms.
+### 3. Coverage-Aligned Heatmap Geometry
+Heatmap dimensions are aligned to the patch grid (`224x224`) to keep overlays pixel-consistent with model attention outputs.
 
-### 4. Canvas-Based Overlays vs OSD Overlays
-Outlier and classifier heatmaps use a separate HTML canvas rather than OSD's `addSimpleImage`. This allows independent toggle/opacity control and avoids conflicts with the attention heatmap overlay.
+### 4. Disk-Backed Caching for Expensive Artifacts
+Heatmaps, embeddings, and derived assets are cached on disk to make repeat requests fast and to reduce repeated compute.
 
-### 5. Imperative Scale Bar Updates
-Direct DOM manipulation for the scale bar bypasses React's reconciliation on every animation frame, preventing jank during continuous zoom/pan.
+### 5. Canvas Overlay Layering in the Frontend
+Overlay rendering is separated from base slide rendering so visibility, opacity, and interaction controls remain independent and predictable.
 
-### 6. Template Report Fallback
-When MedGemma fails or times out, a template-based report preserving real attention weights and coordinates ensures users always receive actionable output.
+### 6. Resilient Report Generation Path
+When LLM-based generation is unavailable or times out, the system can still return structured, evidence-grounded outputs instead of failing hard.
 
-### 7. FAISS IndexFlatIP for Similar Cases
-Exact inner product search on L2-normalized mean embeddings (cosine similarity). Acceptable for 208 slides; switch to IndexIVF at ~10,000+ slides.
+### 7. FAISS for Retrieval Workloads
+Similar-case retrieval uses FAISS indexes over normalized embedding representations to keep nearest-neighbor lookup efficient as slide volume grows.
 
 ## Appendix D: Error Codes
 
-| HTTP Code | Error | Resolution |
+| HTTP Code | Typical Error Class | Resolution Guidance |
 |---|---|---|
-| 400 | Bad Request / LEVEL0_EMBEDDINGS_REQUIRED | Check request format or generate level 0 embeddings |
-| 404 | Slide/Session/Task not found | Verify ID exists |
-| 500 | Prediction/PDF/Embedding failed | Check GPU memory, restart server |
-| 503 | Model not loaded / DB unavailable | Wait for startup (~120s) or check container status |
+| 400 | Invalid request shape or missing prerequisites (for example, level-0 embeddings required) | Validate request payload and ensure prerequisite embeddings/resources exist. |
+| 404 | Slide/session/task/resource not found | Verify IDs and project scope, then retry. |
+| 409 | Resource conflict (state mismatch or duplicate operation) | Re-fetch latest state before retrying the operation. |
+| 500 | Internal processing failure (prediction/report/embedding pipeline) | Inspect backend logs, model artifacts, and runtime resources (memory/storage). |
+| 503 | Dependency unavailable (model/database/service warming up) | Wait for startup completion or recover dependent services, then retry. |
 
 ---
 
