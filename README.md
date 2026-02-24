@@ -51,35 +51,31 @@ This repository is developed for the **Kaggle-Google Med Gemma Impact Challenge*
 
 ## Screenshots
 
+All screenshots below were refreshed from the live deployment at `https://atlas.ensohealth.ai` on Feb 24, 2026.
+
 ### Dashboard (Oncologist View)
 
 ![Dashboard - Oncologist](docs/screenshots/dashboard-lung-oncologist.png)
 
-*Current UI in Oncologist mode with project-scoped model selection and evidence panels.*
+*Oncologist summary view with prediction, similar-case counts, and top attention regions.*
 
 ### Dashboard (Pathologist View)
 
 ![Dashboard - Pathologist](docs/screenshots/dashboard-lung-pathologist.png)
 
-*Current UI in Pathologist mode with project-aware interpretation workflow and tool visibility.*
-
-### Batch Analysis
-
-![Batch Analysis](docs/screenshots/batch-analysis-lung.png)
-
-*Batch analysis view showing project-scoped model selection, resolution controls, and cohort-level run setup.*
+*Pathologist workspace with WSI controls, annotation tools, and heatmap overlays.*
 
 ### Slide Manager
 
 ![Slide Manager](docs/screenshots/slide-manager.png)
 
-*Project-scoped slide inventory with filtering, readiness metadata, and per-project organization controls.*
+*Slide inventory in grid view with filtering controls, embedding status, and patch counts.*
 
 ### Project Management
 
 ![Project Management](docs/screenshots/project-management.png)
 
-*Project configuration and assignment workflow backed by `config/projects.yaml` and project-specific data/model mappings.*
+*Project cards for ovarian and lung demos, including thresholds, embeddings, and navigation actions.*
 
 ---
 
