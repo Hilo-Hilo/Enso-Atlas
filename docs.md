@@ -2786,41 +2786,49 @@ The Mac mini draws significantly less power than the DGX Spark, though Apple's r
 ## 18.1 Current Limitations
 
 ### Class Imbalance
-139 non-responders vs 13 responders (10.7:1 ratio). Mitigated with weighted loss and Youden J threshold (0.9229).
+The ovarian platinum dataset has 139 non-responders vs 13 responders (10.7:1 ratio). Training uses focal loss with inverse-frequency class weighting, which helps but does not eliminate the problem. The threshold optimization script exists (`scripts/optimize_threshold.py`) but the production `threshold_config.json` still carries placeholder values -- the Youden J and F1 optimal thresholds are null, and the system falls back to 0.5. This needs to be run on real validation data and committed.
 
-### Path Foundation CPU-Only
-TensorFlow does not support Blackwell GPUs. Embeddings are pre-computed offline.
+### Path Foundation Is CPU-Only
+Path Foundation uses a TensorFlow SavedModel. TensorFlow has no GPU support on Apple Silicon and limited support on newer NVIDIA architectures. In practice, all Path Foundation embeddings are pre-computed offline and stored as .npy files. Real-time embedding at inference is not feasible with this model.
 
-### Limited Clinical Breadth
-The current deployment includes two production projects (ovarian platinum response and lung stage classification), but still needs broader multi-site validation and additional cancer programs.
+### No Authentication or Access Control
+There is no user login, no RBAC, no API key enforcement. Anyone with network access to the backend can run predictions, view slides, and generate reports. For single-user local deployments this is acceptable; for any shared or networked deployment it is not.
+
+### TCGA-Only, Single-Site Data
+Every model is trained exclusively on TCGA data. There is no multi-site validation. Performance on slides from other institutions, scanners, or staining protocols is unknown and likely worse.
+
+### Variable Model Quality
+The six classification models span a wide AUC range. Platinum sensitivity sits at 0.907, but the survival models (1-year, 3-year, 5-year) range from 0.639 to 0.697 -- barely above chance for a binary classifier. The lung stage model is at 0.648. The UI shows these AUCs, but users may not appreciate what a 0.64 AUC means in practice.
 
 ### No FDA Clearance
-Research tool only. Predictions are uncalibrated raw sigmoid outputs.
+This is a research tool. Predictions are raw sigmoid outputs with no probability calibration. Nothing here is validated for clinical decision-making.
 
 ### Semantic Search Cold Start
-First MedSigLIP embedding run for a slide takes ~12-14 minutes for ~6,680 patches. Cached after first run.
+The first MedSigLIP embedding run for a slide takes roughly 12-14 minutes for around 6,680 patches. Results are cached after the first run, so subsequent searches are fast, but the initial wait is real and there is no progress indicator in the UI beyond a polling spinner.
+
+### No DICOM or PACS Integration
+Slides must be manually placed as files in the project data directory. There is no DICOM import, no PACS connectivity, and no way to pull slides from a clinical image management system.
 
 ## 18.2 Planned Improvements
 
-### Short-Term (3-6 months)
-- Multi-fold ensemble averaging
-- Platt scaling for probability calibration
-- GPU-accelerated real-time embedding pipeline
-- User authentication and RBAC
-- DICOM integration for PACS slide import
+### Near-Term
+- Run threshold optimization on all models and commit real Youden J / F1 thresholds to replace the placeholder config
+- Platt scaling or isotonic regression for probability calibration (the "uncalibrated" disclaimers are honest but the outputs should still be better)
+- Basic API key or token authentication -- even a shared secret would be better than nothing
+- UI progress feedback for long-running embedding and analysis tasks
 
-### Medium-Term (6-12 months)
-- Additional cancer programs beyond ovarian/lung (breast, colorectal, prostate)
-- Multimodal integration (H&E + IHC)
-- Federated learning
-- Active learning for efficient annotation
-- Real-time collaborative annotation
+### Medium-Term
+- Additional cancer programs: BRCA setup script exists (`scripts/setup_brca_project.py`) but is not yet in production. Colorectal and prostate are candidates after that
+- Multi-site validation with non-TCGA cohorts
+- GPU-accelerated embedding pipeline for DINOv2/UNI (these are PyTorch and already support CUDA/MPS, but the integration into the real-time API path is not wired up)
+- Multimodal integration (H&E + IHC on the same case)
+- DICOM/PACS slide import
 
-### Long-Term (12+ months)
-- FDA 510(k) regulatory pathway
-- EHR integration
-- Prospective clinical validation
-- Foundation model fine-tuning
+### Long-Term
+- FDA 510(k) regulatory pathway (requires prospective clinical validation, which has not started)
+- EHR integration (FHIR)
+- Federated learning across institutions
+- Foundation model fine-tuning on institutional data
 
 ---
 
