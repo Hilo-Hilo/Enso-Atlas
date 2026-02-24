@@ -140,256 +140,239 @@ In short, this repository is designed as a platform scaffold for institution-spe
 
 # 2. System Architecture
 
-## 2.1 Abstraction Layer Architecture
+## 2.1 Layer Boundaries and Runtime Contracts
 
-The system is organized into four swappable layers. Each layer communicates through defined contracts (embedding dimension, attention format, JSON report schema) rather than coupling to specific model implementations.
+Enso Atlas is implemented as a layered system with clear handoffs between UI, API orchestration, model services, and storage. Some pieces are fully pluggable (project/model assignments), while others are currently fixed in code (for example, the default embedding runtime is Path Foundation).
 
 ```
-+=====================================================================+
-|  UI LAYER (independently themed, auto-configures per project)       |
-|  Next.js 14 / React 18 / OpenSeadragon / SVG Annotations           |
-|  WSI Viewer | Heatmap Overlay | Panels | Dark Mode | PDF Export     |
-+=====================================================================+
-        |  HTTP/SSE  |  DZI Tiles  |  Annotations CRUD
-        v            v             v
-+=====================================================================+
-|  EVIDENCE LAYER (model-agnostic -- operates on any embedding space) |
-|  FastAPI Backend / PostgreSQL / FAISS                               |
-|  Attention Heatmaps | Similar Cases | Outlier Detection |           |
-|  Few-Shot Classifier | Semantic Search | Agentic Workflow           |
-+=====================================================================+
-        |  embeddings (N x D)   |  attention weights (N,)
-        v                       v
-+=====================================================================+
-|  CLASSIFICATION LAYER (pluggable -- any attention MIL model)        |
-|  Contract: input (N x D) -> prediction (float) + attention (N,)    |
-|  [TransMIL]  [CLAM]  [ABMIL]  [Custom MIL]   <- register via YAML |
-+=====================================================================+
-        |  patch embeddings (N x D)
-        v
-+=====================================================================+
-|  FOUNDATION MODEL LAYER (swappable -- any patch embedding model)    |
-|  Contract: image (224x224x3) -> embedding (D-dim vector)            |
-|  [Path Foundation]  [UNI]  [CONCH]  [Virchow]  [DINOv2]  [Custom]  |
-|                                                  <- register via YAML|
-+=====================================================================+
-        |  224x224 patches
-        v
-+=====================================================================+
-|  DATA LAYER (format-agnostic slide storage)                         |
-|  WSI Files (.svs/.tiff/.ndpi) | Embeddings (.npy) | PostgreSQL 16  |
-+=====================================================================+
++======================================================================+
+| Frontend Layer (Next.js 14.2 / React 18)                             |
+| - OpenSeadragon viewer + heatmap/annotation overlays                 |
+| - Panel-based workspace (analysis, report, assistant, metadata)      |
+| - API client + App Router proxy routes for image/heatmap endpoints   |
++======================================================================+
+                 | HTTP / SSE / image proxy routes
+                 v
++======================================================================+
+| API Orchestration Layer (FastAPI)                                    |
+| - Main API surface (analysis, heatmap, report, embedding, projects)  |
+| - Project scoping via project_id + config/projects.yaml              |
+| - Background task managers (batch analyze, report, re-embed)         |
+| - Agent/chat SSE workflows                                            |
++======================================================================+
+                 | N x D embeddings + coords + model outputs
+                 v
++======================================================================+
+| Model & Evidence Layer                                                |
+| - Embedding: Path Foundation (Transformers) + TF SavedModel flows    |
+| - MIL: CLAM or TransMIL (single-model), TransMIL (multi-model path) |
+| - Retrieval: FAISS patch index + slide-mean index                    |
+| - Semantic search: MedSigLIP                                         |
+| - Reporting: MedGemma                                                 |
++======================================================================+
+                 | SQL + files
+                 v
++======================================================================+
+| Data & Config Layer                                                   |
+| - PostgreSQL 16 (schema v5)                                          |
+| - WSI files (.svs/.tiff/.ndpi/...)                                   |
+| - Embeddings and coordinates (.npy, *_coords.npy)                    |
+| - Checkpoints (outputs/, models/)                                    |
+| - Project registry (config/projects.yaml)                            |
++======================================================================+
 ```
+
+The key runtime contracts are:
+
+1. **Embedding contract:** per-slide `N x D` arrays (`.npy`) with aligned `*_coords.npy`.
+2. **MIL contract:** `(N x D) -> score + attention(N,)`.
+3. **Reporting contract:** structured JSON report payload consumed by UI/PDF export.
+4. **Project scope contract:** `project_id` controls allowed slides/models and dataset paths.
 
 ### Detailed Component Diagram
 
 ```mermaid
 graph TB
-    subgraph "UI Layer"
-        UI[React UI - Port 3002]
-        OSD[OpenSeadragon WSI Viewer]
-        GRID[Patch Grid Overlay]
-        SVG[SVG Annotation Layer]
-        CANVAS[Canvas Heatmap Overlay]
-        API_CLIENT[API Client - api.ts]
+    subgraph UI[Frontend Layer - Next.js]
+        PAGE[app/page.tsx workspace]
+        VIEWER[WSIViewer - OpenSeadragon]
+        API_CLIENT[src/lib/api.ts]
+        PROXY[App Router proxy routes<br/>/api/slides/* and /api/heatmap/*]
     end
 
-    subgraph "Evidence Layer (FastAPI - Port 8003)"
-        API[REST API - main.py]
-        AGENT[Agent Workflow]
-        CHAT[Chat Manager]
-        DB_MOD[Database Module]
-        PROJ[Project Registry - YAML driven]
-        BATCH[Batch Tasks]
-        BEMBED[Batch Embed]
-        REPORT[Report Tasks]
-        PDF[PDF Export]
+    subgraph API[FastAPI Layer - src/enso_atlas/api]
+        MAIN[main.py]
+        PROJECT_ROUTES[project_routes.py]
+        AGENT_ROUTES[agent/routes.py]
+        META[slide_metadata router]
+        TASKS[batch/report/embed task managers]
     end
 
-    subgraph "Classification Layer (Pluggable)"
-        TM[TransMIL x5]
-        CLAM_SLOT["[CLAM slot]"]
-        ABMIL_SLOT["[ABMIL slot]"]
-        CUSTOM_MIL["[Custom MIL slot]"]
-        FAISS[FAISS Index]
-        LR[LogisticRegression - Few-Shot]
+    subgraph ML[Model + Evidence Layer]
+        EMBED[Path Foundation embedders]
+        MIL[CLAM/TransMIL classifier interface]
+        MULTI[MultiModelInference (TransMIL checkpoints)]
+        EVIDENCE[EvidenceGenerator + FAISS]
+        SIGLIP[MedSigLIP semantic retrieval]
+        GEMMA[MedGemma report generator]
     end
 
-    subgraph "Foundation Model Layer (Swappable)"
-        PF["Path Foundation (demo)"]
-        UNI_SLOT["[UNI slot]"]
-        CONCH_SLOT["[CONCH slot]"]
-        CUSTOM_FM["[Custom model slot]"]
-        VLM["Vision-Language Model (Semantic Search)"]
-        LLM["Language Model (Reports)"]
+    subgraph DATA[Data + Config]
+        PG[(PostgreSQL 16<br/>schema v5)]
+        FILES[/data/projects/...<br/>slides + embeddings + labels/]
+        CACHE[/medsiglip_cache + heatmap_cache/]
+        CFG[/config/projects.yaml/]
+        CKPT[/outputs/*/best_model.pt/]
     end
 
-    subgraph "Data Layer"
-        PG[(PostgreSQL 16<br/>Schema v5)]
-        EMB[/Embeddings .npy<br/>N x D vectors/]
-        WSI_FILES[/WSI Files .svs/]
-        MODELS[/Model Checkpoints/]
-        HCACHE[/Heatmap Cache .png/]
-        YAML[/projects.yaml<br/>Configuration/]
-    end
+    PAGE --> API_CLIENT
+    VIEWER --> PROXY
+    API_CLIENT --> MAIN
+    PROXY --> MAIN
 
-    UI --> API_CLIENT
-    API_CLIENT -->|HTTP/SSE| API
-    OSD -->|DZI Tiles| API
-    SVG -->|Annotations CRUD| API
-    CANVAS -->|Patch Overlay Data| API
-    API --> DB_MOD
-    API --> AGENT
-    API --> CHAT
-    API --> BATCH
-    API --> BEMBED
-    API --> REPORT
-    API --> PDF
-    AGENT --> VLM
-    AGENT --> TM
-    AGENT --> FAISS
-    API --> PF
-    API --> VLM
-    API --> LLM
-    API --> TM
-    API --> FAISS
-    API --> LR
-    DB_MOD --> PG
-    PROJ --> YAML
-    PROJ --> PG
-    PF --> EMB
-    TM --> EMB
-    API --> WSI_FILES
-    TM --> MODELS
-    LLM --> MODELS
-    VLM --> MODELS
-    API --> HCACHE
+    MAIN --> PROJECT_ROUTES
+    MAIN --> AGENT_ROUTES
+    MAIN --> META
+    MAIN --> TASKS
+
+    MAIN --> EMBED
+    MAIN --> MIL
+    MAIN --> MULTI
+    MAIN --> EVIDENCE
+    MAIN --> SIGLIP
+    MAIN --> GEMMA
+
+    MAIN --> PG
+    MAIN --> FILES
+    MAIN --> CACHE
+    MAIN --> CFG
+    MULTI --> CKPT
 ```
 
 ## 2.2 Component Overview
 
 ### Frontend Layer
-- **Framework:** Next.js 14 with React 18, TypeScript, Tailwind CSS 3.x
-- **WSI Viewer:** OpenSeadragon 5.0.1 for Deep Zoom Image (DZI) tile-based rendering with SVG annotation overlay, canvas-based patch heatmap overlays, and patch grid overlay
-- **Layout:** react-resizable-panels v4 for user-adjustable, collapsible three-panel layout
-- **State Management:** React Context (ProjectContext), custom hooks (useAnalysis, useKeyboardShortcuts), localStorage caching
-- **API Communication:** Custom fetch wrapper (3,054 lines) with retry logic, timeout handling, polling-based progress tracking, and typed error handling
-- **Dark Mode:** Theme toggling is implemented via a root `.dark` class and CSS variables; Tailwind `dark:` utility usage is limited
+- **Stack:** Next.js 14.2, React 18, TypeScript, Tailwind CSS.
+- **Viewer:** `WSIViewer.tsx` uses OpenSeadragon with synchronized overlays (attention heatmap, patch grid/canvas overlays, and annotation interactions).
+- **API access paths:**
+  - General JSON calls via `src/lib/api.ts` with timeout/retry/error normalization.
+  - App Router proxy handlers for DZI XML, DZI tiles, thumbnails, patches, and heatmaps to avoid CORS and preserve `project_id` query propagation.
+- **State/context:** project-aware behavior is handled through `ProjectContext` and page-level state orchestration.
 
 ### Backend Layer
-- **Framework:** FastAPI with Pydantic models for request/response validation
-- **Primary Module:** `src/enso_atlas/api/main.py` (7,072 lines), containing all core endpoints, model loading, and startup orchestration
-- **Database:** asyncpg connection pool to PostgreSQL 16 (raw SQL, no ORM) with schema v5 including annotations table
-- **Background Tasks:** Thread-based batch analysis, report generation, and batch re-embedding with status polling and cancellation
+- **Core API:** `src/enso_atlas/api/main.py` remains the primary orchestration module, with helper modules for DB, project routing, metadata, and task state.
+- **Project scoping:** project registry is loaded from `config/projects.yaml` at startup and synchronized into DB when available.
+- **Database mode:** startup initializes PostgreSQL schema and can populate from flat files when DB is empty.
+- **Streaming APIs:** chat and agent workflows return Server-Sent Events (SSE).
+- **Background work:** embedding, batch analysis, and report generation use in-process task managers with status polling endpoints and cancellation support for batch flows.
 
-### ML Models Layer
-- **Path Foundation:** 384-dim patch embeddings served via mixed runtimes: Transformers/PyTorch for `/api/embed` (device auto-selection) and TensorFlow SavedModel for slide re-embedding flows
-- **MedGemma 4B:** Transformers-based causal LM for structured report generation (GPU, bfloat16, ~8 GB VRAM)
-- **MedSigLIP:** SigLIP vision-language model for text-to-patch semantic search (GPU, fp16, ~800 MB VRAM)
-- **TransMIL:** Six project-scoped PyTorch Transformer-based MIL classifiers with attention extraction (GPU, ~240 MB total)
-- **FAISS:** Facebook AI Similarity Search for slide-level (cosine via IndexFlatIP) and patch-level (L2) retrieval
-- **scikit-learn:** LogisticRegression for few-shot patch classification on Path Foundation embeddings
+### Model and Evidence Layer
+- **Embedding runtimes:**
+  - `/api/embed` uses `PathFoundationEmbedder` (Transformers/PyTorch, lazy-loaded).
+  - `/api/embed-slide` and batch re-embedding paths use TensorFlow SavedModel loading from local Path Foundation cache.
+- **MIL inference:**
+  - Single-model classifier is selected by `MIL_ARCHITECTURE` (`clam` or `transmil`) via `create_classifier`.
+  - Multi-model inference (`/api/analyze-multi`) is TransMIL-based and loads checkpoint metadata from `classification_models` in `config/projects.yaml`.
+- **Retrieval:**
+  - Patch-level FAISS index in `EvidenceGenerator` (`IndexFlatL2`).
+  - Slide-level similar-case retrieval uses a normalized mean-embedding index (`IndexFlatIP`) built at startup.
+- **Semantic search:** MedSigLIP endpoint uses cached SigLIP embeddings when available and has a fallback path when SigLIP caches are missing.
+- **Reporting:** MedGemma report generation supports synchronous and async flows; stale async tasks return a template fallback instead of hanging indefinitely.
 
-### Storage Layer
-- **PostgreSQL 16:** Patients, slides, metadata, analysis results, embedding tasks, projects, junction tables, annotations (schema v5)
-- **File System:** Project-scoped pre-computed .npy embeddings (level 0 dense), .npy coordinate files, and .svs whole-slide images
-- **Model Storage:** HuggingFace cache + local checkpoints in `models/` directory
-- **Heatmap Cache:** Disk-based PNG cache (`data/embeddings/heatmap_cache/`) for per-model attention heatmaps
+### Storage and Schema
+- **PostgreSQL schema v5:** includes patients, slides, slide_metadata, analysis_results, embedding_tasks, projects, project_models, project_slides, and annotations.
+- **File layout:** project-scoped datasets under `data/projects/<project_id>/...` with slide files, embeddings, coordinates, and labels.
+- **Runtime caches:** heatmap PNG cache and MedSigLIP embedding cache are persisted on disk for reuse.
 
-## 2.3 Data Flow Diagram
+## 2.3 Primary Data Flows
 
 ```mermaid
 flowchart LR
-    subgraph Offline_Pipeline ["Offline Pipeline"]
-        WSI["WSI (.svs file)"] --> PATCH["Patch extraction (224x224, level 0 dense)"]
-        PATCH --> PF_EMB["Path Foundation embedding (dense level-0 grid)"]
-        PF_EMB --> NPY[".npy embeddings (N x 384)"]
+    subgraph Embed[Embedding + Preparation]
+        WSI[WSI file] --> PATCH[224x224 patch grid extraction]
+        PATCH --> PF[Path Foundation embedding]
+        PF --> EMB[(slide.npy)]
+        PATCH --> COORD[(slide_coords.npy)]
     end
 
-    subgraph Online_Analysis ["Online Analysis"]
-        NPY --> TRANSMIL["TransMIL models (project scoped)"]
-        TRANSMIL --> PRED["Predictions + attention weights"]
-        PRED --> HEATMAP["Attention heatmap (regenerated per analysis run)"]
-        PRED --> EVIDENCE["Top-K evidence patches"]
-        NPY --> FAISS_Q["FAISS retrieval query"]
-        FAISS_Q --> SIMILAR["Similar cases"]
-        NPY --> SIGLIP["MedSigLIP semantic search"]
-        SIGLIP --> TEXT_MATCH["Text-matched patches"]
-        NPY --> OUTLIER["Outlier detection"]
-        OUTLIER --> UNUSUAL["Unusual patches"]
-        NPY --> FEWSHOT["Few-shot classifier"]
-        FEWSHOT --> TISSUE_MAP["Tissue classification"]
+    subgraph Analyze[Online Analysis]
+        EMB --> MM[TransMIL model(s)]
+        MM --> PRED[Scores + attention]
+        COORD --> HM[Heatmap rendering]
+        PRED --> HM
+        EMB --> SIM[Similar-case retrieval]
+        EMB --> OUT[Outlier detection]
+        EMB --> FEW[Few-shot logistic regression]
     end
 
-    subgraph Reporting ["Reporting"]
-        PRED --> MEDGEMMA["MedGemma 4B report generator"]
-        EVIDENCE --> MEDGEMMA
-        SIMILAR --> MEDGEMMA
-        MEDGEMMA --> JSON_REPORT["Structured JSON report"]
-        JSON_REPORT --> PDF_GEN["PDF generator"]
-        PDF_GEN --> PDF_OUT["Tumor board PDF"]
+    subgraph Semantic[Semantic Retrieval]
+        EMB --> SIG[MedSigLIP patch embeddings]
+        Q[Text query] --> SIG
+        SIG --> RES[Patch matches]
+    end
+
+    subgraph Report[Reporting]
+        PRED --> GEM[MedGemma]
+        SIM --> GEM
+        RES --> GEM
+        GEM --> JSON[Structured report JSON]
+        JSON --> PDF[PDF export]
     end
 ```
+
+Operational details that matter in practice:
+- Model heatmaps require level-0 embeddings and coordinate files; missing coords return explicit API errors.
+- Heatmap cache keys include model checkpoint signatures so updated weights invalidate old overlays.
+- `project_id` filtering is applied to slide/model scope in analysis, retrieval, and reporting endpoints.
 
 ## 2.4 Deployment Topology
 
 ```
-+-----------------------------------+     +------------------+
-|  enso-atlas (Application)         |     |  atlas-db        |
-|  - FastAPI Backend (port 8003)    |---->|  PostgreSQL 16   |
-|  - Path Foundation (CPU)          |     |  (port 5433)     |
-|  - MedGemma 4B (GPU, bfloat16)   |     +------------------+
-|  - MedSigLIP (GPU, fp16)         |
-|  - TransMIL x6 (GPU)             |
-|  - FAISS Index (CPU)             |
-+-----------------------------------+
-        |
-        | Port 8003 (API)
-        v
-+-----------------------------------+
-|  Frontend (Next.js 14)            |
-|  - Production Build               |
-|  - Port 3002                      |
-|  - Proxy /api/* -> :8003          |
-+-----------------------------------+
-        |
-        | (optional)
-        v
-+-----------------------------------+
-|  Tailscale Funnel                 |
-|  - Public HTTPS access            |
-|  - Zero-config TLS                |
-+-----------------------------------+
+Browser
+  |
+  v
+Frontend (Next.js, usually :3002 prod / :3000 dev)
+  |- /api/* rewrite + route handlers
+  v
+FastAPI backend (host :8003 -> container :8000)
+  |- MedGemma / MedSigLIP / MIL inference
+  |- FAISS indexes
+  |- Task managers (embed, batch, report)
+  |- Reads data/projects + outputs + models volumes
+  v
+PostgreSQL 16 (host :5433 -> container :5432)
 ```
 
 ### Port Mappings
 
-| Service | Internal Port | External Port | Purpose |
-|---|---|---|---|
-| enso-atlas | 8000 | 8003 | FastAPI REST API |
+| Service | Internal | Host | Notes |
+|---|---:|---:|---|
+| enso-atlas API | 8000 | 8003 | Main FastAPI surface |
+| enso-atlas legacy UI port | 7860 | 7862 | Port is exposed in Docker; current `start.sh` runs API only |
 | atlas-db | 5432 | 5433 | PostgreSQL |
-| frontend | 3002 | 3002 | Next.js production server |
+| frontend (outside compose) | 3002 (prod) | 3002 | Separate process from Docker compose |
 
 ## 2.5 Network Architecture
 
-The Next.js frontend proxies all API requests to the backend via a rewrite rule configured in `frontend/next.config.mjs`:
+Frontend and backend are typically presented as one browser origin:
+
+- Browser calls `/api/...` on the frontend origin.
+- Next.js rewrites those requests to backend `/api/...` (default target `http://127.0.0.1:8003`).
+- For binary viewer assets (DZI, tiles, patches, heatmaps), App Router handlers proxy responses and forward key metadata headers used for overlay alignment.
 
 ```javascript
-const nextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8003'}/api/:path*',
-      },
-    ]
-  },
-};
+// frontend/next.config.mjs
+async rewrites() {
+  return [
+    {
+      source: '/api/:path*',
+      destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8003'}/api/:path*`,
+    },
+  ]
+}
 ```
 
-This eliminates CORS issues in production and creates a unified origin for the browser. The backend also configures CORS middleware for direct API access during development.
-
-For public access without opening firewall ports, Tailscale Funnel provides zero-config HTTPS tunneling to the frontend. This supports demonstrations and remote access while maintaining the on-premise security model.
+The backend still enables CORS for direct API access in development and integration testing. For remote/public hosting, keep client traffic same-origin (use frontend `/api` paths) so private backend addresses are not exposed to browsers.
 
 ---
 
