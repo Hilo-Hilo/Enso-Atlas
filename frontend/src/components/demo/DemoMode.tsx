@@ -334,91 +334,218 @@ const tourSteps: Step[] = [
   },
 ];
 
+const STARTUP_READY_CHECK_INTERVAL_MS = 120;
+const STARTUP_MAX_READY_CHECKS = 18;
+const TARGET_RETRY_INTERVAL_MS = 250;
+const MAX_TARGET_RETRY_ATTEMPTS = 8;
+
+function getStepSelector(stepIndex: number): string {
+  const step = tourSteps[stepIndex];
+  return typeof step?.target === "string" ? step.target : "";
+}
+
+function isTargetVisible(selector: string): boolean {
+  if (!selector) return false;
+
+  const element = document.querySelector(selector);
+  if (!element) return false;
+
+  const rect = element.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return false;
+
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
+
+function clampStep(step: number): number {
+  return Math.max(0, Math.min(step, tourSteps.length - 1));
+}
+
 export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [run, setRun] = useState(false);
-  const retryCountRef = React.useRef(0);
-  const retryTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const startupTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stepIndexRef = React.useRef(0);
+  const targetRetryRef = React.useRef<{
+    token: number;
+    step: number | null;
+    attempts: number;
+    timer: ReturnType<typeof setTimeout> | null;
+  }>({
+    token: 0,
+    step: null,
+    attempts: 0,
+    timer: null,
+  });
+
+  const clearStartupTimer = useCallback(() => {
+    if (startupTimerRef.current) {
+      clearTimeout(startupTimerRef.current);
+      startupTimerRef.current = null;
+    }
+  }, []);
+
+  const resetTargetRetry = useCallback(() => {
+    if (targetRetryRef.current.timer) {
+      clearTimeout(targetRetryRef.current.timer);
+    }
+
+    targetRetryRef.current = {
+      token: targetRetryRef.current.token + 1,
+      step: null,
+      attempts: 0,
+      timer: null,
+    };
+  }, []);
+
+  const setTourStep = useCallback(
+    (nextStep: number) => {
+      const bounded = clampStep(nextStep);
+      setStepIndex(bounded);
+      onStepChange?.(bounded);
+    },
+    [onStepChange]
+  );
+
+  const retriggerCurrentStep = useCallback(
+    (expectedStep: number) => {
+      setRun(false);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!isActive) return;
+          if (stepIndexRef.current !== expectedStep) return;
+          setRun(true);
+        });
+      });
+    },
+    [isActive]
+  );
+
+  const scheduleMissingTargetRetry = useCallback(
+    (missingStep: number) => {
+      const activeRetry = targetRetryRef.current;
+      if (activeRetry.step === missingStep && activeRetry.timer) {
+        return;
+      }
+
+      resetTargetRetry();
+      targetRetryRef.current.step = missingStep;
+      const token = targetRetryRef.current.token;
+
+      const tryResolveTarget = () => {
+        const retryState = targetRetryRef.current;
+        if (retryState.token !== token || !isActive) return;
+
+        if (stepIndexRef.current !== missingStep) {
+          resetTargetRetry();
+          return;
+        }
+
+        onStepChange?.(missingStep);
+
+        const selector = getStepSelector(missingStep);
+        const hasVisibleTarget = selector ? isTargetVisible(selector) : false;
+
+        if (hasVisibleTarget) {
+          resetTargetRetry();
+          retriggerCurrentStep(missingStep);
+          return;
+        }
+
+        if (retryState.attempts >= MAX_TARGET_RETRY_ATTEMPTS) {
+          resetTargetRetry();
+          const nextStep = missingStep + 1;
+          if (nextStep >= tourSteps.length) {
+            setRun(false);
+            onClose();
+            return;
+          }
+          setTourStep(nextStep);
+          return;
+        }
+
+        retryState.attempts += 1;
+        retryState.timer = setTimeout(tryResolveTarget, TARGET_RETRY_INTERVAL_MS);
+      };
+
+      targetRetryRef.current.timer = setTimeout(
+        tryResolveTarget,
+        TARGET_RETRY_INTERVAL_MS
+      );
+    },
+    [isActive, onClose, onStepChange, resetTargetRetry, retriggerCurrentStep, setTourStep]
+  );
 
   useEffect(() => {
-    if (isActive) {
-      setStepIndex(0);
-      retryCountRef.current = 0;
-      // Wait for mock data to render all tour targets before starting
-      const waitForTargets = () => {
-        const allFound = tourSteps.every((step) => {
-          const selector = typeof step.target === "string" ? step.target : "";
-          if (!selector) return true;
-          const el = document.querySelector(selector);
-          if (!el) return false;
-          // Check the element is actually visible (not display:none)
-          const rect = el.getBoundingClientRect();
-          return rect.width > 0 && rect.height > 0;
-        });
-        if (allFound) {
-          setRun(true);
-        } else if (retryCountRef.current < 20) {
-          retryCountRef.current += 1;
-          retryTimerRef.current = setTimeout(waitForTargets, 150);
-        } else {
-          // Start anyway after max retries -- some targets may still be missing
-          setRun(true);
-        }
-      };
-      retryTimerRef.current = setTimeout(waitForTargets, 300);
-      return () => {
-        if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
-      };
-    } else {
+    stepIndexRef.current = stepIndex;
+  }, [stepIndex]);
+
+  useEffect(() => {
+    if (!isActive) {
+      clearStartupTimer();
+      resetTargetRetry();
       setRun(false);
+      return;
     }
-  }, [isActive]);
+
+    clearStartupTimer();
+    resetTargetRetry();
+
+    setRun(false);
+    setStepIndex(0);
+    stepIndexRef.current = 0;
+    onStepChange?.(0);
+
+    let checks = 0;
+    const waitForFirstTarget = () => {
+      const firstStepSelector = getStepSelector(0);
+      const firstTargetReady = firstStepSelector
+        ? isTargetVisible(firstStepSelector)
+        : true;
+
+      if (firstTargetReady || checks >= STARTUP_MAX_READY_CHECKS) {
+        setRun(true);
+        return;
+      }
+
+      checks += 1;
+      startupTimerRef.current = setTimeout(
+        waitForFirstTarget,
+        STARTUP_READY_CHECK_INTERVAL_MS
+      );
+    };
+
+    startupTimerRef.current = setTimeout(waitForFirstTarget, 0);
+
+    return () => {
+      clearStartupTimer();
+      resetTargetRetry();
+    };
+  }, [isActive, clearStartupTimer, resetTargetRetry, onStepChange]);
 
   const handleJoyrideCallback = useCallback(
     (data: CallBackProps) => {
       const { status, type, index, action } = data;
+      const currentIndex = clampStep(index ?? 0);
+
+      if (type === EVENTS.STEP_BEFORE) {
+        onStepChange?.(currentIndex);
+      }
 
       if (type === EVENTS.STEP_AFTER) {
+        resetTargetRetry();
+
         if (action === ACTIONS.NEXT) {
-          const nextStep = index + 1;
-          setStepIndex(nextStep);
-          onStepChange?.(nextStep);
+          setTourStep(currentIndex + 1);
         } else if (action === ACTIONS.PREV) {
-          const prevStep = index - 1;
-          setStepIndex(prevStep);
-          onStepChange?.(prevStep);
+          setTourStep(currentIndex - 1);
         }
       }
 
-      // Handle target not found -- retry a few times before skipping
       if (type === EVENTS.TARGET_NOT_FOUND) {
-        const step = tourSteps[index];
-        const selector = typeof step?.target === "string" ? step.target : "";
-        let attempts = 0;
-        const maxAttempts = 5;
-
-        const retryFind = () => {
-          attempts += 1;
-          const el = selector ? document.querySelector(selector) : null;
-          if (el) {
-            // Target appeared -- re-trigger the current step
-            setRun(false);
-            requestAnimationFrame(() => setRun(true));
-          } else if (attempts < maxAttempts) {
-            setTimeout(retryFind, 300);
-          } else {
-            // Give up and skip to next step
-            const nextStep = index + 1;
-            if (nextStep < tourSteps.length) {
-              setStepIndex(nextStep);
-              onStepChange?.(nextStep);
-            } else {
-              setRun(false);
-              onClose();
-            }
-          }
-        };
-        setTimeout(retryFind, 300);
+        onStepChange?.(currentIndex);
+        scheduleMissingTargetRetry(currentIndex);
       }
 
       if (
@@ -426,11 +553,20 @@ export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
         status === STATUS.SKIPPED ||
         action === ACTIONS.CLOSE
       ) {
+        clearStartupTimer();
+        resetTargetRetry();
         setRun(false);
         onClose();
       }
     },
-    [onClose, onStepChange]
+    [
+      clearStartupTimer,
+      onClose,
+      onStepChange,
+      resetTargetRetry,
+      scheduleMissingTargetRetry,
+      setTourStep,
+    ]
   );
 
   if (!isActive) return null;

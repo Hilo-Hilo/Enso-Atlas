@@ -147,6 +147,7 @@ export function AnalysisControls({
                   isLoading={isAnalyzing}
                   className="w-full border-sky-300 bg-sky-100 text-sky-900 hover:bg-sky-200"
                   data-action="run-analysis"
+                  data-demo="analyze-button"
                 >
                   {isGeneratingEmbeddings
                     ? "Generating Embeddings..."

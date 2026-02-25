@@ -119,6 +119,13 @@ const RIGHT_PANEL_ICONS: Record<RightSidebarPanelKey, React.ElementType> = {
   "outlier-detector": AlertTriangle,
 };
 
+const DEMO_RIGHT_PANEL_BY_STEP: Partial<Record<number, RightSidebarPanelKey>> = {
+  3: "prediction",
+  4: "evidence",
+  5: "similar-cases",
+  6: "medgemma",
+};
+
 function RightSidebarTabs({
   options,
   activePanel,
@@ -292,6 +299,29 @@ function HomePage() {
   const handleDemoModeToggle = useCallback(() => {
     setDemoMode((prev) => !prev);
   }, []);
+
+  const handleDemoStepChange = useCallback(
+    (step: number) => {
+      const normalizedStep = Math.max(0, step);
+
+      // Keep demo in oncologist + WSI mode so targets are deterministic.
+      handleUserViewModeChange("oncologist");
+      setViewMode("wsi");
+
+      if (normalizedStep <= 1) {
+        leftPanelRef.current?.expand?.();
+        setLeftSidebarOpen(true);
+        setMobilePanelTab("slides");
+      }
+
+      const targetRightPanel = DEMO_RIGHT_PANEL_BY_STEP[normalizedStep];
+      if (targetRightPanel) {
+        setActiveRightPanel(targetRightPanel);
+        setMobilePanelTab("results");
+      }
+    },
+    [handleUserViewModeChange]
+  );
 
   // Mock analysis result overlay for demo mode (analysisResult is owned by useAnalysis hook)
   const [demoAnalysisResult, setDemoAnalysisResult] = useState<import("@/types").AnalysisResponse | null>(null);
@@ -2712,6 +2742,7 @@ function HomePage() {
       <DemoMode
         isActive={demoMode}
         onClose={() => setDemoMode(false)}
+        onStepChange={handleDemoStepChange}
       />
 
       {/* Welcome Modal */}
