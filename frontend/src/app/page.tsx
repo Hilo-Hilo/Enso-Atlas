@@ -38,7 +38,7 @@ import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
 import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse, VisualSearchResponse, SimilarCase, StructuredReport, PatchOverlay } from "@/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui";
-import { ChevronLeft, ChevronRight, Layers, BarChart3, X } from "lucide-react";
+import { Layers, BarChart3, Sparkles, Search, Grid3X3, Users, Microscope, AlertTriangle, TrendingUp } from "lucide-react";
 
 // ResizableLayout removed - using react-resizable-panels directly
 
@@ -100,6 +100,58 @@ function MobilePanelTabs({
           <span className="absolute top-2 right-1/4 w-2 h-2 bg-clinical-500 rounded-full" />
         )}
       </button>
+    </div>
+  );
+}
+
+// Icon mapping for right sidebar panel tabs
+const RIGHT_PANEL_ICONS: Record<RightSidebarPanelKey, React.ElementType> = {
+  "pathologist-workspace": Microscope,
+  medgemma: Sparkles,
+  evidence: Grid3X3,
+  prediction: TrendingUp,
+  "multi-model": Layers,
+  "semantic-search": Search,
+  "similar-cases": Users,
+  "outlier-detector": AlertTriangle,
+};
+
+function RightSidebarTabs({
+  options,
+  activePanel,
+  onPanelChange,
+}: {
+  options: Array<{ value: RightSidebarPanelKey; label: string }>;
+  activePanel: RightSidebarPanelKey;
+  onPanelChange: (panel: RightSidebarPanelKey) => void;
+}) {
+  return (
+    <div className="sticky top-0 z-10 bg-white border-b border-gray-200">
+      <nav className="flex" role="tablist" aria-label="Analysis tools">
+        {options.map((opt) => {
+          const Icon = RIGHT_PANEL_ICONS[opt.value];
+          const isActive = activePanel === opt.value;
+          return (
+            <button
+              key={opt.value}
+              role="tab"
+              aria-selected={isActive}
+              aria-label={opt.label}
+              title={opt.label}
+              onClick={() => onPanelChange(opt.value)}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 px-1 py-2.5 text-xs font-medium transition-colors border-b-2 min-w-0",
+                isActive
+                  ? "text-clinical-700 border-clinical-500 bg-clinical-50/40"
+                  : "text-gray-400 border-transparent hover:text-gray-600 hover:bg-gray-50"
+              )}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="truncate hidden xl:inline">{opt.label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }
@@ -211,11 +263,9 @@ function HomePage() {
   const [mobilePanelTab, setMobilePanelTab] = useState<MobilePanelTab>("slides");
   const [activeRightPanel, setActiveRightPanel] = useState<RightSidebarPanelKey>("medgemma");
 
-  // Desktop sidebar collapse state
+  // Desktop sidebar collapse state (left only; right panel is always visible)
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
-  const rightPanelRef = useRef<PanelImperativeHandle>(null);
 
   // Check if this is a first visit (show welcome modal)
   useEffect(() => {
@@ -2348,27 +2398,15 @@ function HomePage() {
     return null;
   };
 
-  // Render right sidebar content (oncologist mode)
+  // Render right sidebar content — icon tab bar replaces the old "Right panel" dropdown
   const renderRightSidebarContent = () => (
     <>
-      <div className="sticky top-0 z-10 bg-white pb-3 border-b border-gray-100">
-        <label htmlFor="right-panel-selector" className="block text-xs font-medium text-gray-600 mb-1">
-          Right panel
-        </label>
-        <select
-          id="right-panel-selector"
-          value={activeRightPanel}
-          onChange={(e) => setActiveRightPanel(e.target.value as RightSidebarPanelKey)}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-clinical-500 focus:outline-none focus:ring-1 focus:ring-clinical-500"
-        >
-          {rightSidebarPanelOptions.map((panel) => (
-            <option key={panel.value} value={panel.value}>
-              {panel.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="pt-2">{renderSelectedRightSidebarPanel()}</div>
+      <RightSidebarTabs
+        options={rightSidebarPanelOptions}
+        activePanel={activeRightPanel}
+        onPanelChange={setActiveRightPanel}
+      />
+      <div className="p-4">{renderSelectedRightSidebarPanel()}</div>
     </>
   );
 
@@ -2444,24 +2482,6 @@ function HomePage() {
         </Panel>
         <PanelResizeHandle className="relative w-1.5 bg-gray-100 hover:bg-clinical-200 active:bg-clinical-300 transition-colors cursor-col-resize flex items-center justify-center group">
           <div className="w-0.5 h-8 bg-gray-300 group-hover:bg-clinical-400 rounded-full transition-colors" />
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => {
-              if (leftSidebarOpen) {
-                leftPanelRef.current?.collapse();
-              } else {
-                leftPanelRef.current?.expand();
-              }
-            }}
-            className="absolute top-3 left-1/2 -translate-x-1/2 z-30 h-10 w-10 rounded-lg border border-sky-300 bg-white shadow-md hover:bg-sky-50 flex items-center justify-center"
-            title={leftSidebarOpen ? "Collapse left sidebar" : "Expand left sidebar"}
-          >
-            {leftSidebarOpen ? (
-              <ChevronLeft className="h-5 w-5 text-sky-700" />
-            ) : (
-              <ChevronRight className="h-5 w-5 text-sky-700" />
-            )}
-          </button>
         </PanelResizeHandle>
 
         {/* Center - WSI Viewer or Oncologist Summary */}
@@ -2601,46 +2621,18 @@ function HomePage() {
         </Panel>
         <PanelResizeHandle className="relative w-1.5 bg-gray-100 hover:bg-clinical-200 active:bg-clinical-300 transition-colors cursor-col-resize flex items-center justify-center group">
           <div className="w-0.5 h-8 bg-gray-300 group-hover:bg-clinical-400 rounded-full transition-colors" />
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => {
-              if (rightSidebarOpen) {
-                rightPanelRef.current?.collapse();
-              } else {
-                rightPanelRef.current?.expand();
-              }
-            }}
-            className="absolute top-3 left-1/2 -translate-x-1/2 z-30 h-10 w-10 rounded-lg border border-sky-300 bg-white shadow-md hover:bg-sky-50 flex items-center justify-center"
-            title={rightSidebarOpen ? "Collapse right sidebar" : "Expand right sidebar"}
-          >
-            {rightSidebarOpen ? (
-              <ChevronRight className="h-5 w-5 text-sky-700" />
-            ) : (
-              <ChevronLeft className="h-5 w-5 text-sky-700" />
-            )}
-          </button>
         </PanelResizeHandle>
 
-        {/* Right Sidebar - Desktop (Resizable) */}
+        {/* Right Sidebar - Desktop (Resizable, always visible) */}
         <Panel
-          panelRef={rightPanelRef}
           defaultSize="28%"
-          minSize="5%"
+          minSize="15%"
           maxSize="45%"
-          collapsible
-          collapsedSize="0%"
-          onResize={(size) => {
-            if (size.asPercentage === 0 && rightSidebarOpen) setRightSidebarOpen(false);
-            if (size.asPercentage > 0 && !rightSidebarOpen) setRightSidebarOpen(true);
-          }}
         >
         <aside
-          className={cn(
-            "h-full bg-white p-4 overflow-y-auto overflow-x-hidden space-y-4 relative",
-            !rightSidebarOpen && "overflow-hidden"
-          )}
+          className="h-full bg-white overflow-y-auto overflow-x-hidden relative"
         >
-          {rightSidebarOpen && renderRightSidebarContent()}
+          {renderRightSidebarContent()}
         </aside>
         </Panel>
         </PanelGroup>
