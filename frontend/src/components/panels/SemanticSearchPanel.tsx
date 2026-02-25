@@ -26,6 +26,7 @@ interface SemanticSearchPanelProps {
   isSearching: boolean;
   error?: string | null;
   onPatchClick?: (coords: PatchCoordinates) => void;
+  onPatchDeselect?: () => void;
   selectedPatchId?: string;
   inputRef?: React.RefObject<HTMLInputElement>;
   onClearResults?: () => void;
@@ -48,6 +49,7 @@ export function SemanticSearchPanel({
   isSearching,
   error,
   onPatchClick,
+  onPatchDeselect,
   selectedPatchId,
   inputRef,
   onClearResults,
@@ -230,12 +232,18 @@ export function SemanticSearchPanel({
               <span className="font-medium">Matching Patches</span>
               <span>Similarity Score</span>
             </div>
+            {selectedPatchId && (
+              <p className="text-2xs text-clinical-700">
+                Tip: click the selected patch again to deselect.
+              </p>
+            )}
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {results.map((result, index) => {
                 // Match selection based on coordinates (what handlePatchClick sets)
                 const coordsMatch = result.coordinates
                   ? `${result.coordinates[0]}_${result.coordinates[1]}`
                   : null;
+                const isSelected = coordsMatch !== null && selectedPatchId === coordsMatch;
                 return (
                   <SearchResultItem
                     key={`${result.patch_index}_${index}`}
@@ -243,9 +251,16 @@ export function SemanticSearchPanel({
                     rank={index + 1}
                     slideId={slideId}
                     projectId={projectId}
-                    isSelected={coordsMatch !== null && selectedPatchId === coordsMatch}
+                    isSelected={isSelected}
                     onClick={() => {
                       if (!result.coordinates) return;
+
+                      // Clicking an already selected semantic-search patch deselects it.
+                      if (isSelected) {
+                        onPatchDeselect?.();
+                        return;
+                      }
+
                       onPatchClick?.({
                         x: result.coordinates[0],
                         y: result.coordinates[1],
@@ -323,7 +338,13 @@ function SearchResultItem({
           : "border-gray-200 bg-white",
         !canNavigate && "opacity-70 cursor-not-allowed hover:border-gray-200 hover:bg-white hover:shadow-none"
       )}
-      title={canNavigate ? "Jump to this patch" : "Coordinates unavailable for this patch"}
+      title={
+        canNavigate
+          ? isSelected
+            ? "Selected. Click again to deselect"
+            : "Jump to this patch"
+          : "Coordinates unavailable for this patch"
+      }
     >
       {/* Thumbnail */}
       <div className="relative w-12 h-12 rounded-lg overflow-hidden shrink-0 border border-gray-200 group-hover:border-clinical-300">

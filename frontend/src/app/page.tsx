@@ -1645,6 +1645,11 @@ function HomePage() {
     setTargetCoordinates({ ...coords });
   }, []);
 
+  const handlePatchDeselect = useCallback(() => {
+    setSelectedPatchId(undefined);
+    setTargetCoordinates(null);
+  }, []);
+
   const handleReportEvidenceClick = useCallback((coords: PatchCoordinates) => {
     // Ensure the clicked evidence is visible in the full WSI viewer.
     if (userViewMode === "oncologist") {
@@ -2368,6 +2373,7 @@ function HomePage() {
           isSearching={isSearching}
           error={searchError}
           onPatchClick={handlePatchClick}
+          onPatchDeselect={handlePatchDeselect}
           selectedPatchId={selectedPatchId}
           inputRef={searchInputRef}
           onClearResults={() => {
@@ -2375,6 +2381,7 @@ function HomePage() {
             setSemanticResults([]);
             setSearchError(null);
             setIsSearching(false);
+            handlePatchDeselect();
           }}
         />
       );
