@@ -145,6 +145,7 @@ function RightSidebarTabs({
             <button
               key={opt.value}
               role="tab"
+              data-demo={`right-tab-${opt.value}`}
               aria-selected={isActive}
               aria-label={opt.label}
               title={opt.label}
