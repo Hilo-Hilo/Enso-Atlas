@@ -468,7 +468,7 @@ export function Header({
           {/* Demo Mode Toggle */}
           {onDemoModeToggle && (
             <div className="hidden lg:block">
-              <DemoToggle isActive={demoMode} onToggle={onDemoModeToggle} />
+              <DemoToggle isActive={demoMode} onToggle={onDemoModeToggle} disabled={settingsOpen} />
             </div>
           )}
 
@@ -607,7 +607,7 @@ export function Header({
           {onDemoModeToggle && (
             <div className="flex items-center justify-between px-4 py-3">
               <span className="text-gray-300">Demo Mode</span>
-              <DemoToggle isActive={demoMode} onToggle={onDemoModeToggle} />
+              <DemoToggle isActive={demoMode} onToggle={onDemoModeToggle} disabled={settingsOpen} />
             </div>
           )}
         </div>

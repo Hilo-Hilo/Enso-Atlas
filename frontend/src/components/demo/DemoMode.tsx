@@ -618,20 +618,35 @@ export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
 interface DemoToggleProps {
   isActive: boolean;
   onToggle: () => void;
+  /** When true, the toggle appears greyed/slashed and is non-interactive (e.g., settings modal open) */
+  disabled?: boolean;
 }
 
-export function DemoToggle({ isActive, onToggle }: DemoToggleProps) {
+export function DemoToggle({ isActive, onToggle, disabled = false }: DemoToggleProps) {
   return (
     <button
-      onClick={onToggle}
+      onClick={disabled ? undefined : onToggle}
+      disabled={disabled}
+      aria-disabled={disabled}
       className={cn(
-        "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-        isActive
-          ? "bg-clinical-500 text-white shadow-lg shadow-clinical-500/30"
-          : "bg-gradient-to-r from-clinical-500 to-clinical-600 text-white hover:from-clinical-600 hover:to-clinical-700 shadow-md"
+        "relative flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+        disabled
+          ? "bg-gray-300 text-gray-500 cursor-not-allowed opacity-60 shadow-none"
+          : isActive
+            ? "bg-clinical-500 text-white shadow-lg shadow-clinical-500/30"
+            : "bg-gradient-to-r from-clinical-500 to-clinical-600 text-white hover:from-clinical-600 hover:to-clinical-700 shadow-md"
       )}
-      title={isActive ? "Exit demo mode" : "Start guided tour"}
+      title={disabled ? "Demo mode unavailable while settings is open" : isActive ? "Exit demo mode" : "Start guided tour"}
     >
+      {/* Diagonal strike-through overlay when disabled */}
+      {disabled && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 pointer-events-none overflow-hidden rounded-lg"
+        >
+          <span className="absolute top-1/2 left-0 w-full h-0.5 bg-gray-500/70 -rotate-12 origin-center" />
+        </span>
+      )}
       {isActive ? (
         <>
           <X className="w-4 h-4" />
