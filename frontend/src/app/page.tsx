@@ -169,14 +169,7 @@ export default function HomePageWrapper() {
 
 function HomePage() {
   const searchParams = useSearchParams();
-  const { currentProject, switchProject } = useProject();
-
-  useEffect(() => {
-    const requestedProject = searchParams.get("project");
-    if (requestedProject && requestedProject !== currentProject.id) {
-      switchProject(requestedProject);
-    }
-  }, [searchParams, currentProject.id, switchProject]);
+  const { currentProject } = useProject();
 
   // State
   const [selectedSlide, setSelectedSlide] = useState<SlideInfo | null>(null);
@@ -387,6 +380,14 @@ function HomePage() {
   const evidencePanelRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Request guards to prevent stale async responses from clobbering current UI state
+  const selectedSlideIdRef = useRef<string | null>(null);
+  const slideSelectionRequestRef = useRef(0);
+  const semanticSearchRequestRef = useRef(0);
+  const visualSearchRequestRef = useRef(0);
+  const embeddingRequestRef = useRef(0);
+  const multiModelRequestRef = useRef(0);
+
   // Current viewer zoom level (synced from WSIViewer)
   const [viewerZoom, setViewerZoom] = useState(1);
 
@@ -423,6 +424,18 @@ function HomePage() {
 
   // Effective analysis result: demo overlay takes precedence when active
   const analysisResult = demoAnalysisResult ?? hookAnalysisResult;
+
+  useEffect(() => {
+    selectedSlideIdRef.current = selectedSlide?.id ?? null;
+  }, [selectedSlide?.id]);
+
+  // Invalidate in-flight search requests when slide changes to avoid stale results.
+  useEffect(() => {
+    semanticSearchRequestRef.current += 1;
+    visualSearchRequestRef.current += 1;
+    setIsSearching(false);
+    setIsSearchingVisual(false);
+  }, [selectedSlide?.id]);
 
   // UX gating: hide low-signal evidence by default
   const EVIDENCE_SIGNIFICANCE_THRESHOLD = 0.6;
@@ -632,8 +645,19 @@ function HomePage() {
     // Clear single-model analysis results to avoid stale data from previous project
     clearResults();
     // Clear selected slide
+    selectedSlideIdRef.current = null;
     setSelectedSlide(null);
     setSlideIndex(0);
+    // Clear async/search state to avoid cross-project stale UI
+    semanticSearchRequestRef.current += 1;
+    visualSearchRequestRef.current += 1;
+    setIsSearching(false);
+    setIsSearchingVisual(false);
+    setSemanticResults([]);
+    setSearchError(null);
+    setVisualSearchResults([]);
+    setVisualSearchQuery(null);
+    setVisualSearchError(null);
     // Clear current project model cache while refetching
     setProjectAvailableModels([]);
     setProjectAvailableModelsScopeId(null);
@@ -717,11 +741,15 @@ function HomePage() {
     setSlideIndex(newIndex);
     const slide = slideList[newIndex];
     if (slide) {
+      selectedSlideIdRef.current = slide.id;
       setSelectedSlide(slide);
       clearResults();
       setSelectedPatchId(undefined);
       setSemanticResults([]);
       setSearchError(null);
+      setVisualSearchResults([]);
+      setVisualSearchQuery(null);
+      setVisualSearchError(null);
       // Clear multi-model results and cache
       setMultiModelResult(null);
       setMultiModelError(null);
@@ -736,11 +764,16 @@ function HomePage() {
     } else if (shortcutsModalOpen) {
       setShortcutsModalOpen(false);
     } else {
+      selectedSlideIdRef.current = null;
       setSelectedSlide(null);
       setSlideIndex(-1);
       clearResults();
       setSelectedPatchId(undefined);
       setSemanticResults([]);
+      setSearchError(null);
+      setVisualSearchResults([]);
+      setVisualSearchQuery(null);
+      setVisualSearchError(null);
       // Clear multi-model results and cache
       setMultiModelResult(null);
       setMultiModelError(null);
@@ -775,8 +808,11 @@ function HomePage() {
   }, []);
 
   const handleFocusSearch = useCallback(() => {
-    searchInputRef.current?.focus();
-    searchInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setActiveRightPanel("semantic-search");
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }, []);
 
   const handleViewerZoomIn = useCallback(() => {
@@ -844,11 +880,24 @@ function HomePage() {
   // Handle slide selection
   const handleSlideSelect = useCallback(
     async (slide: SlideInfo) => {
+      const requestId = ++slideSelectionRequestRef.current;
+      const slideId = slide.id;
+      selectedSlideIdRef.current = slideId;
+
       setSelectedSlide(slide);
       clearResults();
       setSelectedPatchId(undefined);
+
+      semanticSearchRequestRef.current += 1;
+      visualSearchRequestRef.current += 1;
+      setIsSearching(false);
+      setIsSearchingVisual(false);
       setSemanticResults([]);
       setSearchError(null);
+      setVisualSearchResults([]);
+      setVisualSearchQuery(null);
+      setVisualSearchError(null);
+
       setSlideQCMetrics(null);
       // Clear multi-model results and cache state
       setMultiModelResult(null);
@@ -857,17 +906,24 @@ function HomePage() {
       setCachedResultTimestamp(null);
 
       // Fetch QC metrics and cached results in parallel
-      const qcPromise = getSlideQC(slide.id).catch((err) => {
+      const qcPromise = getSlideQC(slideId).catch((err) => {
         console.error("Failed to fetch QC metrics:", err);
         return null;
       });
 
-      const cachedPromise = getSlideCachedResults(slide.id, currentProject.id).catch((err) => {
+      const cachedPromise = getSlideCachedResults(slideId, currentProject.id).catch((err) => {
         console.error("Failed to fetch cached results:", err);
         return null;
       });
 
       const [qcResult, cachedResult] = await Promise.all([qcPromise, cachedPromise]);
+
+      if (
+        slideSelectionRequestRef.current !== requestId ||
+        selectedSlideIdRef.current !== slideId
+      ) {
+        return;
+      }
 
       if (qcResult) {
         setSlideQCMetrics(qcResult);
@@ -896,6 +952,12 @@ function HomePage() {
         if (currentProject.id && currentProject.id !== "default") {
           try {
             const projectModels = await getProjectAvailableModels(currentProject.id);
+            if (
+              slideSelectionRequestRef.current !== requestId ||
+              selectedSlideIdRef.current !== slideId
+            ) {
+              return;
+            }
             for (const model of projectModels) {
               MODEL_META[model.id] = {
                 name: model.displayName,
@@ -967,9 +1029,16 @@ function HomePage() {
           }
         }
 
+        if (
+          slideSelectionRequestRef.current !== requestId ||
+          selectedSlideIdRef.current !== slideId
+        ) {
+          return;
+        }
+
         if (Object.keys(predictions).length > 0) {
           setMultiModelResult({
-            slideId: slide.id,
+            slideId,
             predictions,
             byCategory: { cancerSpecific, generalPathology },
             nPatches: 0,
@@ -981,11 +1050,11 @@ function HomePage() {
 
         // Auto-run single-model analysis to populate evidence patches + semantic search
         analyze({
-          slideId: slide.id,
+          slideId,
           patchBudget: 8000,
           magnification: 20,
           projectId: currentProject.id,
-        }).catch(() => {});  // Silent -- cached multi-model results already shown
+        }).catch(() => {}); // Silent -- cached multi-model results already shown
       }
     },
     [
@@ -1004,20 +1073,37 @@ function HomePage() {
     async (query: string, topK: number) => {
       if (!selectedSlide) return;
 
+      const slideId = selectedSlide.id;
+      const requestId = ++semanticSearchRequestRef.current;
+
       setIsSearching(true);
       setSearchError(null);
 
       try {
-        const response = await semanticSearch(selectedSlide.id, query, topK, currentProject?.id);
+        const response = await semanticSearch(slideId, query, topK, currentProject?.id);
+        if (
+          semanticSearchRequestRef.current !== requestId ||
+          selectedSlideIdRef.current !== slideId
+        ) {
+          return;
+        }
         setSemanticResults(response.results);
       } catch (err) {
+        if (
+          semanticSearchRequestRef.current !== requestId ||
+          selectedSlideIdRef.current !== slideId
+        ) {
+          return;
+        }
         console.error("Semantic search failed:", err);
         setSearchError(
           err instanceof Error ? err.message : "Search failed. Please try again."
         );
         setSemanticResults([]);
       } finally {
-        setIsSearching(false);
+        if (semanticSearchRequestRef.current === requestId) {
+          setIsSearching(false);
+        }
       }
     },
     [selectedSlide, currentProject.id]
@@ -1028,21 +1114,30 @@ function HomePage() {
     async (patch: EvidencePatch) => {
       if (!selectedSlide) return;
 
+      const slideId = selectedSlide.id;
+      const requestId = ++visualSearchRequestRef.current;
+
       // Extract patch index from patchId (format: "patch_{index}")
       const patchIndex = parseInt(patch.patchId.replace(/\D/g, ""), 10) || 0;
 
       setIsSearchingVisual(true);
       setVisualSearchError(null);
-      setVisualSearchQuery({ slideId: selectedSlide.id, patchIndex });
+      setVisualSearchQuery({ slideId, patchIndex });
 
       try {
         const response = await visualSearch({
-          slideId: selectedSlide.id,
+          slideId,
           patchIndex,
           topK: 10,
           excludeSameSlide: true,
-          projectId: currentProject.id,
         });
+
+        if (
+          visualSearchRequestRef.current !== requestId ||
+          selectedSlideIdRef.current !== slideId
+        ) {
+          return;
+        }
 
         // Convert VisualSearchResultPatch to SimilarCase for the panel
         const similarCases: SimilarCase[] = response.results.map((r) => ({
@@ -1062,13 +1157,19 @@ function HomePage() {
         }));
 
         setVisualSearchResults(similarCases);
-        
+
         // Show toast notification
         toast.success(
           "Visual Search Complete",
           `Found ${similarCases.length} similar patches in ${response.searchTimeMs.toFixed(0)}ms`
         );
       } catch (err) {
+        if (
+          visualSearchRequestRef.current !== requestId ||
+          selectedSlideIdRef.current !== slideId
+        ) {
+          return;
+        }
         console.error("Visual search failed:", err);
         setVisualSearchError(
           err instanceof Error ? err.message : "Visual search failed. Please try again."
@@ -1076,10 +1177,12 @@ function HomePage() {
         setVisualSearchResults([]);
         toast.error("Visual Search Failed", err instanceof Error ? err.message : "Unknown error");
       } finally {
-        setIsSearchingVisual(false);
+        if (visualSearchRequestRef.current === requestId) {
+          setIsSearchingVisual(false);
+        }
       }
     },
-    [selectedSlide, currentProject.id, toast]
+    [selectedSlide, toast]
   );
 
   // Clear visual search results when slide changes
@@ -1093,8 +1196,11 @@ function HomePage() {
   const handleGenerateEmbeddings = useCallback(async () => {
     if (!selectedSlide) return;
 
+    const slideId = selectedSlide.id;
+    const requestId = ++embeddingRequestRef.current;
+
     setIsGeneratingEmbeddings(true);
-    setEmbeddingProgress({ 
+    setEmbeddingProgress({
       phase: "embedding",
       progress: 0,
       message: "Starting embedding generation...",
@@ -1103,15 +1209,17 @@ function HomePage() {
 
     const toastId = toast.loading(
       "Generating Embeddings",
-      `Starting level ${resolutionLevel} embedding for ${selectedSlide.id}...`
+      `Starting level ${resolutionLevel} embedding for ${slideId}...`
     );
 
     try {
-    const embedResult = await embedSlideWithPolling(
-      selectedSlide.id, 
-      resolutionLevel,
-      forceReembed,
-      (progress) => {
+      const embedResult = await embedSlideWithPolling(
+        slideId,
+        resolutionLevel,
+        forceReembed,
+        (progress) => {
+          if (embeddingRequestRef.current !== requestId) return;
+
           const nextPhase: "embedding" | "complete" =
             progress.phase === "complete" ? "complete" : "embedding";
           const nextProgress = {
@@ -1124,39 +1232,44 @@ function HomePage() {
             ...nextProgress,
             startTime: prev?.startTime ?? Date.now(),
           }));
-          
+
           toast.updateToast(toastId, {
             message: `${progress.message} (${Math.round(progress.progress)}%)`,
           });
         }
       );
-      
+
       toast.removeToast(toastId);
       toast.success(
         "Embeddings Ready",
         `Generated embeddings for ${embedResult.numPatches} patches. You can now run analysis.`
       );
-      
+
       // Refresh slide list to update hasLevel0Embeddings status
       const response = await getSlides({ projectId: currentProject.id });
       const dedupedSlides = deduplicateSlides(response.slides);
+      if (embeddingRequestRef.current !== requestId) return;
+
       setSlideList(dedupedSlides);
-      
-      // Update selected slide with new embedding status
-      const updatedSlide = dedupedSlides.find(s => s.id === selectedSlide.id);
-      if (updatedSlide) {
+
+      // Update selected slide with new embedding status only if the same slide is still selected
+      const updatedSlide = dedupedSlides.find((s) => s.id === slideId);
+      if (updatedSlide && selectedSlideIdRef.current === slideId) {
         setSelectedSlide(updatedSlide);
       }
-      
     } catch (err) {
+      if (embeddingRequestRef.current !== requestId) return;
+
       console.error("Embedding generation failed:", err);
       toast.removeToast(toastId);
-      
+
       const errorMessage = err instanceof Error ? err.message : "Embedding failed";
       toast.error("Embedding Failed", errorMessage);
     } finally {
-      setIsGeneratingEmbeddings(false);
-      setEmbeddingProgress(null);
+      if (embeddingRequestRef.current === requestId) {
+        setIsGeneratingEmbeddings(false);
+        setEmbeddingProgress(null);
+      }
     }
   }, [selectedSlide, resolutionLevel, forceReembed, toast, currentProject.id]);
 
@@ -1164,10 +1277,20 @@ function HomePage() {
   const handleMultiModelAnalyze = useCallback(async (forceRefresh: boolean = false) => {
     if (!selectedSlide) return;
 
+    const slideId = selectedSlide.id;
+    const requestId = ++multiModelRequestRef.current;
+
     // Safety gate: single-model projects should never execute multi-model inference.
     if (scopedProjectModels.length <= 1) {
       setMultiModelResult(null);
       setMultiModelError(null);
+      return;
+    }
+
+    if (selectedModels.length === 0) {
+      setMultiModelResult(null);
+      setMultiModelError("Select at least one model before running multi-model analysis.");
+      toast.warning("No Models Selected", "Pick one or more models to run multi-model analysis.");
       return;
     }
 
@@ -1187,7 +1310,7 @@ function HomePage() {
 
     setIsAnalyzingMultiModel(true);
     setMultiModelError(null);
-    setEmbeddingProgress({ 
+    setEmbeddingProgress({
       phase: "embedding",
       progress: 0,
       message: "Preparing tissue patches for analysis...",
@@ -1207,10 +1330,12 @@ function HomePage() {
 
       // Use the new polling-based embed function
       const embedResult = await embedSlideWithPolling(
-        selectedSlide.id, 
+        slideId,
         resolutionLevel,
         forceReembed,
         (progress) => {
+          if (multiModelRequestRef.current !== requestId) return;
+
           // Update progress UI with real-time status from backend
           const nextPhase: "embedding" | "analyzing" =
             progress.phase === "complete" ? "analyzing" : "embedding";
@@ -1224,58 +1349,57 @@ function HomePage() {
             ...nextProgress,
             startTime: prev?.startTime ?? Date.now(),
           }));
-          
+
           toast.updateToast(toastId, {
             message: `${progress.message} (${Math.round(progress.progress)}%)`,
           });
         }
       );
-      
-      const embeddingMsg = embedResult.status === "exists" 
-        ? "Using cached embeddings" 
-        : `Generated embeddings for ${embedResult.numPatches} patches`;
-      
+
+      if (
+        multiModelRequestRef.current !== requestId ||
+        selectedSlideIdRef.current !== slideId
+      ) {
+        return;
+      }
+
+      const embeddingMsg =
+        embedResult.status === "exists"
+          ? "Using cached embeddings"
+          : `Generated embeddings for ${embedResult.numPatches} patches`;
+
       toast.updateToast(toastId, {
         title: "Embeddings Ready",
         message: embeddingMsg + ". Running model inference...",
       });
-      
+
       setEmbeddingProgress((prev) => ({
         phase: "analyzing",
         progress: 100,
         message: "Running multi-model inference...",
-        startTime: prev?.startTime ?? Date.now()
+        startTime: prev?.startTime ?? Date.now(),
       }));
 
-      // Then run multi-model analysis with project-scoped model defaults
-      const scopedAllowedModelIds = new Set(scopedProjectModels.map((m) => m.id));
-      const sanitizedSelectedModels = selectedModels.filter((id) => scopedAllowedModelIds.has(id));
-
-      if (sanitizedSelectedModels.length !== selectedModels.length) {
-        setSelectedModels(sanitizedSelectedModels);
-      }
-
-      const modelIdsForAnalysis = sanitizedSelectedModels.length > 0
-        ? sanitizedSelectedModels
-        : scopedProjectModels.map((m) => m.id);
+      // Then run multi-model analysis with explicit model selection only
+      const modelIdsForAnalysis = selectedModels;
 
       const result = await analyzeSlideMultiModel(
-        selectedSlide.id,
-        modelIdsForAnalysis.length > 0 ? modelIdsForAnalysis : undefined,
+        slideId,
+        modelIdsForAnalysis,
         false,
         resolutionLevel,
         forceRefresh,
         currentProject.id
       );
 
-      const allowedModelIds = new Set<string>(
-        modelIdsForAnalysis.length > 0
-          ? modelIdsForAnalysis
-          : [
-              ...scopedProjectModels.map((m) => m.id),
-              ...(currentProject.prediction_target ? [currentProject.prediction_target] : []),
-            ]
-      );
+      if (
+        multiModelRequestRef.current !== requestId ||
+        selectedSlideIdRef.current !== slideId
+      ) {
+        return;
+      }
+
+      const allowedModelIds = new Set<string>(modelIdsForAnalysis);
 
       const filteredPredictions = Object.fromEntries(
         Object.entries(result.predictions).filter(([modelId]) => allowedModelIds.has(modelId))
@@ -1297,26 +1421,30 @@ function HomePage() {
       };
 
       setMultiModelResult(scopedResult);
-      
+
       // Success toast
       toast.removeToast(toastId);
       toast.success(
         "Analysis Complete",
         `Analyzed ${scopedResult.nPatches} patches with ${(scopedResult.byCategory.cancerSpecific?.length ?? 0) + (scopedResult.byCategory.generalPathology?.length ?? 0)} models`
       );
-      
     } catch (err) {
+      if (multiModelRequestRef.current !== requestId) {
+        return;
+      }
+
       console.error("Multi-model analysis failed:", err);
-      
+
       toast.removeToast(toastId);
-      
+
       // Determine if it was an embedding error or analysis error
       const errorMessage = err instanceof Error ? err.message : "Analysis failed";
-      const isEmbeddingError = errorMessage.toLowerCase().includes("embed") || 
-                              errorMessage.toLowerCase().includes("dino") ||
-                              errorMessage.toLowerCase().includes("patch") ||
-                              errorMessage.toLowerCase().includes("timeout");
-      
+      const isEmbeddingError =
+        errorMessage.toLowerCase().includes("embed") ||
+        errorMessage.toLowerCase().includes("dino") ||
+        errorMessage.toLowerCase().includes("patch") ||
+        errorMessage.toLowerCase().includes("timeout");
+
       const lowerError = errorMessage.toLowerCase();
 
       // Busy overload contract from backend while batch embedding is active
@@ -1326,8 +1454,9 @@ function HomePage() {
         lowerError.includes("temporarily unavailable to avoid gpu contention");
 
       // Check if it's a level 0 embeddings required error
-      const needsLevel0 = lowerError.includes("level0_embeddings_required") ||
-                          lowerError.includes("level 0");
+      const needsLevel0 =
+        lowerError.includes("level0_embeddings_required") ||
+        lowerError.includes("level 0");
 
       if (isServerBusy) {
         const busyMsg =
@@ -1347,12 +1476,13 @@ function HomePage() {
           "Generate Level 0 embeddings before running analysis."
         );
       } else if (isEmbeddingError) {
-        const userFriendlyMsg = "Failed to generate slide embeddings. This could be due to:\n" +
+        const userFriendlyMsg =
+          "Failed to generate slide embeddings. This could be due to:\n" +
           "• Slide file not found or corrupted\n" +
           "• GPU memory issues on the server\n" +
           "• Network timeout (level 0 embedding can take 5-20 minutes)\n\n" +
           "Please try again or contact support if the issue persists.";
-        
+
         setMultiModelError(userFriendlyMsg);
         toast.error(
           "Embedding Failed",
@@ -1368,18 +1498,15 @@ function HomePage() {
         );
       }
     } finally {
-      setIsAnalyzingMultiModel(false);
-      setEmbeddingProgress(null);
+      if (multiModelRequestRef.current === requestId) {
+        setIsAnalyzingMultiModel(false);
+        setEmbeddingProgress(null);
+      }
     }
-  }, [selectedSlide, selectedModels, scopedProjectModels, resolutionLevel, forceReembed, toast, currentProject.id]);
+  }, [selectedSlide, selectedModels, scopedProjectModels.length, resolutionLevel, forceReembed, toast, currentProject.id]);
   // Handle analyze button
   const handleAnalyze = useCallback(async () => {
     if (!selectedSlide) return;
-
-    if (selectedModels.length === 0) {
-      toast.warning("Model Selection Required", "Select at least one model before analysis.");
-      return;
-    }
 
     // On mobile, switch to results tab when analysis starts
     setMobilePanelTab("results");
@@ -1417,7 +1544,7 @@ function HomePage() {
       setMultiModelResult(null);
       setMultiModelError(null);
     }
-  }, [selectedSlide, selectedModels.length, analyze, toast, handleMultiModelAnalyze, currentProject.id, scopedProjectModels.length]);
+  }, [selectedSlide, analyze, toast, handleMultiModelAnalyze, currentProject.id, scopedProjectModels.length]);
 
   // Retry multi-model analysis (always force)
   const handleRetryMultiModel = useCallback(() => {
@@ -1478,11 +1605,15 @@ function HomePage() {
       setSlideIndex(newIndex);
       
       // Select the slide and clear previous results
+      selectedSlideIdRef.current = slide.id;
       setSelectedSlide(slide);
       clearResults();
       setSelectedPatchId(undefined);
       setSemanticResults([]);
       setSearchError(null);
+      setVisualSearchResults([]);
+      setVisualSearchQuery(null);
+      setVisualSearchError(null);
       setSlideQCMetrics(null);
       // Clear multi-model results and cache
       setMultiModelResult(null);
@@ -1653,9 +1784,9 @@ function HomePage() {
     {
       key: "?",
       modifiers: { shift: true },
-      description: "Show keyboard shortcuts",
+      description: "Toggle keyboard shortcuts",
       category: "Actions",
-      handler: () => setShortcutsModalOpen(true),
+      handler: () => setShortcutsModalOpen((prev) => !prev),
     },
   ], [
     handleNavigateSlides,
@@ -1681,7 +1812,7 @@ function HomePage() {
 
   // Use the keyboard shortcuts hook
   const { shortcuts } = useKeyboardShortcuts({
-    enabled: !zoomModalOpen, // Disable when patch modal is open (it has its own shortcuts)
+    enabled: !zoomModalOpen && !shortcutsModalOpen,
     shortcuts: keyboardShortcuts,
   });
 
@@ -2157,6 +2288,13 @@ function HomePage() {
           error={searchError}
           onPatchClick={handlePatchClick}
           selectedPatchId={selectedPatchId}
+          inputRef={searchInputRef}
+          onClearResults={() => {
+            semanticSearchRequestRef.current += 1;
+            setSemanticResults([]);
+            setSearchError(null);
+            setIsSearching(false);
+          }}
         />
       );
     }

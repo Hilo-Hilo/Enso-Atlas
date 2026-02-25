@@ -1,7 +1,7 @@
 // Enso Atlas - Analysis Hook
 // State management for slide analysis workflow
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type {
   AnalysisResponse,
   AnalysisRequest,
@@ -9,7 +9,12 @@ import type {
   ReportRequest,
   UncertaintyResult,
 } from "@/types";
-import { analyzeSlide, generateReportWithProgress, analyzeWithUncertainty, generateReport } from "@/lib/api";
+import {
+  analyzeSlide,
+  generateReportWithProgress,
+  analyzeWithUncertainty,
+  generateReport,
+} from "@/lib/api";
 
 // Analysis progress steps
 export const ANALYSIS_STEPS = [
@@ -67,33 +72,59 @@ export function useAnalysis(): UseAnalysisReturn {
   const lastReportRequest = useRef<ReportRequest | null>(null);
   const lastUncertaintySlideId = useRef<string | null>(null);
 
-  // Simulate progress steps during analysis
-  // In a real implementation, the backend would send progress updates via SSE/WebSocket
-  const simulateProgress = useCallback((onComplete: () => void) => {
-    const stepDurations = [400, 800, 600, 500]; // ms per step
-    let currentStep = 0;
+  // Track currently active analysis run to avoid stale async state updates.
+  const analysisRunIdRef = useRef(0);
+  const analysisProgressTimersRef = useRef<number[]>([]);
 
-    const advanceStep = () => {
-      if (currentStep < ANALYSIS_STEPS.length) {
-        const step = ANALYSIS_STEPS[currentStep];
-        if (step) {
-          setState((prev) => ({
-            ...prev,
-            analysisStep: currentStep,
-            analysisStepId: step.id,
-          }));
-        }
-        currentStep++;
-        setTimeout(advanceStep, stepDurations[currentStep - 1] || 500);
-      } else {
-        onComplete();
-      }
-    };
-
-    advanceStep();
+  const clearAnalysisProgressTimers = useCallback(() => {
+    for (const timer of analysisProgressTimersRef.current) {
+      clearTimeout(timer);
+    }
+    analysisProgressTimersRef.current = [];
   }, []);
 
+  const startAnalysisProgressSimulation = useCallback(
+    (runId: number) => {
+      clearAnalysisProgressTimers();
+
+      const stepDurations = [400, 800, 600, 500]; // ms per step
+
+      const scheduleStep = (stepIndex: number, delayMs: number) => {
+        const timerId = window.setTimeout(() => {
+          if (analysisRunIdRef.current !== runId) return;
+          const step = ANALYSIS_STEPS[stepIndex];
+          if (!step) return;
+
+          setState((prev) => ({
+            ...prev,
+            analysisStep: stepIndex,
+            analysisStepId: step.id,
+          }));
+
+          if (stepIndex + 1 < ANALYSIS_STEPS.length) {
+            scheduleStep(stepIndex + 1, stepDurations[stepIndex + 1] || 500);
+          }
+        }, delayMs);
+
+        analysisProgressTimersRef.current.push(timerId);
+      };
+
+      // Step 0 is set immediately when analysis starts; advance through later steps on timers.
+      if (ANALYSIS_STEPS.length > 1) {
+        scheduleStep(1, stepDurations[0]);
+      }
+    },
+    [clearAnalysisProgressTimers]
+  );
+
+  useEffect(() => {
+    return () => {
+      clearAnalysisProgressTimers();
+    };
+  }, [clearAnalysisProgressTimers]);
+
   const analyze = useCallback(async (request: AnalysisRequest): Promise<AnalysisResponse | null> => {
+    const runId = ++analysisRunIdRef.current;
     lastAnalysisRequest.current = request;
 
     setState((prev) => ({
@@ -104,26 +135,15 @@ export function useAnalysis(): UseAnalysisReturn {
       analysisStepId: ANALYSIS_STEPS[0].id,
     }));
 
-    // Start progress simulation
-    let progressComplete = false;
-    const progressPromise = new Promise<void>((resolve) => {
-      simulateProgress(() => {
-        progressComplete = true;
-        resolve();
-      });
-    });
+    startAnalysisProgressSimulation(runId);
 
     try {
-      // Run actual API call in parallel with progress simulation
-      const [result] = await Promise.all([
-        analyzeSlide(request),
-        progressPromise,
-      ]);
-
-      // If API finished before progress, wait for progress to complete
-      if (!progressComplete) {
-        await progressPromise;
+      const result = await analyzeSlide(request);
+      if (analysisRunIdRef.current !== runId) {
+        return null;
       }
+
+      clearAnalysisProgressTimers();
 
       setState((prev) => ({
         ...prev,
@@ -135,6 +155,12 @@ export function useAnalysis(): UseAnalysisReturn {
       }));
       return result;
     } catch (err) {
+      if (analysisRunIdRef.current !== runId) {
+        return null;
+      }
+
+      clearAnalysisProgressTimers();
+
       const message = err instanceof Error ? err.message : "Analysis failed";
       setState((prev) => ({
         ...prev,
@@ -145,7 +171,7 @@ export function useAnalysis(): UseAnalysisReturn {
       }));
       return null;
     }
-  }, [simulateProgress]);
+  }, [startAnalysisProgressSimulation, clearAnalysisProgressTimers]);
 
   const retryAnalysis = useCallback(async (): Promise<AnalysisResponse | null> => {
     if (lastAnalysisRequest.current) {
@@ -177,7 +203,7 @@ export function useAnalysis(): UseAnalysisReturn {
           }));
         }
       );
-      
+
       setState((prev) => ({
         ...prev,
         isGeneratingReport: false,
@@ -231,13 +257,13 @@ export function useAnalysis(): UseAnalysisReturn {
 
     try {
       const result = await analyzeWithUncertainty(slideId, nSamples);
-      
+
       setState((prev) => ({
         ...prev,
         isAnalyzingUncertainty: false,
         uncertaintyResult: result,
       }));
-      
+
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Uncertainty analysis failed";
@@ -251,6 +277,9 @@ export function useAnalysis(): UseAnalysisReturn {
   }, []);
 
   const clearResults = useCallback(() => {
+    analysisRunIdRef.current += 1;
+    clearAnalysisProgressTimers();
+
     setState({
       isAnalyzing: false,
       isGeneratingReport: false,
@@ -267,7 +296,7 @@ export function useAnalysis(): UseAnalysisReturn {
     lastAnalysisRequest.current = null;
     lastReportRequest.current = null;
     lastUncertaintySlideId.current = null;
-  }, []);
+  }, [clearAnalysisProgressTimers]);
 
   const clearError = useCallback(() => {
     setState((prev) => ({

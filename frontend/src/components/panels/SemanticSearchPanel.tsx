@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -12,6 +12,7 @@ import {
   ZoomIn,
   Crosshair,
   Lightbulb,
+  AlertCircle,
 } from "lucide-react";
 import type { SemanticSearchResult, PatchCoordinates } from "@/types";
 import { getPatchUrl } from "@/lib/api";
@@ -26,6 +27,8 @@ interface SemanticSearchPanelProps {
   error?: string | null;
   onPatchClick?: (coords: PatchCoordinates) => void;
   selectedPatchId?: string;
+  inputRef?: React.RefObject<HTMLInputElement>;
+  onClearResults?: () => void;
 }
 
 const EXAMPLE_QUERIES = [
@@ -46,15 +49,24 @@ export function SemanticSearchPanel({
   error,
   onPatchClick,
   selectedPatchId,
+  inputRef,
+  onClearResults,
 }: SemanticSearchPanelProps) {
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(5);
+  const [hasSubmittedQuery, setHasSubmittedQuery] = useState(false);
+
+  useEffect(() => {
+    setHasSubmittedQuery(false);
+  }, [slideId]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!query.trim()) return;
-      await onSearch(query.trim(), topK);
+      const trimmed = query.trim();
+      if (!trimmed) return;
+      setHasSubmittedQuery(true);
+      await onSearch(trimmed, topK);
     },
     [query, topK, onSearch]
   );
@@ -62,6 +74,7 @@ export function SemanticSearchPanel({
   const handleExampleClick = useCallback(
     async (exampleQuery: string) => {
       setQuery(exampleQuery);
+      setHasSubmittedQuery(true);
       await onSearch(exampleQuery, topK);
     },
     [topK, onSearch]
@@ -69,7 +82,9 @@ export function SemanticSearchPanel({
 
   const clearQuery = useCallback(() => {
     setQuery("");
-  }, []);
+    setHasSubmittedQuery(false);
+    onClearResults?.();
+  }, [onClearResults]);
 
   // Not ready to search - no slide analyzed
   if (!slideId || !isAnalyzed) {
@@ -116,6 +131,7 @@ export function SemanticSearchPanel({
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="relative">
             <input
+              ref={inputRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -132,6 +148,7 @@ export function SemanticSearchPanel({
                 type="button"
                 onClick={clearQuery}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                aria-label="Clear search query"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -183,6 +200,7 @@ export function SemanticSearchPanel({
             {EXAMPLE_QUERIES.map((example) => (
               <button
                 key={example}
+                type="button"
                 onClick={() => handleExampleClick(example)}
                 disabled={isSearching}
                 className={cn(
@@ -215,7 +233,7 @@ export function SemanticSearchPanel({
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {results.map((result, index) => {
                 // Match selection based on coordinates (what handlePatchClick sets)
-                const coordsMatch = result.coordinates 
+                const coordsMatch = result.coordinates
                   ? `${result.coordinates[0]}_${result.coordinates[1]}`
                   : null;
                 return (
@@ -231,8 +249,8 @@ export function SemanticSearchPanel({
                       onPatchClick?.({
                         x: result.coordinates[0],
                         y: result.coordinates[1],
-                        width: result.patch_size ?? 224,
-                        height: result.patch_size ?? 224,
+                        width: 224,
+                        height: 224,
                         level: 0,
                       });
                     }}
@@ -244,12 +262,16 @@ export function SemanticSearchPanel({
         )}
 
         {/* No Results State */}
-        {!isSearching && query && results.length === 0 && !error && (
-          <div className="text-center py-4 text-gray-500">
-            <p className="text-sm">No matching patches found.</p>
-            <p className="text-xs mt-1">Try a different description.</p>
-          </div>
-        )}
+        {!isSearching &&
+          hasSubmittedQuery &&
+          query.trim().length > 0 &&
+          results.length === 0 &&
+          !error && (
+            <div className="text-center py-4 text-gray-500">
+              <p className="text-sm">No matching patches found.</p>
+              <p className="text-xs mt-1">Try a different description.</p>
+            </div>
+          )}
       </CardContent>
     </Card>
   );
@@ -286,18 +308,22 @@ function SearchResultItem({
     coordinates: result.coordinates,
     patchSize: result.patch_size,
   });
+  const canNavigate = !!result.coordinates;
 
   return (
     <button
       onClick={onClick}
+      disabled={!canNavigate}
       className={cn(
         "w-full flex items-center gap-3 p-2.5 rounded-lg border transition-all text-left group",
         "hover:border-clinical-500 hover:bg-clinical-50/50 hover:shadow-clinical",
         "focus:outline-none focus:ring-2 focus:ring-clinical-500",
         isSelected
           ? "border-clinical-600 bg-clinical-50 ring-1 ring-clinical-200"
-          : "border-gray-200 bg-white"
+          : "border-gray-200 bg-white",
+        !canNavigate && "opacity-70 cursor-not-allowed hover:border-gray-200 hover:bg-white hover:shadow-none"
       )}
+      title={canNavigate ? "Jump to this patch" : "Coordinates unavailable for this patch"}
     >
       {/* Thumbnail */}
       <div className="relative w-12 h-12 rounded-lg overflow-hidden shrink-0 border border-gray-200 group-hover:border-clinical-300">
@@ -331,12 +357,17 @@ function SearchResultItem({
           </div>
         </div>
 
-        {result.coordinates && (
+        {result.coordinates ? (
           <div className="flex items-center gap-1.5 text-2xs text-gray-500">
             <Crosshair className="h-3 w-3" />
             <span className="font-mono">
               ({result.coordinates[0].toLocaleString()}, {result.coordinates[1].toLocaleString()})
             </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 text-2xs text-amber-700">
+            <AlertCircle className="h-3 w-3" />
+            <span>Coordinates unavailable</span>
           </div>
         )}
       </div>

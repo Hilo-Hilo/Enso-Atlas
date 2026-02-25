@@ -252,7 +252,7 @@ export function ModelPicker({
     return [primary, ...unique.filter((m) => m.id !== primary.id)];
   }, [apiModelDetails, projectModelIds, fallbackModels, currentProject]);
 
-  // Prune stale/duplicate selected model IDs whenever project-scoped model options refresh.
+  // Prune stale or duplicate selected model IDs whenever project-scoped model options refresh.
   // This prevents carrying invalid IDs across project switches (for example 4 selected out of 3 available).
   useEffect(() => {
     if (models.length === 0 || selectedModels.length === 0) return;
@@ -301,29 +301,34 @@ export function ModelPicker({
 
   // Track which models have been previously run on the selected slide
   const [previouslyRanModels, setPreviouslyRanModels] = useState<Set<string>>(new Set());
+  const embeddingStatusRequestRef = React.useRef(0);
 
   useEffect(() => {
+    const requestId = ++embeddingStatusRequestRef.current;
+
     if (!selectedSlideId) {
       setPreviouslyRanModels(new Set());
       return;
     }
+
     const fetchStatus = async () => {
       try {
-        const status = await getSlideEmbeddingStatus(selectedSlideId, currentProject.id);
+        const status = await getSlideEmbeddingStatus(selectedSlideId);
+        if (embeddingStatusRequestRef.current !== requestId) return;
         setPreviouslyRanModels(new Set(status.cached_model_ids));
       } catch (err) {
+        if (embeddingStatusRequestRef.current !== requestId) return;
         console.warn("Failed to fetch slide embedding status:", err);
         setPreviouslyRanModels(new Set());
       }
     };
+
     fetchStatus();
-  }, [selectedSlideId, currentProject.id]);
+  }, [selectedSlideId]);
 
   const toggleModel = (modelId: string) => {
     if (disabled) return;
     if (selectedModels.includes(modelId)) {
-      // Keep at least one model selected to avoid ambiguous "run all vs run none" behavior.
-      if (selectedModels.length <= 1) return;
       onSelectionChange(selectedModels.filter((id) => id !== modelId));
     } else {
       onSelectionChange([...selectedModels, modelId]);
@@ -332,6 +337,10 @@ export function ModelPicker({
 
   const selectAll = () => {
     onSelectionChange(models.map((m) => m.id));
+  };
+
+  const selectNone = () => {
+    onSelectionChange([]);
   };
 
   const selectCancerSpecific = () => {
@@ -497,22 +506,29 @@ export function ModelPicker({
           <div className="flex flex-wrap gap-1.5">
             <button
               onClick={selectAll}
-              disabled={disabled}
-              className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+              disabled={disabled || models.length === 0}
+              className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               All
             </button>
             <button
+              onClick={selectNone}
+              disabled={disabled || selectedModels.length === 0}
+              className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              None
+            </button>
+            <button
               onClick={selectCancerSpecific}
-              disabled={disabled}
-              className="text-xs px-2 py-1 rounded bg-pink-100 hover:bg-pink-200 text-pink-700 transition-colors"
+              disabled={disabled || cancerSpecificModels.length === 0}
+              className="text-xs px-2 py-1 rounded bg-pink-100 hover:bg-pink-200 text-pink-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {cancerTypeLabel}
             </button>
             <button
               onClick={selectGeneral}
-              disabled={disabled}
-              className="text-xs px-2 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-700 transition-colors"
+              disabled={disabled || generalModels.length === 0}
+              className="text-xs px-2 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               General
             </button>

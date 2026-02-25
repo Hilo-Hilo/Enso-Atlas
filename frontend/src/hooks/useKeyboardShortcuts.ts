@@ -22,9 +22,38 @@ export interface UseKeyboardShortcutsOptions {
   shortcuts: KeyboardShortcut[];
 }
 
+function isEditableElement(target: HTMLElement): boolean {
+  const tagName = target.tagName.toLowerCase();
+  if (
+    tagName === "input" ||
+    tagName === "textarea" ||
+    tagName === "select" ||
+    target.isContentEditable
+  ) {
+    return true;
+  }
+
+  if (target.closest("[contenteditable='true']")) {
+    return true;
+  }
+
+  const role = target.getAttribute("role");
+  return role === "textbox" || role === "combobox" || role === "searchbox";
+}
+
+function isInteractiveElement(target: HTMLElement): boolean {
+  if (target.closest("[data-shortcuts='ignore']")) {
+    return true;
+  }
+
+  return !!target.closest(
+    "button, a, summary, details, [role='button'], [role='link'], [role='menuitem'], [role='switch'], [role='tab'], [role='option']"
+  );
+}
+
 /**
  * Hook for managing global keyboard shortcuts.
- * Automatically disables shortcuts when focus is in input fields.
+ * Automatically disables shortcuts when focus is in editable or interactive fields.
  */
 export function useKeyboardShortcuts({
   enabled = true,
@@ -36,17 +65,17 @@ export function useKeyboardShortcuts({
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       if (!enabled) return;
+      if (event.defaultPrevented || event.isComposing || event.repeat) return;
 
-      // Ignore shortcuts when typing in input fields
-      const target = event.target as HTMLElement;
-      const tagName = target.tagName.toLowerCase();
-      const isEditable =
-        tagName === "input" ||
-        tagName === "textarea" ||
-        tagName === "select" ||
-        target.isContentEditable;
+      const target = event.target as HTMLElement | null;
+      const pressedKey = event.key.toLowerCase();
+      const isEscape = pressedKey === "escape" || pressedKey === "esc";
 
-      if (isEditable) return;
+      // Ignore shortcuts when typing/editing, and avoid hijacking key presses on interactive controls.
+      // Keep Escape available so dialogs can still be dismissed.
+      if (target && !isEscape && (isEditableElement(target) || isInteractiveElement(target))) {
+        return;
+      }
 
       // Find matching shortcut
       const matchingShortcut = shortcutsRef.current.find((shortcut) => {
@@ -59,11 +88,14 @@ export function useKeyboardShortcuts({
 
         // Check modifiers
         const modifiers = shortcut.modifiers || {};
-        const ctrlMatch = modifiers.ctrl ? event.ctrlKey || event.metaKey : !event.ctrlKey && !event.metaKey;
+        const ctrlOrMetaPressed = event.ctrlKey || event.metaKey;
+
+        const ctrlMatch = modifiers.ctrl ? ctrlOrMetaPressed : !event.ctrlKey;
+        const metaMatch = modifiers.meta ? event.metaKey : !event.metaKey;
         const altMatch = modifiers.alt ? event.altKey : !event.altKey;
         const shiftMatch = modifiers.shift ? event.shiftKey : !event.shiftKey;
 
-        return ctrlMatch && altMatch && shiftMatch;
+        return ctrlMatch && metaMatch && altMatch && shiftMatch;
       });
 
       if (matchingShortcut) {

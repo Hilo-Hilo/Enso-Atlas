@@ -856,42 +856,45 @@ export function getThumbnailUrl(slideId: string, projectId?: string | null, size
 export function getPatchUrl(
   slideId: string,
   patchId: string,
-  options?: {
+  options: {
     projectId?: string;
     size?: number;
     coordinates?: [number, number];
     patchSize?: number;
+    // Backward-compatible aliases
     x?: number;
     y?: number;
-  }
+  } = {}
 ): string {
   const params = new URLSearchParams();
 
-  if (options?.projectId) {
-    const scopedProjectId = normalizeProjectId(options.projectId);
-    if (scopedProjectId) {
-      options.projectId = scopedProjectId;
+  if (typeof options.projectId === "string") {
+    const trimmed = options.projectId.trim();
+    if (trimmed && trimmed !== "default") {
       params.set("project_id", options.projectId);
+      if (trimmed !== options.projectId) {
+        params.set("project_id", trimmed);
+      }
     }
   }
 
-  if (typeof options?.size === "number" && Number.isFinite(options.size) && options.size > 0) {
+  if (typeof options.size === "number" && Number.isFinite(options.size) && options.size > 0) {
     params.set("size", String(Math.round(options.size)));
   }
 
-  if (options?.coordinates && options.coordinates.length === 2) {
+  if (options.coordinates) {
     params.set("x", String(options.coordinates[0]));
     params.set("y", String(options.coordinates[1]));
   } else {
-    if (typeof options?.x === "number" && Number.isFinite(options.x)) {
+    if (typeof options.x === "number" && Number.isFinite(options.x)) {
       params.set("x", String(Math.round(options.x)));
     }
-    if (typeof options?.y === "number" && Number.isFinite(options.y)) {
+    if (typeof options.y === "number" && Number.isFinite(options.y)) {
       params.set("y", String(Math.round(options.y)));
     }
   }
 
-  if (typeof options?.patchSize === "number" && Number.isFinite(options.patchSize) && options.patchSize > 0) {
+  if (typeof options.patchSize === "number" && Number.isFinite(options.patchSize) && options.patchSize > 0) {
     params.set("patch_size", String(options.patchSize));
   }
 
@@ -900,45 +903,19 @@ export function getPatchUrl(
 }
 
 /**
- * Export report as PDF.
- *
- * NOTE: legacy slide-scoped endpoints (/api/slides/{id}/report/*) were removed
- * on the backend. This helper now uses the supported flow:
- * 1) POST /api/report
- * 2) POST /api/report/pdf
+ * Export report as PDF
  */
-export async function exportReportPdf(
-  slideId: string,
-  projectId?: string
-): Promise<Blob> {
-  const { controller, timeoutId } = createTimeoutController(120000);
-
+export async function exportReportPdf(slideId: string): Promise<Blob> {
+  const { controller, timeoutId } = createTimeoutController(60000);
+  
   try {
-    const scopedProjectId = normalizeProjectId(projectId);
-
-    const reportResponse = await fetchApi<BackendReportResponse>(
-      "/api/report",
+    const response = await fetch(
+      `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/report/pdf`,
       {
-        method: "POST",
-        body: JSON.stringify({
-          slide_id: slideId,
-          project_id: scopedProjectId,
-        }),
-      },
-      { timeoutMs: 420000 }
+        method: "GET",
+        signal: controller.signal,
+      }
     );
-
-    const response = await fetch(`${API_BASE_URL}/api/report/pdf`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        report: reportResponse.report_json,
-        case_id: reportResponse.slide_id,
-      }),
-      signal: controller.signal,
-    });
 
     clearTimeout(timeoutId);
 
@@ -953,7 +930,7 @@ export async function exportReportPdf(
     return response.blob();
   } catch (error) {
     clearTimeout(timeoutId);
-
+    
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new AtlasApiError({
         code: "TIMEOUT",
@@ -961,11 +938,11 @@ export async function exportReportPdf(
         isTimeout: true,
       });
     }
-
+    
     if (error instanceof AtlasApiError) {
       throw error;
     }
-
+    
     throw new AtlasApiError({
       code: "EXPORT_FAILED",
       message: error instanceof Error ? error.message : "Failed to export PDF",
@@ -974,17 +951,12 @@ export async function exportReportPdf(
 }
 
 /**
- * Export report as structured JSON via the current /api/report route.
+ * Export report as JSON
  */
 export async function exportReportJson(
-  slideId: string,
-  projectId?: string
+  slideId: string
 ): Promise<StructuredReport> {
-  return generateReport({
-    slideId,
-    evidencePatchIds: [],
-    projectId,
-  });
+  return fetchApi<StructuredReport>(`/api/slides/${encodeURIComponent(slideId)}/report/json`);
 }
 
 /**
@@ -1004,6 +976,7 @@ interface BackendSemanticSearchResult {
   patch_index: number;
   similarity_score: number;
   coordinates?: [number, number];
+  patch_size?: number;
   attention_weight?: number;
 }
 
@@ -1046,6 +1019,7 @@ export async function semanticSearch(
       patch_index: r.patch_index,
       similarity: r.similarity_score,  // Map similarity_score -> similarity
       coordinates: r.coordinates,
+      patch_size: r.patch_size,
     })),
   };
 }
@@ -2735,15 +2709,12 @@ export async function visualSearch(
     top_k: request.topK ?? 10,
     exclude_same_slide: request.excludeSameSlide ?? true,
   };
-
+  
   if (request.slideId) body.slide_id = request.slideId;
   if (request.patchIndex !== undefined) body.patch_index = request.patchIndex;
   if (request.coordinates) body.coordinates = request.coordinates;
   if (request.patchEmbedding) body.patch_embedding = request.patchEmbedding;
-
-  const scopedProjectId = normalizeProjectId(request.projectId);
-  if (scopedProjectId) body.project_id = scopedProjectId;
-
+  
   const backend = await fetchApi<BackendVisualSearchResponse>(
     "/api/search/visual",
     {
@@ -2774,17 +2745,13 @@ export async function visualSearch(
 /**
  * Get the status of the visual search FAISS index.
  */
-export async function getVisualSearchStatus(projectId?: string): Promise<import("@/types").VisualSearchStatus> {
-  const scopedProjectId = normalizeProjectId(projectId);
-  const qs = new URLSearchParams();
-  if (scopedProjectId) qs.set("project_id", scopedProjectId);
-
+export async function getVisualSearchStatus(): Promise<import("@/types").VisualSearchStatus> {
   const backend = await fetchApi<{
     index_loaded: boolean;
     total_patches: number;
     total_slides: number;
     embedding_dim: number;
-  }>(`/api/search/visual/status${qs.toString() ? `?${qs.toString()}` : ""}`);
+  }>("/api/search/visual/status");
   
   return {
     indexLoaded: backend.index_loaded,
@@ -3068,16 +3035,9 @@ export interface SlideEmbeddingStatus {
  * Get embedding and analysis status for a slide.
  */
 export async function getSlideEmbeddingStatus(
-  slideId: string,
-  projectId?: string
+  slideId: string
 ): Promise<SlideEmbeddingStatus> {
-  const scopedProjectId = normalizeProjectId(projectId);
-  const qs = new URLSearchParams();
-  if (scopedProjectId) qs.set("project_id", scopedProjectId);
-  const endpoint =
-    `/api/slides/${encodeURIComponent(slideId)}/embedding-status` +
-    (qs.toString() ? `?${qs.toString()}` : "");
-  return fetchApi(endpoint);
+  return fetchApi(`/api/slides/${encodeURIComponent(slideId)}/embedding-status`);
 }
 
 // ====== Patch Coordinates ======
