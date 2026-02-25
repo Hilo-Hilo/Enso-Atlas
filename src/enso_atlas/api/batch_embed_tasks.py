@@ -39,6 +39,7 @@ class BatchEmbedTask:
     """Represents a background batch embedding task."""
     task_id: str
     slide_ids: List[str]
+    project_id: Optional[str] = None
     level: int = 0
     force: bool = True
     concurrency: int = 1
@@ -73,6 +74,7 @@ class BatchEmbedTask:
         return {
             "task_id": self.task_id,
             "status": self.status.value,
+            "project_id": self.project_id,
             "level": self.level,
             "force": self.force,
             "concurrency": self.concurrency,
@@ -128,12 +130,14 @@ class BatchEmbedTaskManager:
         level: int = 0,
         force: bool = True,
         concurrency: int = 1,
+        project_id: Optional[str] = None,
     ) -> BatchEmbedTask:
         """Create a new batch embedding task."""
         task_id = f"batch_embed_{uuid.uuid4().hex[:12]}"
         task = BatchEmbedTask(
             task_id=task_id,
             slide_ids=slide_ids,
+            project_id=project_id,
             level=level,
             force=force,
             concurrency=concurrency,

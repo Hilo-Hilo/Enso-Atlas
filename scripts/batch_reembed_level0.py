@@ -65,6 +65,11 @@ def main():
         help="Specific slide IDs to re-embed (default: all slides)",
     )
     parser.add_argument(
+        "--project-id",
+        default=None,
+        help="Optional project ID to scope slide listing and batch embedding",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Just list slides and exit without embedding",
@@ -98,14 +103,16 @@ def main():
         print(f"\nTarget slides: {len(slide_ids)} (specified)")
     else:
         print("\nFetching slide list...")
-        resp = requests.get(f"{api_url}/api/slides", timeout=30)
+        params = {"project_id": args.project_id} if args.project_id else None
+        resp = requests.get(f"{api_url}/api/slides", params=params, timeout=30)
         resp.raise_for_status()
         slides = resp.json()
         if isinstance(slides, list):
             slide_ids = [s["slide_id"] for s in slides]
         else:
             slide_ids = [s["slide_id"] for s in slides.get("slides", [])]
-        print(f"  Found {len(slide_ids)} slides")
+        scope_label = f" for project '{args.project_id}'" if args.project_id else ""
+        print(f"  Found {len(slide_ids)} slides{scope_label}")
 
     if not slide_ids:
         print("No slides found. Exiting.")
@@ -119,15 +126,17 @@ def main():
         sys.exit(0)
 
     # 3. Start batch embedding
+    scope_label = f", project_id={args.project_id}" if args.project_id else ""
     print(f"\nStarting batch re-embed: {len(slide_ids)} slides, level={args.level}, "
-          f"force={not args.no_force}, concurrency={args.concurrency}")
+          f"force={not args.no_force}, concurrency={args.concurrency}{scope_label}")
     print("=" * 60)
 
     payload = {
         "level": args.level,
         "force": not args.no_force,
-        "slide_ids": slide_ids if args.slide_ids else None,
+        "slide_ids": slide_ids,
         "concurrency": args.concurrency,
+        "project_id": args.project_id,
     }
 
     resp = requests.post(f"{api_url}/api/embed-slides/batch", json=payload, timeout=30)

@@ -580,6 +580,15 @@ class EmbedResponse(BaseModel):
     embeddings: Optional[List[List[float]]] = None
 
 
+class EmbedSlideRequest(BaseModel):
+    """Request for project-aware on-demand slide embedding."""
+    slide_id: str = Field(..., min_length=1, max_length=256)
+    level: int = Field(default=0, ge=0, le=0, description="Resolution level fixed to 0 (dense full-resolution)")
+    force: bool = Field(default=False, description="Force re-embedding even if cached")
+    async_mode: bool = Field(default=True, alias="async", description="Run embedding in background")
+    project_id: Optional[str] = Field(default=None, description="Project ID to scope slide + embeddings paths")
+
+
 class SimilarRequest(BaseModel):
     """Request for similar case search."""
     slide_id: str = Field(..., min_length=1, max_length=256)
@@ -1187,6 +1196,65 @@ def create_app(
             if not f.name.endswith("_coords.npy"):
                 slide_ids.add(f.stem)
         return slide_ids
+
+    async def _batch_embed_inventory_slide_ids(project_id: Optional[str]) -> list[str]:
+        """Build batch-embed slide inventory with project-aware scoping."""
+        proj_cfg = _require_project(project_id)
+
+        slide_ids: set[str] = set()
+
+        authoritative_slide_ids = await _project_slide_ids(project_id)
+        if authoritative_slide_ids:
+            slide_ids.update(authoritative_slide_ids)
+
+        base_embeddings_dir = _resolve_project_embeddings_dir(project_id, require_exists=False)
+        for emb_dir in _candidate_embedding_dirs_for_level(
+            base_embeddings_dir,
+            level=0,
+            project_id=project_id,
+        ):
+            if not emb_dir.exists() or not emb_dir.is_dir():
+                continue
+            for emb_file in emb_dir.glob("*.npy"):
+                if emb_file.name.endswith("_coords.npy"):
+                    continue
+                slide_ids.add(emb_file.stem)
+
+        slide_dirs: list[Path] = []
+        if proj_cfg:
+            try:
+                slide_dirs.append(_resolve_dataset_path(proj_cfg.dataset.slides_dir))
+            except Exception:
+                pass
+        else:
+            slide_dirs.extend([
+                slides_dir,
+                _data_root / "tcga_full" / "slides",
+                _data_root / "ovarian_bev" / "slides",
+                _data_root / "demo" / "slides",
+                _data_root / "slides",
+            ])
+            if project_registry:
+                try:
+                    for _, cfg in project_registry.list_projects().items():
+                        cand = _resolve_dataset_path(cfg.dataset.slides_dir)
+                        if cand not in slide_dirs:
+                            slide_dirs.append(cand)
+                except Exception:
+                    pass
+
+        slide_exts = {".svs", ".tiff", ".tif", ".ndpi", ".mrxs", ".vms", ".scn"}
+        for slide_dir in slide_dirs:
+            if not slide_dir.exists() or not slide_dir.is_dir():
+                continue
+            try:
+                for slide_file in slide_dir.iterdir():
+                    if slide_file.is_file() and slide_file.suffix.lower() in slide_exts:
+                        slide_ids.add(slide_file.stem)
+            except Exception:
+                continue
+
+        return sorted(slide_ids)
 
     def _similar_case_slide_id(candidate: Any) -> Optional[str]:
         """Extract slide_id from similar-case payloads (flat or metadata-nested)."""
@@ -3245,11 +3313,19 @@ def create_app(
             require_exists=project_requested,
         )
 
-        emb_path = _report_embeddings_dir / f"{slide_id}.npy"
-        coord_path = _report_embeddings_dir / f"{slide_id}_coords.npy"
+        emb_path, searched_dirs = _resolve_embedding_path(
+            slide_id,
+            level=0,
+            project_id=request.project_id,
+            base_embeddings_dir=_report_embeddings_dir,
+        )
+        if emb_path is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Level 0 embeddings not found for slide {slide_id}. Searched: {', '.join(str(d) for d in searched_dirs)}",
+            )
 
-        if not emb_path.exists():
-            raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
+        coord_path = emb_path.with_name(f"{slide_id}_coords.npy")
 
         embeddings = np.load(emb_path)
         score, attention = classifier.predict(embeddings)
@@ -3606,10 +3682,18 @@ should incorporate all available clinical, pathological, and molecular data."""
             require_exists=project_requested,
         )
 
-        # Check if slide exists
-        emb_path = report_embeddings_dir / f"{slide_id}.npy"
-        if not emb_path.exists():
-            raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
+        # Check if slide exists (resolver-based level-0 lookup)
+        report_emb_path, searched_dirs = _resolve_embedding_path(
+            slide_id,
+            level=0,
+            project_id=request.project_id,
+            base_embeddings_dir=report_embeddings_dir,
+        )
+        if report_emb_path is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Level 0 embeddings not found for slide {slide_id}. Searched: {', '.join(str(d) for d in searched_dirs)}",
+            )
         
         # Check for existing task in the same project scope
         existing_task = report_task_manager.get_task_by_slide(slide_id, request.project_id)
@@ -3685,9 +3769,19 @@ should incorporate all available clinical, pathological, and molecular data."""
             )
 
             # Load embeddings
-            emb_path = _report_embeddings_dir / f"{slide_id}.npy"
-            coord_path = _report_embeddings_dir / f"{slide_id}_coords.npy"
-            
+            emb_path, searched_dirs = _resolve_embedding_path(
+                slide_id,
+                level=0,
+                project_id=project_id,
+                base_embeddings_dir=_report_embeddings_dir,
+            )
+            if emb_path is None:
+                raise FileNotFoundError(
+                    f"Level 0 embeddings not found for slide {slide_id}. Searched: {', '.join(str(d) for d in searched_dirs)}"
+                )
+
+            coord_path = emb_path.with_name(f"{slide_id}_coords.npy")
+
             embeddings = np.load(emb_path)
             
             report_task_manager.update_task(task_id,
@@ -5769,44 +5863,44 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
 
     @app.post("/api/embed-slide")
-    async def embed_slide_on_demand(request: dict, background_tasks: BackgroundTasks):
+    async def embed_slide_on_demand(request: EmbedSlideRequest, background_tasks: BackgroundTasks):
         """
         Extract patches and generate embeddings for a slide on-demand.
-        
+
         Enforces level 0 (full resolution, dense) and starts a background task
         with task_id polling.
 
         Policy:
         - level=0 only (dense full-resolution embeddings)
         - async mode for background execution
-        
+
         Returns immediately with task_id for background tasks.
         Poll /api/embed-slide/status/{task_id} for progress.
         """
-        import time
-        
-        slide_id = request.get("slide_id")
-        level = request.get("level", 0)
-        force_reembed = request.get("force", False)
-        use_async = request.get("async", level == 0)  # Default async for level 0
-        
-        if not slide_id:
-            raise HTTPException(status_code=400, detail="slide_id required")
-        
+        slide_id = request.slide_id
+        level = request.level
+        force_reembed = request.force
+        use_async = request.async_mode
+
         if level != 0:
             raise HTTPException(status_code=400, detail="level must be 0 (dense full-resolution policy)")
-        
+
+        _embed_embeddings_dir = _resolve_project_embeddings_dir(
+            request.project_id,
+            require_exists=False,
+        )
+
         # Level-specific embedding paths
-        # If embeddings_dir is already the level0 dir and level==0, use it directly
-        if level == 0 and embeddings_dir.name == "level0":
-            level_dir = embeddings_dir
+        # If embeddings dir is already the level0 dir and level==0, use it directly
+        if level == 0 and _embed_embeddings_dir.name == "level0":
+            level_dir = _embed_embeddings_dir
         else:
-            level_dir = embeddings_dir / f"level{level}"
+            level_dir = _embed_embeddings_dir / f"level{level}"
         level_dir.mkdir(parents=True, exist_ok=True)
-        
+
         emb_path = level_dir / f"{slide_id}.npy"
         coord_path = level_dir / f"{slide_id}_coords.npy"
-        
+
         # Check if embeddings already exist at this level
         if emb_path.exists() and coord_path.exists() and not force_reembed:
             emb = np.load(emb_path)
@@ -5814,34 +5908,36 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 "status": "exists",
                 "slide_id": slide_id,
                 "level": level,
+                "project_id": request.project_id,
                 "num_patches": len(emb),
                 "message": f"Level {level} embeddings already exist"
             }
 
-        # Check if there's already a running task for this slide/level
-        existing_task = task_manager.get_task_by_slide(slide_id, level)
+        # Check if there's already a running task for this slide/level/project scope
+        existing_task = task_manager.get_task_by_slide(slide_id, level, request.project_id)
         if existing_task:
             return {
                 "status": "in_progress",
                 "task_id": existing_task.task_id,
                 "slide_id": slide_id,
                 "level": level,
+                "project_id": request.project_id,
                 "progress": existing_task.progress,
                 "message": existing_task.message,
             }
-        
+
         # Find the slide file
-        slide_path = resolve_slide_path(slide_id)
+        slide_path = resolve_slide_path(slide_id, project_id=request.project_id)
         if not slide_path:
             raise HTTPException(
-                status_code=404, 
-                detail=f"Slide file not found for {slide_id}. Level {level} embedding requires the original .svs file."
+                status_code=404,
+                detail=f"Slide file not found for {slide_id}. Level {level} embedding requires the original .svs file.",
             )
-        
+
         # For level 0 or explicit async mode, use background task
         if use_async:
-            task = task_manager.create_task(slide_id, level)
-            
+            task = task_manager.create_task(slide_id, level, project_id=request.project_id)
+
             # Run embedding in background
             def run_embedding():
                 _run_embedding_task(
@@ -5852,20 +5948,28 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     emb_path,
                     coord_path,
                 )
-            
+
             background_tasks.add_task(run_embedding)
-            
+
             return {
                 "status": "started",
                 "task_id": task.task_id,
                 "slide_id": slide_id,
                 "level": level,
+                "project_id": request.project_id,
                 "message": f"Embedding started in background. Poll /api/embed-slide/status/{task.task_id} for progress.",
                 "estimated_time_minutes": 15,
             }
 
         # Optional inline mode (async remains the default for level 0)
-        return _run_embedding_inline(slide_id, level, slide_path, emb_path, coord_path)
+        return _run_embedding_inline(
+            slide_id,
+            level,
+            slide_path,
+            emb_path,
+            coord_path,
+            project_id=request.project_id,
+        )
 
     def _resolve_pathfoundation_local() -> Optional[str]:
         """Resolve Path Foundation TF saved-model path from local cache only.
@@ -6079,7 +6183,14 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 error=str(e)
             )
     
-    def _run_embedding_inline(slide_id: str, level: int, slide_path: Path, emb_path: Path, coord_path: Path):
+    def _run_embedding_inline(
+        slide_id: str,
+        level: int,
+        slide_path: Path,
+        emb_path: Path,
+        coord_path: Path,
+        project_id: Optional[str] = None,
+    ):
         """Run embedding inline."""
         import time
         start_time = time.time()
@@ -6161,6 +6272,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 "status": "completed",
                 "slide_id": slide_id,
                 "level": level,
+                "project_id": project_id,
                 "num_patches": len(patches),
                 "processing_time_seconds": round(elapsed, 1),
                 "message": f"Embedded {len(patches)} patches at level {level}"
@@ -6182,12 +6294,13 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
         
         result = task.to_dict()
-        
+
         if task.status == TaskStatus.COMPLETED:
-            level_dir = embeddings_dir if (task.level == 0 and embeddings_dir.name == "level0") else embeddings_dir / f"level{task.level}"
+            _task_embeddings_dir = _resolve_project_embeddings_dir(task.project_id, require_exists=False)
+            level_dir = _task_embeddings_dir if (task.level == 0 and _task_embeddings_dir.name == "level0") else _task_embeddings_dir / f"level{task.level}"
             emb_path = level_dir / f"{task.slide_id}.npy"
             result["embedding_path"] = str(emb_path) if emb_path.exists() else None
-        
+
         return result
     
     @app.get("/api/embed-slide/tasks")
@@ -6215,15 +6328,16 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         """Request for batch re-embedding of multiple slides."""
         level: int = Field(default=0, ge=0, le=0, description="Resolution level fixed to 0 (dense full-resolution)")
         force: bool = Field(default=True, description="Force re-embedding even if cached")
-        slide_ids: Optional[List[str]] = Field(default=None, description="Specific slide IDs (None = all slides)")
+        slide_ids: Optional[List[str]] = Field(default=None, description="Specific slide IDs (omitted = inventory-derived)")
         concurrency: int = Field(default=1, ge=1, le=4, description="Concurrent embedding workers (1-4)")
+        project_id: Optional[str] = Field(default=None, description="Project ID to scope slide + embeddings paths")
 
     @app.post("/api/embed-slides/batch")
     async def start_batch_embed(request: BatchEmbedRequest, background_tasks: BackgroundTasks):
         """
         Start batch re-embedding of slides.
 
-        If slide_ids is omitted, all available slides are re-embedded.
+        If slide_ids is omitted, slide IDs are derived from project-aware inventory.
         Returns a batch_task_id for progress polling.
 
         Designed for:
@@ -6236,14 +6350,17 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             return {
                 "batch_task_id": active.task_id,
                 "status": active.status.value,
+                "project_id": active.project_id,
                 "message": f"Batch embedding already in progress ({active.completed_slides}/{active.total_slides} done)",
                 "total": active.total_slides,
             }
 
+        _require_project(request.project_id)
+
         # Determine slide list
         target_slides = request.slide_ids
         if target_slides is None:
-            target_slides = list(available_slides)  # All slides with existing embeddings
+            target_slides = await _batch_embed_inventory_slide_ids(request.project_id)
 
         if not target_slides:
             raise HTTPException(status_code=400, detail="No slides to embed")
@@ -6253,6 +6370,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             level=request.level,
             force=request.force,
             concurrency=request.concurrency,
+            project_id=request.project_id,
         )
 
         def run_batch_embed():
@@ -6263,6 +6381,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         return {
             "batch_task_id": task.task_id,
             "status": "started",
+            "project_id": request.project_id,
             "total": len(target_slides),
             "message": f"Batch embedding started for {len(target_slides)} slides at level {request.level}.",
         }
@@ -6282,6 +6401,8 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         )
 
         total = task.total_slides
+        project_embeddings_dir = _resolve_project_embeddings_dir(task.project_id, require_exists=False)
+
         for idx, slide_id in enumerate(task.slide_ids):
             # Check cancellation
             if batch_embed_manager.is_cancelled(task_id):
@@ -6301,7 +6422,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
             # Setup paths
             level = task.level
-            level_dir = embeddings_dir if (level == 0 and embeddings_dir.name == "level0") else embeddings_dir / f"level{level}"
+            level_dir = project_embeddings_dir if (level == 0 and project_embeddings_dir.name == "level0") else project_embeddings_dir / f"level{level}"
             level_dir.mkdir(parents=True, exist_ok=True)
             emb_path = level_dir / f"{slide_id}.npy"
             coord_path = level_dir / f"{slide_id}_coords.npy"
@@ -6322,12 +6443,12 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 continue
 
             # Resolve slide file
-            slide_path = resolve_slide_path(slide_id)
+            slide_path = resolve_slide_path(slide_id, project_id=task.project_id)
             if not slide_path:
                 batch_embed_manager.add_result(task_id, BatchEmbedSlideResult(
                     slide_id=slide_id,
                     status="failed",
-                    error=f"Slide file not found for {slide_id}",
+                    error=f"Slide file not found for {slide_id} (project_id={task.project_id})",
                 ))
                 continue
 

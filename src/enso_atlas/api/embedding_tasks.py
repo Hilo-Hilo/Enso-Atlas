@@ -30,6 +30,7 @@ class EmbeddingTask:
     task_id: str
     slide_id: str
     level: int
+    project_id: Optional[str] = None
     status: TaskStatus = TaskStatus.PENDING
     progress: float = 0.0  # 0-100
     message: str = "Waiting to start..."
@@ -45,6 +46,7 @@ class EmbeddingTask:
             "task_id": self.task_id,
             "slide_id": self.slide_id,
             "level": self.level,
+            "project_id": self.project_id,
             "status": self.status.value,
             "progress": self.progress,
             "message": self.message,
@@ -64,13 +66,15 @@ class EmbeddingTaskManager:
         self.max_concurrent = max_concurrent
         self._running_count = 0
         
-    def create_task(self, slide_id: str, level: int) -> EmbeddingTask:
+    def create_task(self, slide_id: str, level: int, project_id: Optional[str] = None) -> EmbeddingTask:
         """Create a new embedding task."""
-        task_id = f"emb_{slide_id}_{level}_{uuid.uuid4().hex[:8]}"
+        project_fragment = project_id or "global"
+        task_id = f"emb_{project_fragment}_{slide_id}_{level}_{uuid.uuid4().hex[:8]}"
         task = EmbeddingTask(
             task_id=task_id,
             slide_id=slide_id,
             level=level,
+            project_id=project_id,
         )
         with self.lock:
             self.tasks[task_id] = task
@@ -81,12 +85,13 @@ class EmbeddingTaskManager:
         with self.lock:
             return self.tasks.get(task_id)
     
-    def get_task_by_slide(self, slide_id: str, level: int) -> Optional[EmbeddingTask]:
-        """Get active task for a slide/level combination."""
+    def get_task_by_slide(self, slide_id: str, level: int, project_id: Optional[str] = None) -> Optional[EmbeddingTask]:
+        """Get active task for a slide/level/project combination."""
         with self.lock:
             for task in self.tasks.values():
                 if (task.slide_id == slide_id and 
-                    task.level == level and 
+                    task.level == level and
+                    task.project_id == project_id and
                     task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]):
                     return task
         return None

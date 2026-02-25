@@ -11,6 +11,16 @@ def _batch_tasks_source() -> str:
     return path.read_text()
 
 
+def _batch_embed_tasks_source() -> str:
+    path = Path(__file__).resolve().parents[1] / "src" / "enso_atlas" / "api" / "batch_embed_tasks.py"
+    return path.read_text()
+
+
+def _batch_reembed_script_source() -> str:
+    path = Path(__file__).resolve().parents[1] / "scripts" / "batch_reembed_level0.py"
+    return path.read_text()
+
+
 def _report_tasks_source() -> str:
     report_tasks_py = Path(__file__).resolve().parents[1] / "src" / "enso_atlas" / "api" / "report_tasks.py"
     return report_tasks_py.read_text()
@@ -106,3 +116,44 @@ def test_resolve_slide_path_supports_unambiguous_uuid_suffix_fallback():
     assert "def _resolve_slide_path_in_dirs(" in src
     assert "pattern = f\"{base}.*{ext}\"" in src
     assert "Ambiguous WSI fallback for slide_id=%s" in src
+
+
+def test_issue81_embed_slide_endpoint_is_typed_and_project_scoped():
+    src = _main_source()
+
+    assert "class EmbedSlideRequest(BaseModel):" in src
+    assert "async_mode: bool = Field(default=True, alias=\"async\"" in src
+    assert "async def embed_slide_on_demand(request: EmbedSlideRequest" in src
+    assert "_embed_embeddings_dir = _resolve_project_embeddings_dir(" in src
+    assert "slide_path = resolve_slide_path(slide_id, project_id=request.project_id)" in src
+    assert '"project_id": request.project_id' in src
+
+
+def test_issue81_report_paths_use_embedding_resolver_for_level0_lookup():
+    src = _main_source()
+
+    assert "emb_path, searched_dirs = _resolve_embedding_path(" in src
+    assert "report_emb_path, searched_dirs = _resolve_embedding_path(" in src
+    assert "Level 0 embeddings not found for slide" in src
+
+
+def test_issue81_batch_embed_defaults_use_project_inventory_and_project_threading():
+    src = _main_source()
+    task_src = _batch_embed_tasks_source()
+
+    assert "target_slides = await _batch_embed_inventory_slide_ids(request.project_id)" in src
+    assert "target_slides = list(available_slides)" not in src
+    assert "project_embeddings_dir = _resolve_project_embeddings_dir(task.project_id, require_exists=False)" in src
+    assert "slide_path = resolve_slide_path(slide_id, project_id=task.project_id)" in src
+
+    assert "project_id: Optional[str] = None" in task_src
+    assert "project_id=project_id" in task_src
+
+
+def test_issue81_batch_reembed_script_sends_explicit_slide_ids_and_project_scope():
+    src = _batch_reembed_script_source()
+
+    assert "--project-id" in src
+    assert '"slide_ids": slide_ids' in src
+    assert '"project_id": args.project_id' in src
+    assert '"slide_ids": slide_ids if args.slide_ids else None' not in src
