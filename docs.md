@@ -121,18 +121,18 @@ Any of these can be replaced with alternative models serving the same role. The 
 | Clinical Researcher | Cohort analysis, biomarker discovery | Batch analysis, semantic search, project system, slide manager with filtering |
 | Hospital IT | Deployment, maintenance | Docker Compose, on-premise, PostgreSQL, health checks, Tailscale Funnel access |
 
-## 1.4 Clinical Validation (Demo Configuration)
+## 1.4 Demo Metrics Snapshot (Research-Only; Not Clinical Validation)
 
-The active demo deployment includes two project-specific prediction programs using the same core platform:
+The active demo deployment includes two project-specific prediction tasks on TCGA-derived data using the same core platform.
 
-| Project | Primary Endpoint | Cohort | Best Reported AUC | Threshold |
+| Project | Primary Endpoint | Metrics/Threshold Source | Snapshot Values | Caveat |
 |---|---|---|---|---|
-| `ovarian-platinum` | Platinum chemotherapy response | 208 TCGA ovarian slides | 0.907 | 0.9229 |
-| `lung-stage` | Early (I/II) vs advanced (III/IV) stage | 130 TCGA lung adenocarcinoma slides | 0.648 | 0.5 |
+| `ovarian-platinum` | Platinum chemotherapy response | `config/projects.yaml` model metadata and project threshold | AUC `0.907`, threshold `0.9229` | Training/cohort counts vary across repo notes and historical exports; treat these as demo metadata, not externally validated clinical performance. |
+| `lung-stage` | Early (I/II) vs advanced (III/IV) stage | `config/projects.yaml` model metadata and project threshold | AUC `0.648`, threshold `0.5` | Value reflects current config snapshot only; no multi-site or prospective clinical validation in this repo. |
 
-Both projects use Path Foundation embeddings (384-dim) and TransMIL classification heads, with project-scoped labels, models, and feature flags resolved from `config/projects.yaml`. 
+Both projects use Path Foundation embeddings (384-dim) and TransMIL classification heads, with project-scoped labels, models, and feature flags resolved from `config/projects.yaml`.
 
-These results are specific to the demo configuration. The same platform infrastructure (heatmaps, evidence patches, similar cases, outlier detection, structured reports) works identically with any foundation model and classification head. A hospital deploying a breast cancer HER2 predictor or lung cancer subtype classifier would get the same evidence chain, interpretability tools, and reporting pipeline.
+These numbers are for research/demo communication only. They should be interpreted as configuration-linked performance snapshots, not as clinically validated operating characteristics.
 
 ## 1.5 Competitive Comparison
 
@@ -393,7 +393,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8003'}/api/:path*',
+        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'}/api/:path*',
       },
     ]
   },
@@ -867,7 +867,7 @@ This section is audited against:
 | `POST` | `/api/projects` | Create project. |
 | `GET` | `/api/projects/{project_id}` | Get project details. |
 | `PUT` | `/api/projects/{project_id}` | Update project config. |
-| `DELETE` | `/api/projects/{project_id}` | Delete project config (data retention policy depends on backend config). |
+| `DELETE` | `/api/projects/{project_id}` | Remove project entry from `config/projects.yaml` registry; does **not** delete slide/embedding files already on disk. |
 | `GET` | `/api/projects/{project_id}/slides` | List slides assigned to project. |
 | `POST` | `/api/projects/{project_id}/slides` | Assign slides to project. |
 | `DELETE` | `/api/projects/{project_id}/slides` | Unassign slides from project. |
@@ -1267,14 +1267,14 @@ Notes:
 ## 8.2 Component Hierarchy
 
 ```text
-RootLayout (src/app/layout.tsx)
+RootLayout (frontend/src/app/layout.tsx)
   +-- ToastProvider
   +-- ProjectProvider
   +-- DisclaimerBanner
   +-- ErrorBoundary
       +-- App routes
 
-Home route (/src/app/page.tsx)
+Home route (/frontend/src/app/page.tsx)
   +-- HomePageWrapper (Suspense)
       +-- HomePage (~2485 lines)
           +-- Header
@@ -1314,7 +1314,7 @@ Home route (/src/app/page.tsx)
               +-- DemoMode
               +-- WelcomeModal
 
-Slides route (/src/app/slides/page.tsx)
+Slides route (/frontend/src/app/slides/page.tsx)
   +-- Header
   +-- Toolbar (refresh, filters toggle, grid/table switch)
   +-- FilterPanel (collapsible side column)
@@ -1324,7 +1324,7 @@ Slides route (/src/app/slides/page.tsx)
   +-- Modals: CreateTag, CreateGroup, ConfirmDelete, AddToGroup
   +-- Footer
 
-Projects route (/src/app/projects/page.tsx)
+Projects route (/frontend/src/app/projects/page.tsx)
   +-- Header
   +-- Project cards with readiness status
   +-- ProjectFormModal (create/edit)
@@ -1333,14 +1333,14 @@ Projects route (/src/app/projects/page.tsx)
   +-- Footer
 ```
 
-Components present in `src/components/panels` but currently not mounted in the home layout:
+Components present in `frontend/src/components/panels` but currently not mounted in the home layout:
 - `AIAssistantPanel`
 - `PatchClassifierPanel`
 - `UncertaintyPanel`
 
 ## 8.3 WSI Viewer (74,056 bytes, 1,940 lines)
 
-`src/components/viewer/WSIViewer.tsx` remains the most complex frontend component.
+`frontend/src/components/viewer/WSIViewer.tsx` remains the most complex frontend component.
 
 ### Current behavior
 
@@ -1389,7 +1389,7 @@ Project selection priority is: URL `?project=` -> localStorage (`enso-atlas-sele
 
 ### Home page flow
 
-`src/app/page.tsx` keeps most interaction state local and coordinates several flows:
+`frontend/src/app/page.tsx` keeps most interaction state local and coordinates several flows:
 
 - **Project change reset:** clears selected slide, cached analysis/report state, selected models, and repopulates project-scoped model options.
 - **Deep-link bootstrapping:** `?slide=<id>` autoselects a slide; `?analyze=true` triggers analysis once the slide is loaded.
@@ -1404,7 +1404,7 @@ Project selection priority is: URL `?project=` -> localStorage (`enso-atlas-sele
 
 ## 8.7 API Client (3,079 lines)
 
-`src/lib/api.ts` is the typed transport layer used by most frontend surfaces.
+`frontend/src/lib/api.ts` is the typed transport layer used by most frontend surfaces.
 
 ### Core client behavior
 
@@ -1423,8 +1423,8 @@ Project selection priority is: URL `?project=` -> localStorage (`enso-atlas-sele
 
 ### Known split responsibilities
 
-- SSE parsing for chat/agent streams lives in `AIAssistantPanel.tsx` (`/api/agent/analyze`, `/api/agent/followup`, `/api/chat`), not in `lib/api.ts`.
-- `projects/page.tsx` still uses local page-level fetch helpers for project CRUD/upload instead of `lib/api.ts` wrappers.
+- SSE parsing for chat/agent streams lives in `AIAssistantPanel.tsx` (`/api/agent/analyze`, `/api/agent/followup`, `/api/chat`), not in `frontend/src/lib/api.ts`.
+- `frontend/src/app/projects/page.tsx` still uses local page-level fetch helpers for project CRUD/upload instead of `frontend/src/lib/api.ts` wrappers.
 
 ---
 
@@ -2678,9 +2678,11 @@ These safeguards reduce obvious misuse, but they are not a substitute for clinic
 
 # 16. Performance Benchmarks
 
-This section keeps only numbers that are directly supported by the current repository (startup timing table, code-level limits/targets, and project config values). Earlier fine-grained latency claims that did not have a reproducible measurement source were removed.
+This section keeps only numbers that are directly supported by the current repository (startup timing table, code-level limits/targets, and project config values). Where full benchmark methodology is not packaged in-repo, values are presented as operational estimates from the audited environment, not universal guarantees.
 
-## 16.1 Startup Time (Measured)
+## 16.1 Startup Time (Operational Estimate)
+
+These startup timings come from the audited dev/deployment environment and should be treated as approximate planning numbers.
 
 | Component | Duration |
 |---|---|
@@ -2720,13 +2722,13 @@ The strongest verified performance delta in the current codebase is the slide li
 
 These two numbers are retained because they correspond to explicit behavior documented in the backend implementation.
 
-## 16.5 Project Model Metrics (From `config/projects.yaml`)
+## 16.5 Project Model Metrics (Config Snapshot, Research-Only)
 
-| Project / Model | Metric | Value |
-|---|---|---|
-| Ovarian / `platinum_sensitivity` | AUC | 0.907 |
-| Ovarian / `platinum_sensitivity` | Threshold (project config) | 0.9229 |
-| Lung / `lung_stage` | AUC | 0.648 |
+| Project / Model | Metric | Value | Provenance / Caveat |
+|---|---|---|---|
+| Ovarian / `platinum_sensitivity` | AUC | 0.907 | From `config/projects.yaml` metadata; not an externally audited benchmark in this repo snapshot. |
+| Ovarian / `platinum_sensitivity` | Threshold (project config) | 0.9229 | Project-level operating threshold in config; historical threshold scripts/configs may differ by training snapshot. |
+| Lung / `lung_stage` | AUC | 0.648 | From `config/projects.yaml` metadata; no multi-site validation evidence included here. |
 
 ---
 
@@ -2750,7 +2752,9 @@ Enso Atlas supports on-premise deployment on consumer Apple hardware. The 2024 M
 
 On the base M4 (16 GB), the models technically fit, but macOS itself consumes 4-6 GB at idle. Sustained inference with all models loaded simultaneously will trigger memory pressure and swap. For reliable operation, use the M4 Pro or configure the M4 with 24 GB or more.
 
-## 17.3 Performance Expectations
+## 17.3 Performance Expectations (Illustrative Estimates)
+
+The following ranges are directional estimates from internal testing and implementation constraints; they are not a formal benchmark suite.
 
 | Operation | DGX Spark (Blackwell) | Mac mini (M4 Pro) |
 |---|---|---|
@@ -2790,7 +2794,7 @@ The Mac mini draws significantly less power than the DGX Spark, though Apple's r
 ## 18.1 Current Limitations
 
 ### Class Imbalance
-The ovarian platinum dataset has 139 non-responders vs 13 responders (10.7:1 ratio). Training uses focal loss with inverse-frequency class weighting, which helps but does not eliminate the problem. The threshold optimization script exists (`scripts/optimize_threshold.py`) but the production `threshold_config.json` still carries placeholder values -- the Youden J and F1 optimal thresholds are null, and the system falls back to 0.5. This needs to be run on real validation data and committed.
+One documented ovarian training subset in project notes reports 139 non-responders vs 13 responders (10.7:1 ratio). Because cohort manifests differ across snapshots/exports, treat this as an example imbalance profile rather than a canonical count for every run. Training uses focal loss with inverse-frequency class weighting, which helps but does not eliminate the problem. The threshold optimization script exists (`scripts/optimize_threshold.py`) but threshold artifacts and configured project thresholds have diverged across snapshots; these should be re-derived on a pinned validation split and versioned with provenance.
 
 ### Path Foundation Is CPU-Only
 Path Foundation uses a TensorFlow SavedModel. TensorFlow has no GPU support on Apple Silicon and limited support on newer NVIDIA architectures. In practice, all Path Foundation embeddings are pre-computed offline and stored as .npy files. Real-time embedding at inference is not feasible with this model.
@@ -2855,7 +2859,7 @@ Slides must be manually placed as files in the project data directory. There is 
 | `TRANSFORMERS_CACHE` | *(unset unless provided)* | Embedding loader fallback path | Used if `HF_HOME` is not set. |
 | `HF_TOKEN` / `HUGGINGFACE_TOKEN` / `HUGGINGFACE_HUB_TOKEN` | *(optional)* | MedGemma model loading | Required only for gated/private HuggingFace assets. |
 | `NVIDIA_VISIBLE_DEVICES` | `all` (Compose) | Container GPU visibility | Relevant in GPU container deployments. |
-| `NEXT_PUBLIC_API_URL` | `""` in frontend client code; route handlers/rewrites fall back to `http://127.0.0.1:8003` | Next.js frontend | Leave empty for same-origin deployments through `/api`. |
+| `NEXT_PUBLIC_API_URL` | Local dev commonly `http://127.0.0.1:8000`; Docker backend commonly `http://127.0.0.1:8003` | Next.js frontend | `frontend/.env.example` defaults to `8000`; set explicitly to `8003` when targeting Docker backend. |
 
 ## Appendix B: Repository Map (Audited)
 

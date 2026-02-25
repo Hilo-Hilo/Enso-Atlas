@@ -18,6 +18,18 @@ const nextConfig = {
         port: "8000",
         pathname: "/api/**",
       },
+      {
+        protocol: "http",
+        hostname: "localhost",
+        port: "8003",
+        pathname: "/api/**",
+      },
+      {
+        protocol: "http",
+        hostname: "127.0.0.1",
+        port: "8003",
+        pathname: "/api/**",
+      },
     ],
   },
   
@@ -26,7 +38,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8003'}/api/:path*`, // Backend on same host (DGX Spark)
+        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'}/api/:path*`, // Local backend default; set NEXT_PUBLIC_API_URL to :8003 for Docker backend
       },
     ]
   },
