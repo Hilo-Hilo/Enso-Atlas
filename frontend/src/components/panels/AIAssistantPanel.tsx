@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useProject } from "@/contexts/ProjectContext";
+import { getClientApiBaseUrl } from "@/lib/clientApiBase";
 import {
   Bot,
   Brain,
@@ -28,7 +29,7 @@ import { cn, humanizeIdentifier } from "@/lib/utils";
 import type { StructuredReport } from "@/types";
 
 // API base URL
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE = getClientApiBaseUrl();
 
 // Types for agent workflow
 interface AgentStepData {

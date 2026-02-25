@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { getClientApiBaseUrl } from "@/lib/clientApiBase";
 import type { Project } from "@/types";
 
 // Default fallback project when API is not available
@@ -44,7 +45,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+        const apiUrl = getClientApiBaseUrl();
         const res = await fetch(`${apiUrl}/api/projects`, { signal: AbortSignal.timeout(5000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
