@@ -19,6 +19,8 @@ def test_issue98_demo_mode_disables_joyride_scrolling_side_effects():
     src = _read("frontend/src/components/demo/DemoMode.tsx")
 
     assert "disableScrolling" in src
+    assert "disableScrollParentFix" in src
+    assert "disableAnimation: true" in src
 
 
 def test_issue98_set_tour_step_updates_index_ref_without_direct_onstepchange_call():
