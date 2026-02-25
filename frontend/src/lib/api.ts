@@ -884,19 +884,45 @@ export function getPatchUrl(
 }
 
 /**
- * Export report as PDF
+ * Export report as PDF.
+ *
+ * NOTE: legacy slide-scoped endpoints (/api/slides/{id}/report/*) were removed
+ * on the backend. This helper now uses the supported flow:
+ * 1) POST /api/report
+ * 2) POST /api/report/pdf
  */
-export async function exportReportPdf(slideId: string): Promise<Blob> {
-  const { controller, timeoutId } = createTimeoutController(60000);
-  
+export async function exportReportPdf(
+  slideId: string,
+  projectId?: string
+): Promise<Blob> {
+  const { controller, timeoutId } = createTimeoutController(120000);
+
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/api/slides/${encodeURIComponent(slideId)}/report/pdf`,
+    const scopedProjectId = normalizeProjectId(projectId);
+
+    const reportResponse = await fetchApi<BackendReportResponse>(
+      "/api/report",
       {
-        method: "GET",
-        signal: controller.signal,
-      }
+        method: "POST",
+        body: JSON.stringify({
+          slide_id: slideId,
+          project_id: scopedProjectId,
+        }),
+      },
+      { timeoutMs: 420000 }
     );
+
+    const response = await fetch(`${API_BASE_URL}/api/report/pdf`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        report: reportResponse.report_json,
+        case_id: reportResponse.slide_id,
+      }),
+      signal: controller.signal,
+    });
 
     clearTimeout(timeoutId);
 
@@ -911,7 +937,7 @@ export async function exportReportPdf(slideId: string): Promise<Blob> {
     return response.blob();
   } catch (error) {
     clearTimeout(timeoutId);
-    
+
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new AtlasApiError({
         code: "TIMEOUT",
@@ -919,11 +945,11 @@ export async function exportReportPdf(slideId: string): Promise<Blob> {
         isTimeout: true,
       });
     }
-    
+
     if (error instanceof AtlasApiError) {
       throw error;
     }
-    
+
     throw new AtlasApiError({
       code: "EXPORT_FAILED",
       message: error instanceof Error ? error.message : "Failed to export PDF",
@@ -932,12 +958,17 @@ export async function exportReportPdf(slideId: string): Promise<Blob> {
 }
 
 /**
- * Export report as JSON
+ * Export report as structured JSON via the current /api/report route.
  */
 export async function exportReportJson(
-  slideId: string
+  slideId: string,
+  projectId?: string
 ): Promise<StructuredReport> {
-  return fetchApi<StructuredReport>(`/api/slides/${encodeURIComponent(slideId)}/report/json`);
+  return generateReport({
+    slideId,
+    evidencePatchIds: [],
+    projectId,
+  });
 }
 
 /**
