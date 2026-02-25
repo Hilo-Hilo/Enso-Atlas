@@ -579,13 +579,14 @@ export function DemoMode({ isActive, onClose, onStepChange }: DemoModeProps) {
       showSkipButton
       showProgress
       disableScrolling
+      disableScrollParentFix
       spotlightClicks
       disableOverlay
       disableOverlayClose
       callback={handleJoyrideCallback}
       tooltipComponent={CustomTooltip}
       floaterProps={{
-        disableAnimation: false,
+        disableAnimation: true,
         offset: 16,
       }}
       styles={{
