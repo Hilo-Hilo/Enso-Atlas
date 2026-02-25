@@ -2,6 +2,8 @@
 
 <div align="center">
 
+<img src="docs/screenshots/enso-atlas-hero-banner.jpg" alt="Enso Atlas hero banner" width="960" />
+
 ### Enso Atlas: Fully Local, FM-based Clinical Decision Support System for Pathology  
 **Universal on-premise pathology AI platform: plug in any foundation model, dataset, or cancer task hassle free.**  
 Built on Google Health AI Developer Foundations (HAI-DEF)
