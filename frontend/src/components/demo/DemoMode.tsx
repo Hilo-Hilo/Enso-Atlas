@@ -233,7 +233,7 @@ const tourSteps: Step[] = [
     },
   },
   {
-    target: '[data-demo="prediction-panel"]',
+    target: '[data-demo="right-tab-prediction"]',
     title: "Treatment Response Prediction",
     content: (
       <div className="space-y-2">
@@ -258,7 +258,7 @@ const tourSteps: Step[] = [
     },
   },
   {
-    target: '[data-demo="evidence-panel"]',
+    target: '[data-demo="right-tab-evidence"]',
     title: "Evidence Patches",
     content: (
       <div className="space-y-2">
@@ -283,7 +283,7 @@ const tourSteps: Step[] = [
     },
   },
   {
-    target: '[data-demo="similar-cases"]',
+    target: '[data-demo="right-tab-similar-cases"]',
     title: "Similar Historical Cases",
     content: (
       <div className="space-y-2">
@@ -308,7 +308,7 @@ const tourSteps: Step[] = [
     },
   },
   {
-    target: '[data-demo="report-panel"]',
+    target: '[data-demo="right-tab-medgemma"]',
     title: "Clinical Report Generation",
     content: (
       <div className="space-y-2">
