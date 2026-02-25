@@ -997,16 +997,23 @@ export async function semanticSearch(
   projectId?: string
 ): Promise<SemanticSearchResponse> {
   const scopedProjectId = normalizeProjectId(projectId);
+  const body: {
+    slide_id: string;
+    query: string;
+    top_k: number;
+    project_id?: string;
+  } = {
+    slide_id: slideId,
+    query,
+    top_k: topK,
+  };
+  if (scopedProjectId) body.project_id = scopedProjectId;
+
   const backend = await fetchApi<BackendSemanticSearchResponse>(
     "/api/semantic-search",
     {
       method: "POST",
-      body: JSON.stringify({
-        slide_id: slideId,
-        query,
-        top_k: topK,
-        project_id: scopedProjectId,
-      }),
+      body: JSON.stringify(body),
     },
     { timeoutMs: 30000 }
   );
@@ -3035,9 +3042,16 @@ export interface SlideEmbeddingStatus {
  * Get embedding and analysis status for a slide.
  */
 export async function getSlideEmbeddingStatus(
-  slideId: string
+  slideId: string,
+  projectId?: string
 ): Promise<SlideEmbeddingStatus> {
-  return fetchApi(`/api/slides/${encodeURIComponent(slideId)}/embedding-status`);
+  const scopedProjectId = normalizeProjectId(projectId);
+  const params = new URLSearchParams();
+  if (scopedProjectId) params.set("project_id", scopedProjectId);
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+
+  return fetchApi(`/api/slides/${encodeURIComponent(slideId)}/embedding-status${suffix}`);
 }
 
 // ====== Patch Coordinates ======

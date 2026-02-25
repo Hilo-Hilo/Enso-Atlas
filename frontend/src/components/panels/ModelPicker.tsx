@@ -252,7 +252,7 @@ export function ModelPicker({
     return [primary, ...unique.filter((m) => m.id !== primary.id)];
   }, [apiModelDetails, projectModelIds, fallbackModels, currentProject]);
 
-  // Prune stale or duplicate selected model IDs whenever project-scoped model options refresh.
+  // Prune stale/duplicate selected model IDs whenever project-scoped model options refresh.
   // This prevents carrying invalid IDs across project switches (for example 4 selected out of 3 available).
   useEffect(() => {
     if (models.length === 0 || selectedModels.length === 0) return;
@@ -313,7 +313,7 @@ export function ModelPicker({
 
     const fetchStatus = async () => {
       try {
-        const status = await getSlideEmbeddingStatus(selectedSlideId);
+        const status = await getSlideEmbeddingStatus(selectedSlideId, currentProject.id);
         if (embeddingStatusRequestRef.current !== requestId) return;
         setPreviouslyRanModels(new Set(status.cached_model_ids));
       } catch (err) {
@@ -324,7 +324,7 @@ export function ModelPicker({
     };
 
     fetchStatus();
-  }, [selectedSlideId]);
+  }, [selectedSlideId, currentProject.id]);
 
   const toggleModel = (modelId: string) => {
     if (disabled) return;
