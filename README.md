@@ -2,7 +2,8 @@
 
 <div align="center">
 
-### Production-Grade Multi-Project Pathology AI Platform  
+### Enso Atlas: Fully Local, FM-based Clinical Decision Support System for Pathology  
+**Universal on-premise pathology AI platform: plug in any foundation model, dataset, or cancer task hassle free.**  
 Built on Google Health AI Developer Foundations (HAI-DEF)
 
 [![Kaggle Writeup](https://img.shields.io/badge/Kaggle-Writeup-20BEFF?style=for-the-badge&logo=kaggle&logoColor=white)](https://www.kaggle.com/competitions/med-gemma-impact-challenge/writeups/Enso-Atlas)
