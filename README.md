@@ -6,6 +6,8 @@
 **Universal on-premise pathology AI platform: plug in any foundation model, dataset, or cancer task hassle free.**  
 Built on Google Health AI Developer Foundations (HAI-DEF)
 
+Test is out here: https://atlas.ensohealth.ai/
+
 [![Kaggle Writeup](https://img.shields.io/badge/Kaggle-Writeup-20BEFF?style=for-the-badge&logo=kaggle&logoColor=white)](https://www.kaggle.com/competitions/med-gemma-impact-challenge/writeups/Enso-Atlas)
 [![MedGemma Impact Challenge](https://img.shields.io/badge/MedGemma-Impact%20Challenge-0EA5E9?style=for-the-badge)](https://www.kaggle.com/competitions/med-gemma-impact-challenge)
 [![Deployment](https://img.shields.io/badge/Deployment-On--Premise%20Only-166534?style=for-the-badge)](#)
