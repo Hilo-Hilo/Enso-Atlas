@@ -1,12 +1,10 @@
 "use client";
 
-import React, { useState, useCallback, useEffect, useMemo } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
-import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui";
 import {
   FilterPanel,
@@ -15,10 +13,9 @@ import {
   BulkActions,
   CreateTagModal,
   CreateGroupModal,
-  ConfirmDeleteModal,
   AddToGroupModal,
 } from "@/components/slides";
-import { cn, debounce } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import {
   getSlides,
   searchSlides,
@@ -40,8 +37,6 @@ import {
   ChevronRight,
   ArrowLeft,
   PanelLeft,
-  Microscope,
-  Home,
   Layers,
 } from "lucide-react";
 import { useProject } from "@/contexts/ProjectContext";
@@ -125,7 +120,7 @@ function Pagination({
 export default function SlidesPage() {
   const router = useRouter();
   const { showToast } = useToast();
-  const { currentProject } = useProject();
+  const { currentProject, switchProject } = useProject();
 
   // Connection state
   const [isConnected, setIsConnected] = useState(false);
@@ -156,12 +151,20 @@ export default function SlidesPage() {
   // Modal state
   const [createTagModalOpen, setCreateTagModalOpen] = useState(false);
   const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [addToGroupModalOpen, setAddToGroupModalOpen] = useState(false);
   const [slideForGroupModal, setSlideForGroupModal] = useState<string | null>(null);
 
   // Processing state
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Keep context aligned with explicit ?project= links.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const requestedProject = new URLSearchParams(window.location.search).get("project");
+    if (requestedProject && requestedProject !== currentProject.id) {
+      switchProject(requestedProject);
+    }
+  }, [currentProject.id, switchProject]);
 
   // Check backend connection
   useEffect(() => {
@@ -214,7 +217,7 @@ export default function SlidesPage() {
         filters.dateTo;
 
       if (hasFilters) {
-        const result = await searchSlides(filters);
+        const result = await searchSlides(filters, currentProject.id);
         setSlides(result.slides);
         setTotalSlides(result.total);
       } else {
@@ -240,6 +243,12 @@ export default function SlidesPage() {
   useEffect(() => {
     fetchSlides();
   }, [fetchSlides]);
+
+  // Reset selection and pagination when switching projects.
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setFilters((prev) => ({ ...prev, page: 1 }));
+  }, [currentProject.id]);
 
   // Handlers
   const handleRefresh = async () => {
@@ -314,10 +323,12 @@ export default function SlidesPage() {
     setAddToGroupModalOpen(true);
   }, []);
 
-  const handleDeleteSlide = useCallback((id: string) => {
-    setSelectedIds(new Set([id]));
-    setDeleteModalOpen(true);
-  }, []);
+  const handleDeleteSlide = useCallback(() => {
+    showToast({
+      type: "info",
+      message: "Slide deletion is disabled in this deployment",
+    });
+  }, [showToast]);
 
   const handleSort = useCallback(
     (field: string) => {
@@ -382,16 +393,6 @@ export default function SlidesPage() {
     [selectedIds, showToast]
   );
 
-  const handleBulkRemoveFromGroup = useCallback(
-    async (groupId: string) => {
-      showToast({
-        type: "info",
-        message: "Remove from group feature coming soon",
-      });
-    },
-    [showToast]
-  );
-
   const handleExportCsv = useCallback(() => {
     const selectedSlides = slides.filter((s) => selectedIds.has(s.id));
     const headers = ["ID", "Filename", "Label", "Patches", "Has Embeddings", "Starred"];
@@ -420,17 +421,17 @@ export default function SlidesPage() {
   }, [slides, selectedIds, showToast]);
 
   const handleBatchAnalyze = useCallback(() => {
-    router.push(`/?batch=${Array.from(selectedIds).join(",")}`);
-  }, [selectedIds, router]);
+    const selected = Array.from(selectedIds);
+    if (selected.length === 0) return;
 
-  const handleBulkDelete = useCallback(async () => {
-    showToast({
-      type: "info",
-      message: "Delete feature requires backend implementation",
-    });
-    setDeleteModalOpen(false);
-    setSelectedIds(new Set());
-  }, [showToast]);
+    const params = new URLSearchParams();
+    if (currentProject.id && currentProject.id !== "default") {
+      params.set("project", currentProject.id);
+    }
+    params.set("slides", selected.join(","));
+
+    router.push(`/batch?${params.toString()}`);
+  }, [selectedIds, currentProject.id, router]);
 
   const handleCreateTag = useCallback(
     async (name: string, color: string) => {
@@ -640,10 +641,8 @@ export default function SlidesPage() {
         onClearSelection={() => setSelectedIds(new Set())}
         onAddTags={handleBulkAddTags}
         onAddToGroup={handleBulkAddToGroup}
-        onRemoveFromGroup={handleBulkRemoveFromGroup}
         onExportCsv={handleExportCsv}
         onBatchAnalyze={handleBatchAnalyze}
-        onDelete={() => setDeleteModalOpen(true)}
         groups={groups}
         availableTags={tags.map((t) => t.name)}
         isProcessing={isProcessing}
@@ -661,12 +660,6 @@ export default function SlidesPage() {
         onClose={() => setCreateGroupModalOpen(false)}
         onCreateGroup={handleCreateGroup}
         existingGroups={groups.map((g) => g.name)}
-      />
-      <ConfirmDeleteModal
-        isOpen={deleteModalOpen}
-        onClose={() => setDeleteModalOpen(false)}
-        onConfirm={handleBulkDelete}
-        count={selectedIds.size}
       />
       {slideForGroupModal && (
         <AddToGroupModal

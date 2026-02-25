@@ -21,13 +21,15 @@ interface BulkActionsProps {
   onClearSelection: () => void;
   onAddTags: (tags: string[]) => void;
   onAddToGroup: (groupId: string) => void;
-  onRemoveFromGroup: (groupId: string) => void;
+  onRemoveFromGroup?: (groupId: string) => void;
   onExportCsv: () => void;
   onBatchAnalyze: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   groups: Group[];
   availableTags: string[];
   isProcessing?: boolean;
+  enableRemoveFromGroup?: boolean;
+  enableDelete?: boolean;
 }
 
 function DropdownMenu({
@@ -147,6 +149,8 @@ export function BulkActions({
   groups,
   availableTags,
   isProcessing,
+  enableRemoveFromGroup = false,
+  enableDelete = false,
 }: BulkActionsProps) {
   if (selectedCount === 0) return null;
 
@@ -219,33 +223,34 @@ export function BulkActions({
                 )}
               </DropdownMenu>
 
-              {/* Remove from Group */}
-              <DropdownMenu
-                trigger={
-                  <Button variant="secondary" size="sm" className="gap-1.5">
-                    <FolderMinus className="h-4 w-4" />
-                    Remove from Group
-                    <ChevronDown className="h-3 w-3" />
-                  </Button>
-                }
-              >
-                {groups.length > 0 ? (
-                  <div className="max-h-48 overflow-y-auto">
-                    {groups.map((group) => (
-                      <button
-                        key={group.id}
-                        onClick={() => onRemoveFromGroup(group.id)}
-                        className="w-full flex items-center justify-between px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                      >
-                        <span>{group.name}</span>
-                        <span className="text-xs text-gray-400">{group.slideIds.length}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="px-4 py-2 text-sm text-gray-500">No groups available</p>
-                )}
-              </DropdownMenu>
+              {enableRemoveFromGroup && onRemoveFromGroup && (
+                <DropdownMenu
+                  trigger={
+                    <Button variant="secondary" size="sm" className="gap-1.5">
+                      <FolderMinus className="h-4 w-4" />
+                      Remove from Group
+                      <ChevronDown className="h-3 w-3" />
+                    </Button>
+                  }
+                >
+                  {groups.length > 0 ? (
+                    <div className="max-h-48 overflow-y-auto">
+                      {groups.map((group) => (
+                        <button
+                          key={group.id}
+                          onClick={() => onRemoveFromGroup(group.id)}
+                          className="w-full flex items-center justify-between px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          <span>{group.name}</span>
+                          <span className="text-xs text-gray-400">{group.slideIds.length}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="px-4 py-2 text-sm text-gray-500">No groups available</p>
+                  )}
+                </DropdownMenu>
+              )}
 
               {/* Divider */}
               <div className="h-6 w-px bg-navy-700 mx-1" />
@@ -273,19 +278,23 @@ export function BulkActions({
                 Batch Analyze
               </Button>
 
-              {/* Divider */}
-              <div className="h-6 w-px bg-navy-700 mx-1" />
+              {enableDelete && onDelete && (
+                <>
+                  {/* Divider */}
+                  <div className="h-6 w-px bg-navy-700 mx-1" />
 
-              {/* Delete */}
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={onDelete}
-                className="gap-1.5"
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete
-              </Button>
+                  {/* Delete */}
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={onDelete}
+                    className="gap-1.5"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>

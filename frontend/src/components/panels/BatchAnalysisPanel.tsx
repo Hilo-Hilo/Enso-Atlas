@@ -130,6 +130,7 @@ function buildConfigFromModelId(
 interface BatchAnalysisPanelProps {
   onSlideSelect?: (slideId: string) => void;
   className?: string;
+  initialSelectedIds?: string[];
 }
 
 type SortField = "slideId" | "prediction" | "confidence" | "uncertaintyLevel";
@@ -139,6 +140,7 @@ type FilterMode = "all" | "uncertain" | "responders" | "non-responders" | "error
 export function BatchAnalysisPanel({
   onSlideSelect,
   className,
+  initialSelectedIds,
 }: BatchAnalysisPanelProps) {
   // Project-aware labels
   const { currentProject } = useProject();
@@ -180,6 +182,11 @@ export function BatchAnalysisPanel({
 
   // Polling interval ref
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const initialSelectedIdSet = useMemo(
+    () => new Set((initialSelectedIds || []).filter(Boolean)),
+    [initialSelectedIds]
+  );
 
   const fallbackModels = useMemo(
     () =>
@@ -319,6 +326,28 @@ export function BatchAnalysisPanel({
     loadSlides();
     return () => { cancelled = true; };
   }, [currentProject.id]);
+
+  useEffect(() => {
+    if (slides.length === 0) {
+      if (!isLoadingSlides) {
+        setSelectedIds(new Set());
+      }
+      return;
+    }
+
+    if (initialSelectedIdSet.size === 0) {
+      setSelectedIds((prev) => {
+        const valid = new Set(Array.from(prev).filter((id) => slides.some((slide) => slide.id === id)));
+        return valid.size === prev.size ? prev : valid;
+      });
+      return;
+    }
+
+    const scopedInitial = new Set(
+      slides.filter((slide) => initialSelectedIdSet.has(slide.id)).map((slide) => slide.id)
+    );
+    setSelectedIds(scopedInitial);
+  }, [slides, isLoadingSlides, initialSelectedIdSet]);
 
   // Handle select all / deselect all
   const handleSelectAll = useCallback(() => {

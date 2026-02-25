@@ -53,12 +53,23 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           setProjects(projectList);
 
           // URL ?project= param takes priority, then localStorage, then first
-          const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+          const urlParams =
+            typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
           const urlProjectId = urlParams?.get("project");
-          const savedId = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
-          const fromUrl = urlProjectId ? projectList.find((p) => p.id === urlProjectId) : null;
-          const fromStorage = savedId ? projectList.find((p) => p.id === savedId) : null;
-          setCurrentProject(fromUrl ?? fromStorage ?? projectList[0]);
+          const savedId =
+            typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+          const fromUrl = urlProjectId
+            ? projectList.find((p) => p.id === urlProjectId)
+            : null;
+          const fromStorage = savedId
+            ? projectList.find((p) => p.id === savedId)
+            : null;
+          const resolved = fromUrl ?? fromStorage ?? projectList[0];
+          setCurrentProject(resolved);
+
+          if (typeof window !== "undefined") {
+            localStorage.setItem(STORAGE_KEY, resolved.id);
+          }
         } else {
           // No projects returned — use default
           setProjects([DEFAULT_PROJECT]);
@@ -78,11 +89,21 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const switchProject = useCallback(
     (id: string) => {
       const project = projects.find((p) => p.id === id);
-      if (project) {
-        setCurrentProject(project);
-        if (typeof window !== "undefined") {
-          localStorage.setItem(STORAGE_KEY, id);
+      if (!project) return;
+
+      setCurrentProject(project);
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STORAGE_KEY, id);
+
+        // Keep URL project query in sync so deep-links and refreshes preserve context.
+        const url = new URL(window.location.href);
+        if (id === "default") {
+          url.searchParams.delete("project");
+        } else {
+          url.searchParams.set("project", id);
         }
+        window.history.replaceState(window.history.state, "", url.toString());
       }
     },
     [projects]

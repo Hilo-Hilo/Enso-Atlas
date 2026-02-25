@@ -169,7 +169,14 @@ export default function HomePageWrapper() {
 
 function HomePage() {
   const searchParams = useSearchParams();
-  const { currentProject } = useProject();
+  const { currentProject, switchProject } = useProject();
+
+  useEffect(() => {
+    const requestedProject = searchParams.get("project");
+    if (requestedProject && requestedProject !== currentProject.id) {
+      switchProject(requestedProject);
+    }
+  }, [searchParams, currentProject.id, switchProject]);
 
   // State
   const [selectedSlide, setSelectedSlide] = useState<SlideInfo | null>(null);
