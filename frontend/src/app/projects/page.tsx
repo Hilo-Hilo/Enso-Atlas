@@ -1038,20 +1038,47 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Check backend connectivity
+  // Check backend connectivity and recover immediately after idle/background.
   useEffect(() => {
     let cancelled = false;
+    let failureStreak = 0;
+
     const check = async () => {
       try {
         await healthCheck();
+        failureStreak = 0;
         if (!cancelled) setIsConnected(true);
       } catch (err) {
-        if (!cancelled) setIsConnected(false);
+        failureStreak += 1;
+        if (!cancelled && failureStreak >= 2) {
+          setIsConnected(false);
+        }
       }
     };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void check();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      void check();
+    };
+
     check();
     const interval = setInterval(check, 15000);
-    return () => { cancelled = true; clearInterval(interval); };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("online", handleWindowFocus);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("online", handleWindowFocus);
+    };
   }, []);
 
   // Modal state
