@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -55,6 +57,71 @@ def get_registry() -> ProjectRegistry:
 # ---------------------------------------------------------------------------
 
 ALLOWED_SLIDE_EXTENSIONS = {".svs", ".tiff", ".tif", ".ndpi"}
+MAX_UPLOAD_SIZE_BYTES = int(os.environ.get("ENSO_MAX_UPLOAD_SIZE_BYTES", 10 * 1024 * 1024 * 1024))
+SAFE_UPLOAD_FILENAME_RE = re.compile(r"^[A-Za-z0-9._\- ]+$")
+
+
+def _dedupe_non_empty_ids(values: List[str]) -> List[str]:
+    """Trim, de-duplicate, and preserve order for ID payloads."""
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        value = (raw or "").strip()
+        if not value or value in seen:
+            continue
+        deduped.append(value)
+        seen.add(value)
+    return deduped
+
+
+def _validate_project_model_ids(*, project_id: str, model_ids: List[str], reg: ProjectRegistry) -> List[str]:
+    """Ensure payload model IDs are known and compatible with the project."""
+    cleaned = _dedupe_non_empty_ids(model_ids)
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="model_ids must include at least one non-empty model id")
+
+    allowed = {m.id for m in reg.get_project_classification_models(project_id)}
+    if not allowed:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Project '{project_id}' has no compatible classification models configured",
+        )
+
+    invalid = [mid for mid in cleaned if mid not in allowed]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "INVALID_MODEL_IDS",
+                "message": "One or more model_ids are not compatible with this project",
+                "invalid_model_ids": invalid,
+                "allowed_model_ids": sorted(allowed),
+            },
+        )
+
+    return cleaned
+
+
+def _safe_upload_filename(filename: str) -> str:
+    """Validate and normalize uploaded filename to prevent traversal/poisoning."""
+    if "\x00" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Strip any user-supplied path components.
+    basename = Path(filename).name.strip()
+    if not basename or basename in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    if basename != filename.strip():
+        raise HTTPException(status_code=400, detail="Filename must not include path separators")
+
+    if not SAFE_UPLOAD_FILENAME_RE.match(basename):
+        raise HTTPException(
+            status_code=400,
+            detail="Filename contains unsupported characters",
+        )
+
+    return basename
 
 
 class CreateProjectRequest(BaseModel):
@@ -168,13 +235,20 @@ async def create_project(body: CreateProjectRequest):
     # Seed project_slides and project_models if provided
     slides_assigned = 0
     models_assigned = 0
+    slide_ids = _dedupe_non_empty_ids(body.slide_ids or [])
+    validated_model_ids = (
+        _validate_project_model_ids(project_id=body.id, model_ids=body.model_ids, reg=reg)
+        if body.model_ids
+        else []
+    )
+
     try:
         from . import database as db
 
-        if body.slide_ids:
-            slides_assigned = await db.assign_slides_to_project(body.id, body.slide_ids)
-        if body.model_ids:
-            models_assigned = await db.assign_models_to_project(body.id, body.model_ids)
+        if slide_ids:
+            slides_assigned = await db.assign_slides_to_project(body.id, slide_ids)
+        if validated_model_ids:
+            models_assigned = await db.assign_models_to_project(body.id, validated_model_ids)
     except Exception as e:
         logger.warning("Failed to seed slide/model assignments for project '%s': %s", body.id, e)
 
@@ -303,8 +377,7 @@ async def upload_slide(project_id: str, file: UploadFile = File(...)):
             detail=f"Project '{project_id}' not found",
         )
 
-    # Validate file extension
-    filename = file.filename or ""
+    filename = _safe_upload_filename(file.filename or "")
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_SLIDE_EXTENSIONS:
         raise HTTPException(
@@ -315,30 +388,60 @@ async def upload_slide(project_id: str, file: UploadFile = File(...)):
             ),
         )
 
-    # Ensure slides directory exists
-    slides_dir = Path(proj.dataset.slides_dir)
+    # Resolve and ensure slides directory exists
+    slides_dir = Path(proj.dataset.slides_dir).expanduser().resolve()
     os.makedirs(slides_dir, exist_ok=True)
 
-    dest_path = slides_dir / filename
+    dest_path = (slides_dir / filename).resolve()
+    if slides_dir != dest_path.parent:
+        raise HTTPException(status_code=400, detail="Invalid upload destination")
+    if dest_path.exists():
+        raise HTTPException(status_code=409, detail=f"Slide file already exists: {filename}")
+
+    tmp_file = tempfile.NamedTemporaryFile(
+        mode="wb",
+        delete=False,
+        dir=str(slides_dir),
+        prefix=".upload_",
+        suffix=ext,
+    )
+    tmp_path = Path(tmp_file.name)
     file_size = 0
 
     # Stream-write to disk to handle large WSI files
     try:
-        with open(dest_path, "wb") as out:
+        with tmp_file:
             while True:
                 chunk = await file.read(1024 * 1024)  # 1 MB chunks
                 if not chunk:
                     break
-                out.write(chunk)
                 file_size += len(chunk)
+                if file_size > MAX_UPLOAD_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            "Uploaded file exceeds maximum allowed size "
+                            f"({MAX_UPLOAD_SIZE_BYTES} bytes)"
+                        ),
+                    )
+                tmp_file.write(chunk)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+
+        os.replace(tmp_path, dest_path)
+    except HTTPException:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
     except Exception as exc:
-        # Clean up partial file on failure
-        if dest_path.exists():
-            dest_path.unlink()
+        if tmp_path.exists():
+            tmp_path.unlink()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to save uploaded file: {exc}",
         )
+    finally:
+        await file.close()
 
     slide_id = Path(filename).stem
 
@@ -383,7 +486,7 @@ async def upload_slide(project_id: str, file: UploadFile = File(...)):
         "filename": filename,
         "project_id": project_id,
         "file_size_bytes": file_size,
-        "path": str(dest_path),
+        "path": str(Path(proj.dataset.slides_dir) / filename),
         "db_registered": db_registered,
     }
 
@@ -441,7 +544,7 @@ async def get_project_slides(project_id: str):
                     SELECT s.slide_id, s.patient_id, s.filename, s.width, s.height,
                            s.label, s.has_embeddings, s.has_level0_embeddings, s.num_patches
                     FROM slides s
-                    WHERE s.project_id = $1 OR s.project_id IS NULL
+                    WHERE s.project_id = $1
                     ORDER BY s.slide_id
                     """,
                     project_id,
@@ -488,12 +591,16 @@ async def assign_project_slides(project_id: str, body: SlideIdsRequest):
     if reg.get_project(project_id) is None:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
 
+    slide_ids = _dedupe_non_empty_ids(body.slide_ids)
+    if not slide_ids:
+        raise HTTPException(status_code=400, detail="slide_ids must include at least one non-empty slide id")
+
     from . import database as db
-    count = await db.assign_slides_to_project(project_id, body.slide_ids)
+    count = await db.assign_slides_to_project(project_id, slide_ids)
     return {
         "project_id": project_id,
         "assigned": count,
-        "requested": len(body.slide_ids),
+        "requested": len(slide_ids),
     }
 
 
@@ -504,12 +611,16 @@ async def unassign_project_slides(project_id: str, body: SlideIdsRequest):
     if reg.get_project(project_id) is None:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
 
+    slide_ids = _dedupe_non_empty_ids(body.slide_ids)
+    if not slide_ids:
+        raise HTTPException(status_code=400, detail="slide_ids must include at least one non-empty slide id")
+
     from . import database as db
-    count = await db.unassign_slides_from_project(project_id, body.slide_ids)
+    count = await db.unassign_slides_from_project(project_id, slide_ids)
     return {
         "project_id": project_id,
         "removed": count,
-        "requested": len(body.slide_ids),
+        "requested": len(slide_ids),
     }
 
 
@@ -536,12 +647,18 @@ async def assign_project_models(project_id: str, body: ModelIdsRequest):
     if reg.get_project(project_id) is None:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
 
+    validated_model_ids = _validate_project_model_ids(
+        project_id=project_id,
+        model_ids=body.model_ids,
+        reg=reg,
+    )
+
     from . import database as db
-    count = await db.assign_models_to_project(project_id, body.model_ids)
+    count = await db.assign_models_to_project(project_id, validated_model_ids)
     return {
         "project_id": project_id,
         "assigned": count,
-        "requested": len(body.model_ids),
+        "requested": len(validated_model_ids),
     }
 
 
@@ -552,12 +669,18 @@ async def unassign_project_models(project_id: str, body: ModelIdsRequest):
     if reg.get_project(project_id) is None:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
 
+    validated_model_ids = _validate_project_model_ids(
+        project_id=project_id,
+        model_ids=body.model_ids,
+        reg=reg,
+    )
+
     from . import database as db
-    count = await db.unassign_models_from_project(project_id, body.model_ids)
+    count = await db.unassign_models_from_project(project_id, validated_model_ids)
     return {
         "project_id": project_id,
         "removed": count,
-        "requested": len(body.model_ids),
+        "requested": len(validated_model_ids),
     }
 
 

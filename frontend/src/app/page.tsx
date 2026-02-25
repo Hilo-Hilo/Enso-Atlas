@@ -1041,6 +1041,7 @@ function HomePage() {
           patchIndex,
           topK: 10,
           excludeSameSlide: true,
+          projectId: currentProject.id,
         });
 
         // Convert VisualSearchResultPatch to SimilarCase for the panel
@@ -1078,7 +1079,7 @@ function HomePage() {
         setIsSearchingVisual(false);
       }
     },
-    [selectedSlide, toast]
+    [selectedSlide, currentProject.id, toast]
   );
 
   // Clear visual search results when slide changes
@@ -1247,8 +1248,15 @@ function HomePage() {
       }));
 
       // Then run multi-model analysis with project-scoped model defaults
-      const modelIdsForAnalysis = selectedModels.length > 0
-        ? selectedModels
+      const scopedAllowedModelIds = new Set(scopedProjectModels.map((m) => m.id));
+      const sanitizedSelectedModels = selectedModels.filter((id) => scopedAllowedModelIds.has(id));
+
+      if (sanitizedSelectedModels.length !== selectedModels.length) {
+        setSelectedModels(sanitizedSelectedModels);
+      }
+
+      const modelIdsForAnalysis = sanitizedSelectedModels.length > 0
+        ? sanitizedSelectedModels
         : scopedProjectModels.map((m) => m.id);
 
       const result = await analyzeSlideMultiModel(

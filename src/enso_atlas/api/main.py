@@ -736,6 +736,7 @@ class VisualSearchRequest(BaseModel):
     patch_embedding: Optional[List[float]] = Field(None, description="Direct embedding vector (384-dim)")
     top_k: int = Field(default=10, ge=1, le=50, description="Number of similar patches to return")
     exclude_same_slide: bool = Field(default=True, description="Exclude patches from the same slide")
+    project_id: Optional[str] = Field(default=None, description="Project ID to scope visual search candidates")
 
 
 class VisualSearchResultPatch(BaseModel):
@@ -4897,191 +4898,305 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
     async def visual_search(request: VisualSearchRequest):
         """
         Find visually similar patches across the entire database using FAISS.
-        
+
         This endpoint enables image-to-image search: given a query patch (by embedding,
         index, or coordinates), find the most histologically similar patches from all
         slides in the database.
-        
+
         Use cases:
         - "Find Similar Patches" button on evidence patches
         - Compare tumor morphology across cases
         - Identify similar stroma/inflammatory patterns
         - Educational: show similar cases for training
-        
+
         The search uses Path Foundation patch embeddings and FAISS for efficient
         approximate nearest neighbor search.
         """
         import time
+
         start_time = time.time()
-        
+
+        project_requested = request.project_id is not None
+        _require_project(request.project_id)
+        allowed_slide_ids = await _project_slide_ids(request.project_id)
+        if allowed_slide_ids is not None and len(allowed_slide_ids) == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Project '{request.project_id}' has no scoped slides for visual search",
+            )
+
+        if request.coordinates is not None:
+            if len(request.coordinates) != 2:
+                raise HTTPException(status_code=400, detail="coordinates must be [x, y]")
+            if request.coordinates[0] < 0 or request.coordinates[1] < 0:
+                raise HTTPException(status_code=400, detail="coordinates must be non-negative")
+
         # Validate request - need at least one way to identify the query patch
         has_embedding = request.patch_embedding is not None
         has_slide_patch = request.slide_id is not None and request.patch_index is not None
         has_slide_coords = request.slide_id is not None and request.coordinates is not None
-        
+
         if not (has_embedding or has_slide_patch or has_slide_coords):
             raise HTTPException(
                 status_code=400,
-                detail="Must provide either patch_embedding, (slide_id + patch_index), or (slide_id + coordinates)"
+                detail="Must provide either patch_embedding, (slide_id + patch_index), or (slide_id + coordinates)",
             )
-        
+
         query_embedding = None
         query_slide_id = request.slide_id
         query_patch_index = request.patch_index
         query_coordinates = request.coordinates
-        
+
+        if query_slide_id and allowed_slide_ids is not None and query_slide_id not in allowed_slide_ids:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Slide {query_slide_id} is not available in project '{request.project_id}'",
+            )
+
+        visual_embeddings_dir = _resolve_project_embeddings_dir(
+            request.project_id,
+            require_exists=project_requested,
+        )
+
         # Case 1: Direct embedding provided
         if has_embedding:
-            query_embedding = np.array(request.patch_embedding, dtype=np.float32)
-            if len(query_embedding.shape) == 1:
+            query_embedding = np.asarray(request.patch_embedding, dtype=np.float32)
+            if query_embedding.ndim == 1:
                 query_embedding = query_embedding.reshape(1, -1)
-        
+            elif query_embedding.ndim != 2 or query_embedding.shape[0] != 1:
+                raise HTTPException(status_code=400, detail="patch_embedding must be a single embedding vector")
+
         # Case 2: Look up by slide_id + patch_index
         elif has_slide_patch:
-            emb_path = embeddings_dir / f"{request.slide_id}.npy"
-            if not emb_path.exists():
-                raise HTTPException(status_code=404, detail=f"Slide {request.slide_id} not found")
-            
+            emb_path, searched_dirs = _resolve_embedding_path(
+                request.slide_id,
+                level=1,
+                project_id=request.project_id,
+                base_embeddings_dir=visual_embeddings_dir,
+            )
+            if emb_path is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"Slide {request.slide_id} not found in embeddings directories: "
+                        + ", ".join(str(p) for p in searched_dirs)
+                    ),
+                )
+
             embeddings = np.load(emb_path)
             if request.patch_index >= len(embeddings):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Patch index {request.patch_index} out of range (slide has {len(embeddings)} patches)"
+                    detail=f"Patch index {request.patch_index} out of range (slide has {len(embeddings)} patches)",
                 )
-            
-            query_embedding = embeddings[request.patch_index:request.patch_index+1].astype(np.float32)
-            
+
+            query_embedding = embeddings[request.patch_index : request.patch_index + 1].astype(np.float32)
+
             # Also get coordinates if available
-            coord_path = embeddings_dir / f"{request.slide_id}_coords.npy"
+            coord_path = emb_path.with_name(f"{request.slide_id}_coords.npy")
             if coord_path.exists():
                 coords = np.load(coord_path)
                 if request.patch_index < len(coords):
                     query_coordinates = [int(coords[request.patch_index][0]), int(coords[request.patch_index][1])]
-        
+
         # Case 3: Look up by slide_id + coordinates
         elif has_slide_coords:
-            emb_path = embeddings_dir / f"{request.slide_id}.npy"
-            coord_path = embeddings_dir / f"{request.slide_id}_coords.npy"
-            
-            if not emb_path.exists():
-                raise HTTPException(status_code=404, detail=f"Slide {request.slide_id} not found")
+            emb_path, searched_dirs = _resolve_embedding_path(
+                request.slide_id,
+                level=1,
+                project_id=request.project_id,
+                base_embeddings_dir=visual_embeddings_dir,
+            )
+            if emb_path is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"Slide {request.slide_id} not found in embeddings directories: "
+                        + ", ".join(str(p) for p in searched_dirs)
+                    ),
+                )
+
+            coord_path = emb_path.with_name(f"{request.slide_id}_coords.npy")
+
             if not coord_path.exists():
                 raise HTTPException(status_code=404, detail=f"Coordinates not found for slide {request.slide_id}")
-            
+
             embeddings = np.load(emb_path)
             coords = np.load(coord_path)
-            
+
             # Find patch closest to requested coordinates
             target_x, target_y = request.coordinates[0], request.coordinates[1]
-            distances = np.sqrt((coords[:, 0] - target_x)**2 + (coords[:, 1] - target_y)**2)
+            distances = np.sqrt((coords[:, 0] - target_x) ** 2 + (coords[:, 1] - target_y) ** 2)
             query_patch_index = int(np.argmin(distances))
-            
-            query_embedding = embeddings[query_patch_index:query_patch_index+1].astype(np.float32)
+
+            query_embedding = embeddings[query_patch_index : query_patch_index + 1].astype(np.float32)
             query_coordinates = [int(coords[query_patch_index][0]), int(coords[query_patch_index][1])]
-        
+
         # Perform FAISS search
         if evidence_gen is None or evidence_gen._faiss_index is None:
             raise HTTPException(status_code=503, detail="FAISS index not initialized")
-        
-        # Search with extra results to allow filtering
-        search_k = request.top_k * 3 if request.exclude_same_slide else request.top_k
-        search_k = min(search_k, evidence_gen._faiss_index.ntotal)
-        
+
+        faiss_index = evidence_gen._faiss_index
+        index_total = int(faiss_index.ntotal)
+        if index_total <= 0:
+            raise HTTPException(status_code=404, detail="FAISS index is empty")
+
+        if query_embedding is None or query_embedding.ndim != 2:
+            raise HTTPException(status_code=400, detail="Could not resolve query embedding")
+
+        if int(query_embedding.shape[1]) != int(faiss_index.d):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Embedding dimension mismatch: expected {faiss_index.d}, got {query_embedding.shape[1]}",
+            )
+
+        # Search with extra results to allow project/same-slide filtering
+        search_multiplier = 10 if allowed_slide_ids is not None else 3
+        if not request.exclude_same_slide and allowed_slide_ids is None:
+            search_multiplier = 1
+        search_k = min(max(request.top_k * search_multiplier, request.top_k), index_total)
+
         try:
-            distances, indices = evidence_gen._faiss_index.search(query_embedding, search_k)
+            distances, indices = faiss_index.search(query_embedding, search_k)
         except Exception as e:
             logger.error(f"FAISS search failed: {e}")
             raise HTTPException(status_code=500, detail=f"FAISS search failed: {str(e)}")
-        
+
+        scoped_total_patches = index_total
+        if allowed_slide_ids is not None:
+            scoped_total_patches = sum(
+                1
+                for meta in evidence_gen._reference_metadata
+                if str(meta.get("slide_id", "")) in allowed_slide_ids
+            )
+
         # Build results
         results = []
         seen_slide_patches = set()
-        
+
         for dist, idx in zip(distances[0], indices[0]):
             if idx < 0 or idx >= len(evidence_gen._reference_metadata):
                 continue
-            
+
             meta = evidence_gen._reference_metadata[idx]
-            result_slide_id = meta.get("slide_id", "unknown")
-            result_patch_index = meta.get("patch_index", 0)
-            
+            result_slide_id = str(meta.get("slide_id", "unknown"))
+            result_patch_index = int(meta.get("patch_index", 0))
+
+            if allowed_slide_ids is not None and result_slide_id not in allowed_slide_ids:
+                continue
+
             # Skip same slide if requested
             if request.exclude_same_slide and result_slide_id == query_slide_id:
                 continue
-            
+
             # Deduplicate by (slide_id, patch_index)
             key = (result_slide_id, result_patch_index)
             if key in seen_slide_patches:
                 continue
             seen_slide_patches.add(key)
-            
+
             # Get coordinates if available
             result_coordinates = None
-            coord_path = embeddings_dir / f"{result_slide_id}_coords.npy"
-            if coord_path.exists():
-                try:
-                    coords = np.load(coord_path)
-                    if result_patch_index < len(coords):
-                        result_coordinates = [int(coords[result_patch_index][0]), int(coords[result_patch_index][1])]
-                except Exception as e:
-                    logger.warning(f"Failed to load coords for {result_slide_id}: {e}")
-            
+            emb_path_for_result, _ = _resolve_embedding_path(
+                result_slide_id,
+                level=1,
+                project_id=request.project_id,
+                base_embeddings_dir=visual_embeddings_dir,
+            )
+            if emb_path_for_result is not None:
+                coord_path = emb_path_for_result.with_name(f"{result_slide_id}_coords.npy")
+                if coord_path.exists():
+                    try:
+                        coords = np.load(coord_path)
+                        if result_patch_index < len(coords):
+                            result_coordinates = [int(coords[result_patch_index][0]), int(coords[result_patch_index][1])]
+                    except Exception as e:
+                        logger.warning(f"Failed to load coords for {result_slide_id}: {e}")
+
             # Get slide label if available
             result_label = slide_labels.get(result_slide_id)
-            
+
             # Convert L2 distance to similarity score (higher = more similar)
             # Using inverse distance formula: similarity = 1 / (1 + distance)
             similarity = 1.0 / (1.0 + float(dist))
-            
+
             # Generate thumbnail URL
             thumbnail_url = None
             if result_coordinates:
                 thumbnail_url = f"/api/slides/{result_slide_id}/patches/{result_patch_index}"
-            
-            results.append(VisualSearchResultPatch(
-                slide_id=result_slide_id,
-                patch_index=result_patch_index,
-                coordinates=result_coordinates,
-                distance=float(dist),
-                similarity=similarity,
-                label=result_label,
-                thumbnail_url=thumbnail_url,
-            ))
-            
+                if request.project_id:
+                    thumbnail_url = f"{thumbnail_url}?project_id={request.project_id}"
+
+            results.append(
+                VisualSearchResultPatch(
+                    slide_id=result_slide_id,
+                    patch_index=result_patch_index,
+                    coordinates=result_coordinates,
+                    distance=float(dist),
+                    similarity=similarity,
+                    label=result_label,
+                    thumbnail_url=thumbnail_url,
+                )
+            )
+
             if len(results) >= request.top_k:
                 break
-        
+
         search_time_ms = (time.time() - start_time) * 1000
-        
+
         log_audit_event(
             "visual_search",
             slide_id=query_slide_id,
             details={
+                "project_id": request.project_id,
                 "patch_index": query_patch_index,
                 "coordinates": query_coordinates,
                 "num_results": len(results),
                 "search_time_ms": search_time_ms,
             },
         )
-        
+
         return VisualSearchResponse(
             query_slide_id=query_slide_id,
             query_patch_index=query_patch_index,
             query_coordinates=query_coordinates,
             results=results,
-            total_patches_searched=evidence_gen._faiss_index.ntotal if evidence_gen._faiss_index else 0,
+            total_patches_searched=scoped_total_patches,
             search_time_ms=round(search_time_ms, 2),
         )
 
     @app.get("/api/search/visual/status")
-    async def visual_search_status():
+    async def visual_search_status(
+        project_id: Optional[str] = Query(default=None, description="Optional project scope for visual-search inventory"),
+    ):
         """Check the status of the visual search FAISS index."""
+        _require_project(project_id)
         index_loaded = evidence_gen is not None and evidence_gen._faiss_index is not None
-        
+
+        total_patches = evidence_gen._faiss_index.ntotal if index_loaded else 0
+        total_slides = len(available_slides)
+
+        if index_loaded and project_id is not None:
+            allowed_slide_ids = await _project_slide_ids(project_id)
+            if allowed_slide_ids is None:
+                allowed_slide_ids = set()
+
+            scoped_slide_ids = {
+                str(meta.get("slide_id", ""))
+                for meta in evidence_gen._reference_metadata
+                if str(meta.get("slide_id", "")) in allowed_slide_ids
+            }
+            total_slides = len(scoped_slide_ids)
+            total_patches = sum(
+                1
+                for meta in evidence_gen._reference_metadata
+                if str(meta.get("slide_id", "")) in allowed_slide_ids
+            )
+
         return {
             "index_loaded": index_loaded,
-            "total_patches": evidence_gen._faiss_index.ntotal if index_loaded else 0,
-            "total_slides": len(available_slides),
+            "total_patches": total_patches,
+            "total_slides": total_slides,
             "embedding_dim": 384,  # Path Foundation embedding dimension
         }
 
@@ -5641,26 +5756,63 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
     # ====== Slide Embedding Status ======
 
     @app.get("/api/slides/{slide_id}/embedding-status")
-    async def get_slide_embedding_status(slide_id: str):
+    async def get_slide_embedding_status(
+        slide_id: str,
+        project_id: Optional[str] = Query(default=None, description="Optional project scope for model cache visibility"),
+    ):
         """Get embedding and analysis status for a slide.
 
         Returns which embeddings exist and which classification models
         have cached results.
         """
+        _require_project(project_id)
+
+        if project_id is not None:
+            allowed_slide_ids = await _project_slide_ids(project_id)
+            if allowed_slide_ids is not None and slide_id not in allowed_slide_ids:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Slide {slide_id} is not available in project '{project_id}'",
+                )
+
         status = await db.get_slide_embedding_status(slide_id)
         if "error" in status:
             raise HTTPException(status_code=404, detail=status["error"])
+
+        allowed_model_ids = await _resolve_project_model_ids(project_id)
+        if allowed_model_ids is not None:
+            status["cached_model_ids"] = [
+                model_id
+                for model_id in status.get("cached_model_ids", [])
+                if model_id in allowed_model_ids
+            ]
+
         return status
 
     @app.get("/api/slides/{slide_id}/cached-results")
-    async def get_slide_cached_results(slide_id: str):
+    async def get_slide_cached_results(
+        slide_id: str,
+        project_id: Optional[str] = Query(default=None, description="Optional project scope for cached result visibility"),
+    ):
         """
         Get all cached analysis results for a slide.
-        
+
         Returns the latest result per model from the analysis_results table.
         Used by the frontend to instantly display previous results when
         navigating back to a slide.
         """
+        _require_project(project_id)
+
+        if project_id is not None:
+            allowed_slide_ids = await _project_slide_ids(project_id)
+            if allowed_slide_ids is not None and slide_id not in allowed_slide_ids:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Slide {slide_id} is not available in project '{project_id}'",
+                )
+
+        allowed_model_ids = await _resolve_project_model_ids(project_id)
+
         try:
             cached = await db.get_all_cached_results(slide_id)
         except Exception as e:
@@ -5670,6 +5822,8 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
         results = []
         for row in cached:
+            if allowed_model_ids is not None and row.get("model_id") not in allowed_model_ids:
+                continue
             results.append({
                 "model_id": row["model_id"],
                 "score": row["score"],

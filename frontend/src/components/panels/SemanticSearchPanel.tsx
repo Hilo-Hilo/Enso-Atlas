@@ -285,7 +285,6 @@ function SearchResultItem({
     projectId,
     coordinates: result.coordinates,
     patchSize: result.patch_size,
-    size: 224,
   });
 
   return (

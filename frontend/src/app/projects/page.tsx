@@ -454,28 +454,42 @@ function UploadModal({
   const isBusy = uploading || gdcDownloading;
 
   const ALLOWED_EXTENSIONS = [".svs", ".tiff", ".tif", ".ndpi"];
+  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024; // 10 GiB
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files || []);
-    const valid = selected.filter((f) =>
+  const validateSelectedFiles = (incoming: File[]): File[] => {
+    const validExtension = incoming.filter((f) =>
       ALLOWED_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(ext))
     );
-    if (valid.length < selected.length) {
+
+    const oversized = validExtension.filter((f) => f.size > MAX_UPLOAD_BYTES);
+    if (oversized.length > 0) {
+      toast.warning(
+        "Large files skipped",
+        `${oversized.length} file(s) exceed 10 GiB upload limit.`
+      );
+    }
+
+    const valid = validExtension.filter((f) => f.size <= MAX_UPLOAD_BYTES);
+
+    if (validExtension.length < incoming.length) {
       toast.warning(
         "Invalid files skipped",
         `Only ${ALLOWED_EXTENSIONS.join(", ")} files are accepted.`
       );
     }
-    setFiles((prev) => [...prev, ...valid]);
+
+    return valid;
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = validateSelectedFiles(Array.from(e.target.files || []));
+    setFiles((prev) => [...prev, ...selected]);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const dropped = Array.from(e.dataTransfer.files);
-    const valid = dropped.filter((f) =>
-      ALLOWED_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(ext))
-    );
-    setFiles((prev) => [...prev, ...valid]);
+    const dropped = validateSelectedFiles(Array.from(e.dataTransfer.files));
+    setFiles((prev) => [...prev, ...dropped]);
   };
 
   const removeFile = (index: number) => {
@@ -621,7 +635,7 @@ function UploadModal({
                   Drop WSI files here or click to browse
                 </p>
                 <p className="text-xs text-gray-400 mt-1">
-                  Supported: {ALLOWED_EXTENSIONS.join(", ")}
+                  Supported: {ALLOWED_EXTENSIONS.join(", ")} · Max 10 GiB each
                 </p>
                 <input
                   id="file-input-local"

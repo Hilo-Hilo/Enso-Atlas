@@ -481,6 +481,7 @@ export interface VisualSearchRequest {
   patchEmbedding?: number[];
   topK?: number;
   excludeSameSlide?: boolean;
+  projectId?: string;
 }
 
 // Single result from visual search

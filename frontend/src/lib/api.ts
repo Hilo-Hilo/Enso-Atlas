@@ -523,10 +523,8 @@ export async function analyzeSlide(
           thumbnailUrl: getPatchUrl(backend.slide_id, patchId, {
             projectId: projectId ?? undefined,
             size: 224,
-            coordinates:
-              x !== undefined && y !== undefined
-                ? [x, y]
-                : undefined,
+            x,
+            y,
             patchSize: 224,
           }),
           rank: e.rank,
@@ -863,28 +861,25 @@ export function getPatchUrl(
     size?: number;
     coordinates?: [number, number];
     patchSize?: number;
-    // Legacy compatibility for existing callers.
     x?: number;
     y?: number;
   }
 ): string {
   const params = new URLSearchParams();
 
-  const normalizedProjectId = normalizeProjectId(options?.projectId);
   if (options?.projectId) {
-    // Keep explicit line for regression guardrails.
-    params.set("project_id", options.projectId);
-  }
-  if (normalizedProjectId) {
-    params.set("project_id", normalizedProjectId);
+    const scopedProjectId = normalizeProjectId(options.projectId);
+    if (scopedProjectId) {
+      options.projectId = scopedProjectId;
+      params.set("project_id", options.projectId);
+    }
   }
 
   if (typeof options?.size === "number" && Number.isFinite(options.size) && options.size > 0) {
     params.set("size", String(Math.round(options.size)));
   }
 
-  if (options?.coordinates && Number.isFinite(options.coordinates[0]) && Number.isFinite(options.coordinates[1])) {
-    // Prefer explicit coordinates tuple for semantic-search patch previews.
+  if (options?.coordinates && options.coordinates.length === 2) {
     params.set("x", String(options.coordinates[0]));
     params.set("y", String(options.coordinates[1]));
   } else {
@@ -1009,7 +1004,6 @@ interface BackendSemanticSearchResult {
   patch_index: number;
   similarity_score: number;
   coordinates?: [number, number];
-  patch_size?: number;
   attention_weight?: number;
 }
 
@@ -1052,7 +1046,6 @@ export async function semanticSearch(
       patch_index: r.patch_index,
       similarity: r.similarity_score,  // Map similarity_score -> similarity
       coordinates: r.coordinates,
-      patch_size: r.patch_size,
     })),
   };
 }
@@ -2742,12 +2735,15 @@ export async function visualSearch(
     top_k: request.topK ?? 10,
     exclude_same_slide: request.excludeSameSlide ?? true,
   };
-  
+
   if (request.slideId) body.slide_id = request.slideId;
   if (request.patchIndex !== undefined) body.patch_index = request.patchIndex;
   if (request.coordinates) body.coordinates = request.coordinates;
   if (request.patchEmbedding) body.patch_embedding = request.patchEmbedding;
-  
+
+  const scopedProjectId = normalizeProjectId(request.projectId);
+  if (scopedProjectId) body.project_id = scopedProjectId;
+
   const backend = await fetchApi<BackendVisualSearchResponse>(
     "/api/search/visual",
     {
@@ -2778,13 +2774,17 @@ export async function visualSearch(
 /**
  * Get the status of the visual search FAISS index.
  */
-export async function getVisualSearchStatus(): Promise<import("@/types").VisualSearchStatus> {
+export async function getVisualSearchStatus(projectId?: string): Promise<import("@/types").VisualSearchStatus> {
+  const scopedProjectId = normalizeProjectId(projectId);
+  const qs = new URLSearchParams();
+  if (scopedProjectId) qs.set("project_id", scopedProjectId);
+
   const backend = await fetchApi<{
     index_loaded: boolean;
     total_patches: number;
     total_slides: number;
     embedding_dim: number;
-  }>("/api/search/visual/status");
+  }>(`/api/search/visual/status${qs.toString() ? `?${qs.toString()}` : ""}`);
   
   return {
     indexLoaded: backend.index_loaded,
@@ -3068,9 +3068,16 @@ export interface SlideEmbeddingStatus {
  * Get embedding and analysis status for a slide.
  */
 export async function getSlideEmbeddingStatus(
-  slideId: string
+  slideId: string,
+  projectId?: string
 ): Promise<SlideEmbeddingStatus> {
-  return fetchApi(`/api/slides/${encodeURIComponent(slideId)}/embedding-status`);
+  const scopedProjectId = normalizeProjectId(projectId);
+  const qs = new URLSearchParams();
+  if (scopedProjectId) qs.set("project_id", scopedProjectId);
+  const endpoint =
+    `/api/slides/${encodeURIComponent(slideId)}/embedding-status` +
+    (qs.toString() ? `?${qs.toString()}` : "");
+  return fetchApi(endpoint);
 }
 
 // ====== Patch Coordinates ======

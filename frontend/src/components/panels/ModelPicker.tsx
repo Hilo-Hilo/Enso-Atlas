@@ -309,7 +309,7 @@ export function ModelPicker({
     }
     const fetchStatus = async () => {
       try {
-        const status = await getSlideEmbeddingStatus(selectedSlideId);
+        const status = await getSlideEmbeddingStatus(selectedSlideId, currentProject.id);
         setPreviouslyRanModels(new Set(status.cached_model_ids));
       } catch (err) {
         console.warn("Failed to fetch slide embedding status:", err);
@@ -317,7 +317,7 @@ export function ModelPicker({
       }
     };
     fetchStatus();
-  }, [selectedSlideId]);
+  }, [selectedSlideId, currentProject.id]);
 
   const toggleModel = (modelId: string) => {
     if (disabled) return;
