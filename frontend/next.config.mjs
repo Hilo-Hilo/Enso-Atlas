@@ -1,4 +1,10 @@
 /** @type {import('next').NextConfig} */
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || (
+  process.env.NODE_ENV === "production"
+    ? "http://127.0.0.1:8003"
+    : "http://127.0.0.1:8000"
+);
+
 const nextConfig = {
   // Enable React strict mode for development
   reactStrictMode: true,
@@ -38,7 +44,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'}/api/:path*`, // Local backend default; set NEXT_PUBLIC_API_URL to :8003 for Docker backend
+        destination: `${apiBaseUrl}/api/:path*`,
       },
     ]
   },
