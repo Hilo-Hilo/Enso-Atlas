@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui";
 import { useProject } from "@/contexts/ProjectContext";
+import { getClientApiBaseUrl } from "@/lib/clientApiBase";
 import { cn } from "@/lib/utils";
 import {
   Plus,
@@ -124,7 +125,7 @@ const EMPTY_FORM: CreateProjectForm = {
 // API helpers
 // -------------------------------------------------------------------
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE = getClientApiBaseUrl();
 
 async function fetchProjects(): Promise<ProjectDetail[]> {
   const res = await fetch(`${API_BASE}/api/projects`);

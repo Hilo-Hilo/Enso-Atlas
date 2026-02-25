@@ -2,6 +2,7 @@
 
 import React, { useEffect, useCallback, useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { getClientApiBaseUrl } from "@/lib/clientApiBase";
 import {
   X,
   Activity,
@@ -37,6 +38,8 @@ interface SystemMetrics {
   lastChecked: Date;
 }
 
+const API_BASE = getClientApiBaseUrl();
+
 export function SystemStatusModal({ isOpen, onClose, isConnected }: SystemStatusModalProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [metrics, setMetrics] = useState<SystemMetrics>({
@@ -59,7 +62,7 @@ export function SystemStatusModal({ isOpen, onClose, isConnected }: SystemStatus
     const startTime = Date.now();
     
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/health`, {
+      const response = await fetch(`${API_BASE}/api/health`, {
         method: "GET",
         signal: AbortSignal.timeout(5000),
       });

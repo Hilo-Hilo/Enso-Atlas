@@ -30,6 +30,7 @@ import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
 import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords, getProjectAvailableModels, type AvailableModelDetail } from "@/lib/api";
+import { getClientApiBaseUrl } from "@/lib/clientApiBase";
 import { deduplicateSlides } from "@/lib/slideUtils";
 import { useProject } from "@/contexts/ProjectContext";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
@@ -47,6 +48,8 @@ const WSIViewer = nextDynamic(
   () => import("@/components/viewer/WSIViewer").then((mod) => mod.WSIViewer),
   { ssr: false, loading: () => <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg">Loading viewer...</div> }
 );
+
+const API_BASE = getClientApiBaseUrl();
 
 // Fallback heatmap models -- derived from shared model config
 
@@ -1915,7 +1918,7 @@ function HomePage() {
       };
       
       // Call backend PDF export endpoint
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/export/pdf`, {
+      const response = await fetch(`${API_BASE}/api/export/pdf`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1935,7 +1938,7 @@ function HomePage() {
         console.warn("Server PDF export failed, trying lightweight endpoint...");
         try {
           const lightResponse = await fetch(
-            `${process.env.NEXT_PUBLIC_API_URL || ""}/api/report/pdf`,
+            `${API_BASE}/api/report/pdf`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },

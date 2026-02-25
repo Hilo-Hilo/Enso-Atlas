@@ -34,8 +34,9 @@ import type {
   AvailableModelsResponse,
   SimilarCase,
 } from "@/types";
+import { getClientApiBaseUrl } from "@/lib/clientApiBase";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE_URL = getClientApiBaseUrl();
 
 // Configuration for retry behavior
 const RETRY_CONFIG = {
