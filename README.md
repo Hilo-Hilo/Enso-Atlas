@@ -1,81 +1,98 @@
 # Enso Atlas
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+<div align="center">
 
-**On-Premise Multi-Cancer Pathology Evidence Platform for Project-Scoped Clinical AI**
+### Production-Grade Multi-Project Pathology AI Platform  
+Built on Google Health AI Developer Foundations (HAI-DEF)
 
-Enso Atlas is an on-premise pathology evidence platform that analyzes whole-slide images (WSIs) using CLAM/TransMIL attention-based classification, Path Foundation embeddings, MedSigLIP retrieval, and MedGemma reporting across multiple cancer projects with strict project isolation. The platform is disease-agnostic; the ovarian and lung setups in this repository are reference demos.
+[![Kaggle Writeup](https://img.shields.io/badge/Kaggle-Writeup-20BEFF?style=for-the-badge&logo=kaggle&logoColor=white)](https://www.kaggle.com/competitions/med-gemma-impact-challenge/writeups/Enso-Atlas)
+[![MedGemma Impact Challenge](https://img.shields.io/badge/MedGemma-Impact%20Challenge-0EA5E9?style=for-the-badge)](https://www.kaggle.com/competitions/med-gemma-impact-challenge)
+[![Deployment](https://img.shields.io/badge/Deployment-On--Premise%20Only-166534?style=for-the-badge)](#)
+[![PHI Boundary](https://img.shields.io/badge/PHI-Data%20Stays%20On%20Site-1D4ED8?style=for-the-badge)](#)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-2563EB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/License-MIT-EAB308?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-## Competition Context
+[Competition Write-up](https://www.kaggle.com/competitions/med-gemma-impact-challenge/writeups/Enso-Atlas) • [Documentation](docs.md) • [Quick Start](#quick-start) • [Pipeline Scripts](#pipeline-scripts)
 
-This repository is developed for the **Kaggle-Google Med Gemma Impact Challenge**:
-
-- Writeups page: https://www.kaggle.com/competitions/med-gemma-impact-challenge
-- Challenge prompt: **The MedGemma Impact Challenge — Build human-centered AI applications with MedGemma and other open models from Google’s Health AI Developer Foundations (HAI-DEF).**
+</div>
 
 **Last Updated:** February 24, 2026
 
 ---
 
+## Overview
+
+### Clinical Problem
+Current oncology workflows often identify treatment resistance only after patients complete toxic therapy. In platinum-based ovarian cancer, the morphological signal for resistance may already be present in the diagnostic slide; the challenge is extracting it in a traceable and clinically usable way.
+
+### What we built
+- **Platform, not a single model:** One system that supports multiple endpoints and cancer projects
+- **Evidence-first predictions:** Attention heatmaps tied to tissue regions, plus similar-case retrieval
+- **Reusable embeddings:** Path Foundation patch embeddings cached for downstream tasks
+- **Multimodal interpretation:** MedSigLIP semantic patch search and MedGemma structured report generation
+- **Operational output:** One-click PDF reports for tumor board workflows
+
+### What makes this deployment practical
+- Fully local deployment with no PHI leaving the hospital network
+- Strict project isolation across data, model visibility, inference, and async tasks
+- New cancer type onboarding through configuration plus checkpoint registration
+- Docker-based deployment targeting a single DGX Spark node
+
+### Current reference deployment
+- `ovarian-platinum` project: platinum sensitivity, tumor grade, and 1/3/5-year survival tasks
+- `lung-stage` project: lung adenocarcinoma stage classification
+- Total: 6 project-scoped classification models (5 ovarian + 1 lung)
+
+### Impact framing
+Retrospective analyses suggest meaningful potential to reduce avoidable toxicity and cost by flagging likely non-responders earlier. Prospective, multi-site clinical validation is still required before clinical deployment decisions.
+
+---
+
 ## Highlights
 
-- **Multi-project platform**: Project definitions are driven by `config/projects.yaml`; current reference projects are:
-  - `ovarian-platinum` — **Ovarian Cancer - Platinum Sensitivity**
-  - `lung-stage` — **Lung Adenocarcinoma - Stage Classification**
-- **Strict project isolation**: Slide listing, model selection, heatmaps, similar-case retrieval, report generation, batch analysis, and async tasks are scoped by `project_id` with no cross-project fallback.
-- **Project-scoped model visibility**: 6 total classification models (5 ovarian + 1 lung), and each project only exposes assigned models.
-- **Level-0 dense embeddings by default**: Analysis and multi-model workflows default to full-resolution level-0 embeddings.
-- **Explicit backend error behavior**: Heatmap and multi-model endpoints return explicit errors for missing prerequisites:
-  - `LEVEL0_EMBEDDINGS_REQUIRED`
-  - `COORDS_REQUIRED_FOR_HEATMAP`
-- **Heatmap rendering modes**: Truthful patch-grid overlays plus optional interpolated/smoothed view.
-- **Project-aware frontend UX**: ModelPicker prunes stale model IDs on project switch; prediction panels, AI assistant, and patch zoom use project-specific language.
-- **Local-first deployment**: Runs on-premise; no PHI leaves the hospital network.
-
-## Recent Model and Pipeline Updates
-
-- `scripts/train_transmil_finetune.py` now supports patient-level stratified k-fold CV, class-balanced epoch sampling, minority-class feature augmentation (noise injection, feature dropout, mixup), configurable patch caps (`max_train_patches`, `max_eval_patches`), single-split mode, and per-fold PR-AUC plus calibration curves.
-- `scripts/multi_model_inference.py` now supports per-model decision thresholds (from `config/projects.yaml` or training outputs), wrapped checkpoint loading, CUDA OOM fallback with patch subsampling, and threshold-relative confidence calibration.
-- `src/enso_atlas/mil/clam.py` now includes a `TransMILClassifier` implementation alongside CLAM, with the same public inference interface.
-- `src/enso_atlas/reporting/medgemma.py` now includes structured report parsing, safety-constrained prompting, multi-section fallback behavior, and stronger generation error handling.
-- New data preparation scripts are included for barcode-balanced pool rebuilding, lung stage pool prep, ovarian endpoint pool prep, and bucket H5-to-NPY conversion:
-  - `scripts/rebuild_multimodel_pools_barcode_balanced.py`
-  - `scripts/prepare_lung_stage_api_pool.py`
-  - `scripts/prepare_ov_endpoint_api_pool.py`
-  - `scripts/convert_bucket_h5_to_npy.py`
-- `config/projects.yaml` now defines `decision_threshold: 0.9935` for `tumor_grade`.
+- **Multi-project architecture** driven by `config/projects.yaml`
+- **Strict project isolation** for slides, models, heatmaps, retrieval, reporting, and async jobs
+- **Project-scoped model visibility** (6 total models, exposed only where assigned)
+- **Level-0 dense embeddings by default** for analysis and multi-model workflows
+- **Explicit backend errors** for missing prerequisites (`LEVEL0_EMBEDDINGS_REQUIRED`, `COORDS_REQUIRED_FOR_HEATMAP`)
+- **Dual heatmap rendering modes** (truthful patch-grid and optional smoothed interpolation)
+- **Project-aware frontend behavior** with stale model pruning on project switch
+- **Canonical pipeline scripts** documented and aligned with deployed model preparation flow
+- **Local-first operation** with no required cloud runtime path
 
 ---
 
 ## Screenshots
 
-All screenshots below were refreshed from the live deployment at `https://atlas.ensohealth.ai` on Feb 24, 2026.
-
 ### Dashboard (Oncologist View)
 
 ![Dashboard - Oncologist](docs/screenshots/dashboard-lung-oncologist.png)
 
-*Oncologist summary view with prediction, similar-case counts, and top attention regions.*
+*Current UI in Oncologist mode with project-scoped model selection and evidence panels.*
 
 ### Dashboard (Pathologist View)
 
 ![Dashboard - Pathologist](docs/screenshots/dashboard-lung-pathologist.png)
 
-*Pathologist workspace with WSI controls, annotation tools, and heatmap overlays.*
+*Current UI in Pathologist mode with project-aware interpretation workflow and tool visibility.*
+
+### Batch Analysis
+
+![Batch Analysis](docs/screenshots/batch-analysis-lung.png)
+
+*Batch analysis view showing project-scoped model selection, resolution controls, and cohort-level run setup.*
 
 ### Slide Manager
 
 ![Slide Manager](docs/screenshots/slide-manager.png)
 
-*Slide inventory in grid view with filtering controls, embedding status, and patch counts.*
+*Project-scoped slide inventory with filtering, readiness metadata, and per-project organization controls.*
 
 ### Project Management
 
 ![Project Management](docs/screenshots/project-management.png)
 
-*Project cards for ovarian and lung demos, including thresholds, embeddings, and navigation actions.*
+*Project configuration and assignment workflow backed by `config/projects.yaml` and project-specific data/model mappings.*
 
 ---
 
@@ -85,7 +102,7 @@ All screenshots below were refreshed from the live deployment at `https://atlas.
 
 ```bash
 # Clone the repository
-git clone https://github.com/Hilo-Hilo/enso-atlas.git
+git clone https://github.com/Hilo-Hilo/med-gemma-hackathon.git
 cd med-gemma-hackathon
 
 # Build and start backend + database
@@ -143,8 +160,8 @@ npm run dev
                  |                      |                             |
                  v                      v                             v
           +-------------+        +--------------+              +-------------+
-          | Path        |        | CLAM +       |              | MedGemma    |
-          | Foundation  |        | TransMIL     |              | Reporting   |
+          | Path        |        | TransMIL     |              | MedGemma    |
+          | Foundation  |        | Classifiers  |              | Reporting   |
           | (level-0)   |        | (project set)|              | (async)     |
           +-------------+        +--------------+              +-------------+
                  |                      |                             |
@@ -165,7 +182,7 @@ npm run dev
 | **Project-Scoped Routing** | Endpoints enforce `project_id` scope for slides, models, analysis, retrieval, and reports |
 | **WSI Processing** | OpenSlide-based processing with tissue detection |
 | **Path Foundation** | 384-dim patch embeddings; level-0 dense embeddings are the default analysis path |
-| **CLAM + TransMIL** | Attention-based MIL options for slide-level classification (shared classifier interface) |
+| **TransMIL** | Transformer-based MIL for slide-level classification |
 | **MedSigLIP** | Text-to-patch semantic search (project-scoped availability) |
 | **FAISS Retrieval** | Similar case search constrained to slides in the selected project |
 | **MedGemma 1.5 4B** | Structured clinical report generation with project-aware context |
@@ -191,7 +208,7 @@ Total: **6 project-scoped classification models** (5 ovarian + 1 lung).
 | WSI I/O | OpenSlide |
 | Embeddings | Path Foundation (ViT-S, 384-dim) |
 | Semantic Search | MedSigLIP (text-to-patch retrieval) |
-| Classification | CLAM + TransMIL (attention-based MIL) |
+| Classification | TransMIL (Transformer-based MIL) |
 | Retrieval | FAISS |
 | Reporting | MedGemma 1.5 4B |
 | Backend | FastAPI + Python 3.10+ + asyncpg |
@@ -282,9 +299,15 @@ med-gemma-hackathon/
 |   |-- api/           # FastAPI endpoints
 |   |-- embedding/     # Path Foundation embedder
 |   |-- evidence/      # Heatmaps and FAISS retrieval
-|   |-- mil/           # CLAM + TransMIL attention classifiers
+|   |-- mil/           # TransMIL attention classifier
 |   |-- reporting/     # MedGemma report generation
 |   |-- wsi/           # WSI processing
+|-- scripts/           # Pipeline scripts (see Pipeline Scripts section)
+|   |-- create_gdc_thumbnails.py
+|   |-- convert_bucket_h5_to_npy.py
+|   |-- rebuild_multimodel_pools_barcode_balanced.py
+|   |-- evaluate_model.py
+|   |-- multi_model_inference.py
 |-- frontend/          # Next.js 14.2 application
 |-- docker/            # Docker Compose configuration
 |-- config/            # projects.yaml and configuration
@@ -339,24 +362,209 @@ If this check fails, level-0 heatmaps and analysis can report missing level-0 em
 
 Projects are managed via `config/projects.yaml` and `/api/projects` CRUD endpoints.
 
-Current reference projects:
+Configured projects:
 - `ovarian-platinum`: Ovarian Cancer - Platinum Sensitivity
 - `lung-stage`: Lung Adenocarcinoma - Stage Classification
 
 Project isolation is enforced in API routing and task execution, including batch analysis and async report generation.
 
-Model-level decision thresholds can also be set in `config/projects.yaml` (for example, `tumor_grade` currently uses `decision_threshold: 0.9935`).
-
 ---
 
 ## Dataset
 
-This repository currently includes two reference project datasets:
+The platform currently supports two project datasets:
 
 - **Ovarian cancer cohort** for platinum sensitivity, tumor grade, and survival classification
 - **Lung adenocarcinoma cohort** for stage classification
 
 Both use Path Foundation embeddings, with level-0 dense embeddings as the default analysis path.
+
+---
+
+## Pipeline Scripts
+
+The `scripts/` directory contains the canonical pipeline for data preparation, training pool construction, model evaluation, and inference. These scripts are the source of truth for all deployed models.
+
+### Data Flow
+
+```
+  GDC / GCS Bucket (SVS slides)
+          |
+          |  [embedder_32-path.py]          [create_gdc_thumbnails.py]
+          |  (external embedder)             (thumbnail generation)
+          v                                          |
+  H5 embeddings (per file_id)                        v
+          |                                  JPEG thumbnails in GCS
+          |  [convert_bucket_h5_to_npy.py]
+          v
+  NPY embeddings (per slide_id)
+  + coords NPY sidecars
+          |
+          |  [rebuild_multimodel_pools_barcode_balanced.py]
+          v
+  Balanced training pools
+  (labels CSV + file ID lists per model)
+          |
+          |  [train_transmil_finetune.py]
+          |  (external training script)
+          v
+  Trained TransMIL checkpoints
+          |
+          +---> [evaluate_model.py]         --> metrics JSON + plots
+          |
+          +---> [multi_model_inference.py]  --> per-slide predictions JSON
+```
+
+### Script Reference
+
+#### 1. create_gdc_thumbnails.py
+
+Generates JPEG thumbnails from TCGA whole-slide images stored in GCS. Downloads each SVS file from the `gdc-tcga-phs000178-open` bucket (with GDC API fallback for stale UUIDs), renders a thumbnail using OpenSlide with streaming INTER_AREA downsampling, and uploads the result to a destination bucket.
+
+**Key arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--bucket_out` | Yes | Destination GCS bucket name |
+| `--out_prefix` | No | Object prefix in destination bucket (default: `thumbnails`) |
+| `--scan_csv` | No | Local `bucket_physical_scan.csv` for file_id to full_path mapping |
+| `--max_dim` | No | Maximum thumbnail dimension in pixels (default: 6000) |
+| `--stripe_max_mpx` | No | Maximum megapixels per processing stripe (default: 60.0) |
+| `file_ids` | Yes | One or more GDC file UUIDs (positional) |
+
+**Example:**
+
+```bash
+python scripts/create_gdc_thumbnails.py \
+    --bucket_out my-thumbnail-bucket \
+    --out_prefix thumbnails/ov \
+    --scan_csv data/tcga_full/bucket_physical_scan.csv \
+    --max_dim 6000 \
+    abc123-def456 789abc-012def
+```
+
+#### 2. convert_bucket_h5_to_npy.py
+
+Converts bucket-produced H5 embeddings (from `embedder_32-path.py`) into per-slide NPY files for TransMIL training. Joins `file_id` to `slide_id` via a matched CSV, filters to a training subset, and writes `<slide_id>.npy` embeddings plus optional `<slide_id>_coords.npy` coordinate sidecars (required for API heatmaps).
+
+**Key arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--h5_dir` | Yes | Directory containing `<file_id>.h5` files |
+| `--matched_csv` | Yes | CSV with `slide_id` and `file_id` columns |
+| `--labels_csv` | Yes | Subset labels CSV with `slide_id` column |
+| `--out_dir` | Yes | Output directory for NPY files |
+| `--skip_coords` | No | Skip writing coordinate sidecars (not recommended) |
+| `--max_patches` | No | Cap patches per slide; 0 = keep all (default: 0) |
+| `--dtype` | No | Output dtype: `float16` or `float32` (default: `float16`) |
+| `--seed` | No | Random seed for patch subsampling (default: 42) |
+
+**Example:**
+
+```bash
+python scripts/convert_bucket_h5_to_npy.py \
+    --h5_dir data/tcga_full/h5_embeddings \
+    --matched_csv data/tcga_full/matched_labels_available.csv \
+    --labels_csv data/tcga_full/train_subset_labels.csv \
+    --out_dir data/tcga_full/bucket_training/npy_pool_api_expanded \
+    --dtype float16
+```
+
+#### 3. rebuild_multimodel_pools_barcode_balanced.py
+
+Rebuilds training pools for all 6 classification models by matching bucket slide embeddings to current GDC records via stable TCGA slide barcodes. GDC file UUIDs can change over time, so barcode matching provides a durable join key. For each model, the script queries the GDC API for clinical labels (platinum response, tumor grade, survival, or AJCC stage), then produces class-balanced label sets by undersampling the majority class with optional site/specimen stratification.
+
+**Outputs per model:**
+
+- `<prefix>_meta.csv` -- full metadata including bucket and API file IDs
+- `<prefix>_labels.csv` -- training labels with slide, patient, and clinical columns
+- `<prefix>_file_ids.txt` -- bucket file IDs (one per line)
+- `<prefix>_h5_uris.txt` -- GCS URIs for H5 embeddings
+- `<prefix>_labels_balanced.csv` -- class-balanced label subset
+- `<prefix>_file_ids_balanced.txt` -- file IDs for balanced subset
+
+**Key arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--scan_csv` | Yes | `bucket_physical_scan.csv` mapping file IDs to filenames |
+| `--available_file_ids` | Yes | `available_file_ids.txt` listing embedded file IDs |
+| `--out_dir` | Yes | Output directory for pool files |
+| `--seed` | No | Random seed for balanced sampling (default: 42) |
+
+**Example:**
+
+```bash
+python scripts/rebuild_multimodel_pools_barcode_balanced.py \
+    --scan_csv data/tcga_full/bucket_physical_scan.csv \
+    --available_file_ids data/tcga_full/available_file_ids.txt \
+    --out_dir data/tcga_full/bucket_training/pools_v2 \
+    --seed 42
+```
+
+#### 4. evaluate_model.py
+
+Runs comprehensive model evaluation with bootstrap confidence intervals. Computes clinical metrics (ROC-AUC, PR-AUC, precision, recall, specificity, F1, PPV, NPV, Brier score), calibration analysis (ECE, MCE, reliability diagrams), decision threshold optimization (Youden's J, F1-optimal), and attention visualizations. All metric CIs use 1000 bootstrap samples by default.
+
+**Key arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--model_path` | Yes | Path to trained model checkpoint (`.pt`) |
+| `--data_dir` | No | Directory containing test data (default: `data/demo`) |
+| `--output_dir` | No | Output directory for results and plots (default: `outputs/evaluation`) |
+| `--n_bootstrap` | No | Number of bootstrap samples for CI (default: 1000) |
+| `--n_attention_samples` | No | Samples for attention visualization (default: 5) |
+| `--test_ids_file` | No | JSON file with held-out test IDs |
+
+**Example:**
+
+```bash
+python scripts/evaluate_model.py \
+    --model_path outputs/transmil_v2/best_model.pt \
+    --data_dir data/projects/ovarian-platinum \
+    --output_dir outputs/evaluation/platinum_v2 \
+    --n_bootstrap 2000
+```
+
+**Outputs:** `evaluation_results.json`, `roc_curve.png`, `pr_curve.png`, `calibration_curve.png`, `threshold_analysis.png`, and per-slide attention visualizations.
+
+#### 5. multi_model_inference.py
+
+Loads all trained TransMIL models and runs inference on a slide's patch embeddings. Model configurations are loaded from `config/projects.yaml` when available, falling back to built-in defaults. Includes temperature scaling for uncalibrated survival models, per-model decision thresholds (overridable via environment variables), CUDA OOM recovery with automatic patch subsampling, and logical consistency checks across survival predictions.
+
+**Key arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--embeddings` / `-e` | Yes | Path to embeddings `.npy` file |
+| `--models-dir` / `-m` | No | Directory containing model subdirectories (default: `~/med-gemma-hackathon/outputs`) |
+| `--models` | No | Specific model IDs to run (default: all) |
+| `--attention` | No | Return attention weights in output |
+| `--output` / `-o` | No | Output JSON file (default: stdout) |
+| `--device` | No | `auto`, `cuda`, or `cpu` (default: `auto`) |
+| `--list-models` | No | List available models and exit |
+
+**Example:**
+
+```bash
+# List available models
+python scripts/multi_model_inference.py --list-models
+
+# Run all models on a slide
+python scripts/multi_model_inference.py \
+    -e data/projects/ovarian-platinum/embeddings/TCGA-XX-XXXX.npy \
+    -m outputs \
+    --attention \
+    -o results/TCGA-XX-XXXX_predictions.json
+
+# Run specific models
+python scripts/multi_model_inference.py \
+    -e embeddings/slide.npy \
+    --models platinum_sensitivity tumor_grade \
+    --device cuda
+```
 
 ---
 

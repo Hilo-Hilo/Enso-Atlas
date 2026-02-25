@@ -105,46 +105,6 @@ def _resolve_decision_threshold(model_id: str, cfg: Dict[str, Any]) -> float:
     return resolved
 
 
-def score_to_prediction(
-    score: float,
-    decision_threshold: float,
-    positive_label: str,
-    negative_label: str,
-) -> Dict[str, Any]:
-    """Convert a raw score into threshold-aware label and confidence."""
-    try:
-        score_f = float(score)
-    except Exception:
-        score_f = 0.0
-
-    if not np.isfinite(score_f):
-        score_f = 0.0
-    score_f = float(min(1.0, max(0.0, score_f)))
-
-    threshold = _sanitize_threshold(decision_threshold, 0.5)
-    pos_label = str(positive_label or "Positive")
-    neg_label = str(negative_label or "Negative")
-
-    is_positive = score_f >= threshold
-    label = pos_label if is_positive else neg_label
-
-    if is_positive:
-        denom = max(1e-6, 1.0 - threshold)
-        confidence = (score_f - threshold) / denom
-    else:
-        denom = max(1e-6, threshold)
-        confidence = (threshold - score_f) / denom
-
-    confidence = float(min(max(confidence, 0.0), 0.99))
-
-    return {
-        "score": score_f,
-        "decision_threshold": threshold,
-        "label": label,
-        "confidence": confidence,
-    }
-
-
 def _extract_auc_from_results_json(path: Path) -> Optional[float]:
     """Extract scalar AUC from a training results.json file."""
     try:
@@ -225,11 +185,10 @@ def _load_model_configs_from_yaml() -> Optional[Dict[str, Dict]]:
                 "display_name": m.get("display_name", mid),
                 "description": m.get("description", ""),
                 "auc": auc,
-                "n_slides": m.get("n_training_slides", m.get("n_slides", 0)),
+                "n_slides": m.get("n_slides", 0),
                 "category": m.get("category", "general_pathology"),
                 "positive_label": m.get("positive_label", "Positive"),
                 "negative_label": m.get("negative_label", "Negative"),
-                "decision_threshold": m.get("decision_threshold", m.get("threshold", 0.5)),
             }
         return resolved
     except Exception as e:
@@ -585,23 +544,30 @@ class MultiModelInference:
             scaled_logit = logit / temperature
             score = 1.0 / (1.0 + math.exp(-scaled_logit))  # sigmoid
 
-        pred = score_to_prediction(
-            score=score,
-            decision_threshold=config.get("decision_threshold", 0.5),
-            positive_label=config.get("positive_label", "Positive"),
-            negative_label=config.get("negative_label", "Negative"),
-        )
+        score = float(min(1.0, max(0.0, score)))
+        decision_threshold = _sanitize_threshold(config.get("decision_threshold", 0.5), 0.5)
 
+        # Determine label based on per-model threshold
+        is_positive = score >= decision_threshold
+        label = config["positive_label"] if is_positive else config["negative_label"]
+        if is_positive:
+            denom = max(1e-6, 1.0 - decision_threshold)
+            confidence = (score - decision_threshold) / denom
+        else:
+            denom = max(1e-6, decision_threshold)
+            confidence = (decision_threshold - score) / denom
+        confidence = float(min(max(confidence, 0.0), 0.99))
+        
         result = {
             "model_id": model_id,
             "model_name": config["display_name"],
             "category": config["category"],
-            "score": pred["score"],
-            "decision_threshold": pred["decision_threshold"],
-            "label": pred["label"],
+            "score": score,
+            "decision_threshold": decision_threshold,
+            "label": label,
             "positive_label": config["positive_label"],
             "negative_label": config["negative_label"],
-            "confidence": pred["confidence"],
+            "confidence": confidence,
             "auc": config["auc"],
             "n_training_slides": config["n_slides"],
             "description": config["description"],
