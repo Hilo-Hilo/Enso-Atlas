@@ -523,6 +523,7 @@ function HomePage() {
             ...(showMultiModelPanel
               ? [{ value: "multi-model" as const, label: "Survival AI Predictions" }]
               : []),
+            { value: "semantic-search", label: "Semantic Search" },
             { value: "similar-cases", label: "Similar Cases" },
           ],
     [showMultiModelPanel, userViewMode, primaryPredictionPanelLabel]
@@ -899,21 +900,48 @@ function HomePage() {
     }
   }, [report]);
 
-  // Check backend connection
+  // Check backend connection and recover quickly after tab idle/backgrounding.
   useEffect(() => {
+    let cancelled = false;
+    let failureStreak = 0;
+
     const checkConnection = async () => {
       try {
         await healthCheck();
-        setIsConnected(true);
+        failureStreak = 0;
+        if (!cancelled) setIsConnected(true);
       } catch (err) {
         console.warn("Health check failed:", err);
-        setIsConnected(false);
+        failureStreak += 1;
+        if (!cancelled && failureStreak >= 2) {
+          setIsConnected(false);
+        }
       }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void checkConnection();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      void checkConnection();
     };
 
     checkConnection();
     const interval = setInterval(checkConnection, 30000);
-    return () => clearInterval(interval);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("online", handleWindowFocus);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("online", handleWindowFocus);
+    };
   }, []);
 
   // Handle manual reconnect attempt
