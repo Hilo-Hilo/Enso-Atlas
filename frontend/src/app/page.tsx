@@ -18,7 +18,6 @@ import {
   CaseNotesPanel,
   OncologistSummaryView,
   PathologistView,
-  AIAssistantPanel,
   AnalysisControls,
   OutlierDetectorPanel,
   PatchClassifierPanel,
@@ -38,7 +37,7 @@ import { generatePdfReport, downloadPdf } from "@/lib/pdfExport";
 import type { SlideInfo, PatchCoordinates, SemanticSearchResult, EvidencePatch, SlideQCMetrics, Annotation, MultiModelResponse, VisualSearchResponse, SimilarCase, StructuredReport, PatchOverlay } from "@/types";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui";
-import { ChevronLeft, ChevronRight, Layers, BarChart3, X } from "lucide-react";
+import { Layers, BarChart3 } from "lucide-react";
 
 // ResizableLayout removed - using react-resizable-panels directly
 
@@ -52,7 +51,7 @@ const WSIViewer = nextDynamic(
 
 // Mobile Panel Tab Component
 type MobilePanelTab = "slides" | "results";
-type RightSidebarPanelKey =
+type WorkspacePanelKey =
   | "pathologist-workspace"
   | "medgemma"
   | "evidence"
@@ -60,7 +59,13 @@ type RightSidebarPanelKey =
   | "multi-model"
   | "semantic-search"
   | "similar-cases"
-  | "outlier-detector";
+  | "outlier-detector"
+  | "patch-classifier";
+
+type WorkspacePanelOption = {
+  value: WorkspacePanelKey;
+  label: string;
+};
 
 function MobilePanelTabs({
   activeTab,
@@ -100,6 +105,43 @@ function MobilePanelTabs({
           <span className="absolute top-2 right-1/4 w-2 h-2 bg-clinical-500 rounded-full" />
         )}
       </button>
+    </div>
+  );
+}
+
+function WorkspacePanelTabs({
+  options,
+  activePanel,
+  onPanelChange,
+  compact = false,
+}: {
+  options: WorkspacePanelOption[];
+  activePanel: WorkspacePanelKey;
+  onPanelChange: (panel: WorkspacePanelKey) => void;
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn("overflow-x-auto", compact ? "pb-1" : "pb-2")}>
+      <div className="flex min-w-max items-center gap-2">
+        {options.map((panel) => {
+          const isActive = activePanel === panel.value;
+          return (
+            <button
+              key={panel.value}
+              onClick={() => onPanelChange(panel.value)}
+              className={cn(
+                "whitespace-nowrap rounded-full border font-medium transition-colors",
+                compact ? "px-3 py-1.5 text-xs" : "px-3.5 py-1.5 text-sm",
+                isActive
+                  ? "border-clinical-600 bg-clinical-600 text-white"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900"
+              )}
+            >
+              {panel.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -181,7 +223,8 @@ function HomePage() {
   const [userViewMode, setUserViewMode] = useState<UserViewMode>("oncologist");
   const handleUserViewModeChange = useCallback((mode: UserViewMode) => {
     setUserViewMode(mode);
-    setActiveRightPanel((prev) => {
+    setWorkspacePanelCollapsed(false);
+    setActiveWorkspacePanel((prev) => {
       if (mode === "pathologist") return "pathologist-workspace";
       if (prev === "pathologist-workspace") return "medgemma";
       return prev;
@@ -209,13 +252,12 @@ function HomePage() {
 
   // Mobile panel state
   const [mobilePanelTab, setMobilePanelTab] = useState<MobilePanelTab>("slides");
-  const [activeRightPanel, setActiveRightPanel] = useState<RightSidebarPanelKey>("medgemma");
+  const [activeWorkspacePanel, setActiveWorkspacePanel] = useState<WorkspacePanelKey>("medgemma");
 
-  // Desktop sidebar collapse state
+  // Desktop layout state
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [workspacePanelCollapsed, setWorkspacePanelCollapsed] = useState(false);
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
-  const rightPanelRef = useRef<PanelImperativeHandle>(null);
 
   // Check if this is a first visit (show welcome modal)
   useEffect(() => {
@@ -456,33 +498,41 @@ function HomePage() {
   const primaryPredictionPanelLabel = isTumorStageProject
     ? "Tumor Stage"
     : "Resistance to Therapy";
-  const rightSidebarPanelOptions = useMemo<
-    Array<{ value: RightSidebarPanelKey; label: string }>
-  >(
+  const workspacePanelOptions = useMemo<WorkspacePanelOption[]>(
     () =>
       userViewMode === "pathologist"
         ? [
-            { value: "pathologist-workspace" as const, label: "Pathologist Workspace" },
-            { value: "semantic-search", label: "MedSigLIP Semantic Search" },
-            { value: "evidence", label: "Evidence Patches" },
-            { value: "outlier-detector", label: "Outlier Tissue Detector" },
+            { value: "pathologist-workspace", label: "Pathologist Workspace" },
+            { value: "evidence", label: "Evidence" },
+            { value: "semantic-search", label: "Semantic Search" },
+            { value: "outlier-detector", label: "Outlier Detector" },
+            { value: "patch-classifier", label: "Patch Classifier" },
+            { value: "medgemma", label: "MedGemma" },
           ]
         : [
             { value: "medgemma", label: "MedGemma" },
             { value: "prediction", label: primaryPredictionPanelLabel },
             ...(showMultiModelPanel
-              ? [{ value: "multi-model" as const, label: "Survival AI Predictions" }]
+              ? [{ value: "multi-model" as const, label: "Survival AI" }]
               : []),
+            { value: "evidence", label: "Evidence" },
+            { value: "semantic-search", label: "Semantic Search" },
             { value: "similar-cases", label: "Similar Cases" },
+            { value: "outlier-detector", label: "Outlier Detector" },
+            { value: "patch-classifier", label: "Patch Classifier" },
           ],
     [showMultiModelPanel, userViewMode, primaryPredictionPanelLabel]
   );
 
+  const activeWorkspacePanelLabel =
+    workspacePanelOptions.find((panel) => panel.value === activeWorkspacePanel)?.label ??
+    "Workspace";
+
   useEffect(() => {
-    if (!rightSidebarPanelOptions.some((panel) => panel.value === activeRightPanel)) {
-      setActiveRightPanel(rightSidebarPanelOptions[0]?.value ?? "medgemma");
+    if (!workspacePanelOptions.some((panel) => panel.value === activeWorkspacePanel)) {
+      setActiveWorkspacePanel(workspacePanelOptions[0]?.value ?? "medgemma");
     }
-  }, [activeRightPanel, rightSidebarPanelOptions]);
+  }, [activeWorkspacePanel, workspacePanelOptions]);
 
   // Report state from agent workflow (AI Assistant). This hydrates the main Clinical Report panel.
   const [agentReport, setAgentReport] = useState<StructuredReport | null>(null);
@@ -782,6 +832,11 @@ function HomePage() {
     }
   }, [zoomModalOpen, shortcutsModalOpen, clearResults]);
 
+  const handleWorkspacePanelChange = useCallback((panel: WorkspacePanelKey) => {
+    setActiveWorkspacePanel(panel);
+    setWorkspacePanelCollapsed(false);
+  }, []);
+
   const handleFocusPanel = useCallback((panel: number) => {
     switch (panel) {
       case 1:
@@ -791,29 +846,29 @@ function HomePage() {
         viewerRef.current?.focus();
         break;
       case 3:
-        setActiveRightPanel("prediction");
+        handleWorkspacePanelChange("prediction");
         requestAnimationFrame(() => {
           predictionPanelRef.current?.focus();
           predictionPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         });
         break;
       case 4:
-        setActiveRightPanel("evidence");
+        handleWorkspacePanelChange("evidence");
         requestAnimationFrame(() => {
           evidencePanelRef.current?.focus();
           evidencePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         });
         break;
     }
-  }, []);
+  }, [handleWorkspacePanelChange]);
 
   const handleFocusSearch = useCallback(() => {
-    setActiveRightPanel("semantic-search");
+    handleWorkspacePanelChange("semantic-search");
     requestAnimationFrame(() => {
       searchInputRef.current?.focus();
       searchInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
-  }, []);
+  }, [handleWorkspacePanelChange]);
 
   const handleViewerZoomIn = useCallback(() => {
     viewerControlsRef.current?.zoomIn();
@@ -1185,11 +1240,16 @@ function HomePage() {
     [selectedSlide, toast]
   );
 
-  // Clear visual search results when slide changes
+  // Reset panel-scoped overlays and search state when slide changes.
   useEffect(() => {
     setVisualSearchResults([]);
     setVisualSearchQuery(null);
     setVisualSearchError(null);
+    setShowOutlierHeatmap(false);
+    setOutlierHeatmapData(null);
+    setClassifyResult(null);
+    setShowClassifyHeatmap(false);
+    setPatchSelectionMode(null);
   }, [selectedSlide?.id]);
 
   // Handle generating level 0 embeddings (separate from analysis)
@@ -2157,8 +2217,8 @@ function HomePage() {
     </>
   );
 
-  const renderSelectedRightSidebarPanel = () => {
-    if (activeRightPanel === "pathologist-workspace") {
+  const renderSelectedWorkspacePanel = () => {
+    if (activeWorkspacePanel === "pathologist-workspace") {
       if (!selectedSlide) {
         return (
           <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 text-sm text-violet-800">
@@ -2189,7 +2249,7 @@ function HomePage() {
       );
     }
 
-    if (activeRightPanel === "medgemma") {
+    if (activeWorkspacePanel === "medgemma") {
       return (
         <div data-demo="report-panel">
           <ReportPanel
@@ -2210,7 +2270,7 @@ function HomePage() {
       );
     }
 
-    if (activeRightPanel === "evidence") {
+    if (activeWorkspacePanel === "evidence") {
       return (
         <div
           ref={evidencePanelRef}
@@ -2233,7 +2293,7 @@ function HomePage() {
       );
     }
 
-    if (activeRightPanel === "prediction") {
+    if (activeWorkspacePanel === "prediction") {
       return (
         <div
           ref={predictionPanelRef}
@@ -2257,7 +2317,7 @@ function HomePage() {
       );
     }
 
-    if (activeRightPanel === "multi-model" && showMultiModelPanel) {
+    if (activeWorkspacePanel === "multi-model" && showMultiModelPanel) {
       return (
         <div data-demo="multi-model-panel">
           <MultiModelPredictionPanel
@@ -2276,7 +2336,7 @@ function HomePage() {
       );
     }
 
-    if (activeRightPanel === "semantic-search") {
+    if (activeWorkspacePanel === "semantic-search") {
       return (
         <SemanticSearchPanel
           slideId={selectedSlide?.id ?? null}
@@ -2299,7 +2359,7 @@ function HomePage() {
       );
     }
 
-    if (activeRightPanel === "similar-cases") {
+    if (activeWorkspacePanel === "similar-cases") {
       return (
         <div data-demo="similar-cases">
           <SimilarCasesPanel
@@ -2332,15 +2392,38 @@ function HomePage() {
       );
     }
 
-    if (activeRightPanel === "outlier-detector") {
+    if (activeWorkspacePanel === "outlier-detector") {
       return (
         <OutlierDetectorPanel
           slideId={selectedSlide?.id ?? null}
           onHeatmapToggle={(enabled, data) => {
             setShowOutlierHeatmap(enabled);
             setOutlierHeatmapData(data);
+            if (enabled) {
+              setShowClassifyHeatmap(false);
+            }
           }}
           onPatchClick={handlePatchClick}
+        />
+      );
+    }
+
+    if (activeWorkspacePanel === "patch-classifier") {
+      return (
+        <PatchClassifierPanel
+          slideId={selectedSlide?.id ?? null}
+          isAnalyzed={!!analysisResult}
+          totalPatches={patchCoordinates?.length}
+          onClassifyResult={setClassifyResult}
+          onShowHeatmap={(show) => {
+            setShowClassifyHeatmap(show);
+            if (show) {
+              setShowOutlierHeatmap(false);
+            }
+          }}
+          showHeatmap={showClassifyHeatmap}
+          onSelectionModeChange={setPatchSelectionMode}
+          hasPatchCoordinates={Boolean(patchCoordinates && patchCoordinates.length > 0)}
         />
       );
     }
@@ -2348,27 +2431,19 @@ function HomePage() {
     return null;
   };
 
-  // Render right sidebar content (oncologist mode)
-  const renderRightSidebarContent = () => (
+  const renderWorkspacePanelContent = ({
+    compact = false,
+  }: {
+    compact?: boolean;
+  } = {}) => (
     <>
-      <div className="sticky top-0 z-10 bg-white pb-3 border-b border-gray-100">
-        <label htmlFor="right-panel-selector" className="block text-xs font-medium text-gray-600 mb-1">
-          Right panel
-        </label>
-        <select
-          id="right-panel-selector"
-          value={activeRightPanel}
-          onChange={(e) => setActiveRightPanel(e.target.value as RightSidebarPanelKey)}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-clinical-500 focus:outline-none focus:ring-1 focus:ring-clinical-500"
-        >
-          {rightSidebarPanelOptions.map((panel) => (
-            <option key={panel.value} value={panel.value}>
-              {panel.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="pt-2">{renderSelectedRightSidebarPanel()}</div>
+      <WorkspacePanelTabs
+        options={workspacePanelOptions}
+        activePanel={activeWorkspacePanel}
+        onPanelChange={handleWorkspacePanelChange}
+        compact={compact}
+      />
+      <div className={compact ? "pt-2" : "pt-3"}>{renderSelectedWorkspacePanel()}</div>
     </>
   );
 
@@ -2411,248 +2486,260 @@ function HomePage() {
           {renderLeftSidebarContent()}
         </aside>
 
-        {/* Desktop Resizable Layout */}
+        {/* Desktop two-pane layout */}
         <PanelGroup
           orientation="horizontal"
           id="enso-atlas-layout-v2"
           className="hidden lg:flex flex-1"
         >
-        {/* Left Sidebar - Desktop (Resizable) */}
-        <Panel
-          panelRef={leftPanelRef}
-          defaultSize="22%"
-          minSize="10%"
-          maxSize="35%"
-          collapsible
-          collapsedSize="0%"
-          onResize={(size) => {
-            if (size.asPercentage === 0 && leftSidebarOpen) setLeftSidebarOpen(false);
-            if (size.asPercentage > 0 && !leftSidebarOpen) setLeftSidebarOpen(true);
-          }}
-        >
-        <aside
-          ref={slideSelectorRef as React.RefObject<HTMLElement>}
-          tabIndex={-1}
-          className={cn(
-            "h-full bg-white border-r border-surface-border space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative overflow-x-hidden",
-            leftSidebarOpen ? "p-4 overflow-y-auto overflow-x-hidden" : "overflow-hidden"
-          )}
-          data-demo="slide-selector"
-        >
-          {leftSidebarOpen && renderLeftSidebarContent()}
-        </aside>
-        </Panel>
-        <PanelResizeHandle className="relative w-1.5 bg-gray-100 hover:bg-clinical-200 active:bg-clinical-300 transition-colors cursor-col-resize flex items-center justify-center group">
-          <div className="w-0.5 h-8 bg-gray-300 group-hover:bg-clinical-400 rounded-full transition-colors" />
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => {
-              if (leftSidebarOpen) {
-                leftPanelRef.current?.collapse();
-              } else {
-                leftPanelRef.current?.expand();
-              }
+          {/* Left Sidebar - Desktop (Resizable) */}
+          <Panel
+            panelRef={leftPanelRef}
+            defaultSize="22%"
+            minSize="10%"
+            maxSize="35%"
+            collapsible
+            collapsedSize="0%"
+            onResize={(size) => {
+              if (size.asPercentage === 0 && leftSidebarOpen) setLeftSidebarOpen(false);
+              if (size.asPercentage > 0 && !leftSidebarOpen) setLeftSidebarOpen(true);
             }}
-            className="absolute top-3 left-1/2 -translate-x-1/2 z-30 h-10 w-10 rounded-lg border border-sky-300 bg-white shadow-md hover:bg-sky-50 flex items-center justify-center"
-            title={leftSidebarOpen ? "Collapse left sidebar" : "Expand left sidebar"}
           >
-            {leftSidebarOpen ? (
-              <ChevronLeft className="h-5 w-5 text-sky-700" />
-            ) : (
-              <ChevronRight className="h-5 w-5 text-sky-700" />
-            )}
-          </button>
-        </PanelResizeHandle>
-
-        {/* Center - WSI Viewer or Oncologist Summary */}
-        <Panel defaultSize="50%" minSize="30%">
-        <section
-          ref={viewerRef as React.RefObject<HTMLElement>}
-          tabIndex={-1}
-          className="h-full flex flex-col overflow-hidden focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500"
-        >
-          {/* View Mode Toggle - Only show in oncologist mode */}
-          {userViewMode === "oncologist" && selectedSlide && analysisResult && (
-            <div className="flex items-center justify-center gap-2 p-2 bg-white border-b border-gray-200">
-              <span className="text-xs text-gray-500 mr-2 hidden sm:inline">View Mode:</span>
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                <button
-                  onClick={() => setViewMode("wsi")}
-                  className={`px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
-                    viewMode === "wsi"
-                      ? "bg-white text-clinical-700 shadow-sm"
-                      : "text-gray-600 hover:text-gray-900"
-                  }`}
-                >
-                  WSI Viewer
-                </button>
-                <button
-                  onClick={() => setViewMode("summary")}
-                  className={`px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
-                    viewMode === "summary"
-                      ? "bg-white text-clinical-700 shadow-sm"
-                      : "text-gray-600 hover:text-gray-900"
-                  }`}
-                >
-                  Summary
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Pathologist mode header */}
-          {userViewMode === "pathologist" && selectedSlide && (
-            <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-violet-50 border-b border-violet-200">
-              <span className="text-xs sm:text-sm font-medium text-violet-700">
-                WSI Viewer
-              </span>
-              <span className="text-2xs sm:text-xs text-violet-500 hidden sm:inline">
-                Pan, zoom, and annotate
-              </span>
-            </div>
-          )}
-
-          {/* Content Area */}
-          <div className="flex-1 p-2 sm:p-3 lg:p-4 overflow-hidden" data-demo="wsi-viewer">
-            {userViewMode === "oncologist" && viewMode === "summary" && analysisResult ? (
-              <OncologistSummaryView
-                analysisResult={analysisResult}
-                report={report}
-                onPatchZoom={handlePatchZoom}
-                onSwitchToFullView={() => setViewMode("wsi")}
-              />
-            ) : selectedSlide && dziUrl ? (
-              <WSIViewer
-                slideId={selectedSlide.id}
-                dziUrl={dziUrl}
-                hasWsi={selectedSlide.hasWsi}
-                heatmap={heatmapData}
-                mpp={selectedSlide.mpp}
-                onRegionClick={handlePatchClick}
-                targetCoordinates={targetCoordinates}
-                className="h-full"
-                heatmapModel={normalizedHeatmapModel}
-                heatmapLevel={heatmapLevel}
-                onHeatmapLevelChange={setHeatmapLevel}
-                heatmapAlphaPower={heatmapAlphaPower}
-                onHeatmapAlphaPowerChange={setHeatmapAlphaPower}
-                heatmapSmooth={heatmapSmooth}
-                onHeatmapSmoothChange={setHeatmapSmooth}
-                onHeatmapModelChange={setHeatmapModel}
-                availableModels={scopedProjectModels.map((m) => ({ id: m.id, name: m.name }))}
-                onControlsReady={(controls) => { viewerControlsRef.current = controls; }}
-                onZoomChange={setViewerZoom}
-                annotations={annotations}
-                activeAnnotationTool={userViewMode === "pathologist" ? activeAnnotationTool : "pointer"}
-                onAnnotationCreate={userViewMode === "pathologist" ? (ann) => {
-                  handleAddAnnotation({
-                    slideId: selectedSlide.id,
-                    type: (ann.type === "point" ? "marker" : ann.type) as Annotation["type"],
-                    coordinates: ann.coordinates,
-                    text: ann.type === "point" ? "Mitotic marker" : `${ann.type} annotation`,
-                    color: ann.type === "point" ? "#ef4444" : "#8b5cf6",
-                    category: ann.type,
-                  });
-                } : undefined}
-                onAnnotationSelect={userViewMode === "pathologist" ? setSelectedAnnotationId : undefined}
-                onAnnotationDelete={userViewMode === "pathologist" ? handleDeleteAnnotation : undefined}
-                selectedAnnotationId={selectedAnnotationId}
-                patchOverlay={patchOverlayData}
-                patchSelectionMode={patchSelectionMode}
-                patchCoordinates={patchCoordinates}
-                onPatchSelected={handlePatchSelectedOnSlide}
-              />
-            ) : (
-              <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 p-4">
-                <div className="text-center max-w-sm">
-                  <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
-                    <svg
-                      className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                      />
-                    </svg>
+            <aside
+              ref={slideSelectorRef as React.RefObject<HTMLElement>}
+              tabIndex={-1}
+              className={cn(
+                "h-full bg-white border-r border-surface-border focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative overflow-x-hidden",
+                leftSidebarOpen ? "p-4 overflow-y-auto overflow-x-hidden" : "overflow-hidden"
+              )}
+              data-demo="slide-selector"
+            >
+              {leftSidebarOpen && (
+                <>
+                  <div className="sticky top-0 z-10 -mx-4 border-b border-gray-100 bg-white px-4 pb-2 pt-1">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Case Selection</p>
+                      <button
+                        onClick={() => leftPanelRef.current?.collapse()}
+                        className="text-xs font-medium text-clinical-600 hover:text-clinical-700"
+                      >
+                        Hide
+                      </button>
+                    </div>
                   </div>
-                  <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1">
-                    No Slide Selected
-                  </h3>
-                  <p className="text-xs sm:text-sm text-gray-500">
-                    Select a whole-slide image from the{" "}
-                    <button
-                      onClick={() => setMobilePanelTab("slides")}
-                      className="text-clinical-600 font-medium underline lg:no-underline lg:cursor-default"
-                    >
-                      sidebar
-                    </button>{" "}
-                    to begin analysis.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-        </Panel>
-        <PanelResizeHandle className="relative w-1.5 bg-gray-100 hover:bg-clinical-200 active:bg-clinical-300 transition-colors cursor-col-resize flex items-center justify-center group">
-          <div className="w-0.5 h-8 bg-gray-300 group-hover:bg-clinical-400 rounded-full transition-colors" />
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => {
-              if (rightSidebarOpen) {
-                rightPanelRef.current?.collapse();
-              } else {
-                rightPanelRef.current?.expand();
-              }
-            }}
-            className="absolute top-3 left-1/2 -translate-x-1/2 z-30 h-10 w-10 rounded-lg border border-sky-300 bg-white shadow-md hover:bg-sky-50 flex items-center justify-center"
-            title={rightSidebarOpen ? "Collapse right sidebar" : "Expand right sidebar"}
-          >
-            {rightSidebarOpen ? (
-              <ChevronRight className="h-5 w-5 text-sky-700" />
-            ) : (
-              <ChevronLeft className="h-5 w-5 text-sky-700" />
-            )}
-          </button>
-        </PanelResizeHandle>
+                  <div className="pt-3">{renderLeftSidebarContent()}</div>
+                </>
+              )}
+            </aside>
+          </Panel>
 
-        {/* Right Sidebar - Desktop (Resizable) */}
-        <Panel
-          panelRef={rightPanelRef}
-          defaultSize="28%"
-          minSize="5%"
-          maxSize="45%"
-          collapsible
-          collapsedSize="0%"
-          onResize={(size) => {
-            if (size.asPercentage === 0 && rightSidebarOpen) setRightSidebarOpen(false);
-            if (size.asPercentage > 0 && !rightSidebarOpen) setRightSidebarOpen(true);
-          }}
-        >
-        <aside
-          className={cn(
-            "h-full bg-white p-4 overflow-y-auto overflow-x-hidden space-y-4 relative",
-            !rightSidebarOpen && "overflow-hidden"
-          )}
-        >
-          {rightSidebarOpen && renderRightSidebarContent()}
-        </aside>
-        </Panel>
+          <PanelResizeHandle className="w-1.5 bg-gray-100 hover:bg-clinical-200 active:bg-clinical-300 transition-colors cursor-col-resize flex items-center justify-center">
+            <div className="w-0.5 h-10 bg-gray-300 rounded-full" />
+          </PanelResizeHandle>
+
+          {/* Main Workspace */}
+          <Panel defaultSize="78%" minSize="40%">
+            <div className="h-full flex flex-col overflow-hidden bg-white">
+              <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/90 px-4 py-2">
+                <button
+                  onClick={() => {
+                    if (leftSidebarOpen) {
+                      leftPanelRef.current?.collapse();
+                    } else {
+                      leftPanelRef.current?.expand();
+                    }
+                  }}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-300 hover:text-gray-900"
+                >
+                  {leftSidebarOpen ? "Hide case panel" : "Show case panel"}
+                </button>
+
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Clinical Workspace</p>
+
+                <button
+                  onClick={() => setWorkspacePanelCollapsed((prev) => !prev)}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-300 hover:text-gray-900"
+                >
+                  {workspacePanelCollapsed ? "Show tools" : "Hide tools"}
+                </button>
+              </div>
+
+              <section
+                ref={viewerRef as React.RefObject<HTMLElement>}
+                tabIndex={-1}
+                className={cn(
+                  "min-h-0 flex flex-col overflow-hidden focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500",
+                  workspacePanelCollapsed ? "flex-1" : "flex-[3_1_0%]"
+                )}
+              >
+                {/* View Mode Toggle - Only show in oncologist mode */}
+                {userViewMode === "oncologist" && selectedSlide && analysisResult && (
+                  <div className="flex items-center justify-center gap-2 p-2 bg-white border-b border-gray-200">
+                    <span className="text-xs text-gray-500 mr-2 hidden sm:inline">View Mode:</span>
+                    <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                      <button
+                        onClick={() => setViewMode("wsi")}
+                        className={`px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
+                          viewMode === "wsi"
+                            ? "bg-white text-clinical-700 shadow-sm"
+                            : "text-gray-600 hover:text-gray-900"
+                        }`}
+                      >
+                        WSI Viewer
+                      </button>
+                      <button
+                        onClick={() => setViewMode("summary")}
+                        className={`px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
+                          viewMode === "summary"
+                            ? "bg-white text-clinical-700 shadow-sm"
+                            : "text-gray-600 hover:text-gray-900"
+                        }`}
+                      >
+                        Summary
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pathologist mode header */}
+                {userViewMode === "pathologist" && selectedSlide && (
+                  <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-violet-50 border-b border-violet-200">
+                    <span className="text-xs sm:text-sm font-medium text-violet-700">
+                      WSI Viewer
+                    </span>
+                    <span className="text-2xs sm:text-xs text-violet-500 hidden sm:inline">
+                      Pan, zoom, and annotate
+                    </span>
+                  </div>
+                )}
+
+                {/* Content Area */}
+                <div className="flex-1 p-2 sm:p-3 lg:p-4 overflow-hidden" data-demo="wsi-viewer">
+                  {userViewMode === "oncologist" && viewMode === "summary" && analysisResult ? (
+                    <OncologistSummaryView
+                      analysisResult={analysisResult}
+                      report={report}
+                      onPatchZoom={handlePatchZoom}
+                      onSwitchToFullView={() => setViewMode("wsi")}
+                    />
+                  ) : selectedSlide && dziUrl ? (
+                    <WSIViewer
+                      slideId={selectedSlide.id}
+                      dziUrl={dziUrl}
+                      hasWsi={selectedSlide.hasWsi}
+                      heatmap={heatmapData}
+                      mpp={selectedSlide.mpp}
+                      onRegionClick={handlePatchClick}
+                      targetCoordinates={targetCoordinates}
+                      className="h-full"
+                      heatmapModel={normalizedHeatmapModel}
+                      heatmapLevel={heatmapLevel}
+                      onHeatmapLevelChange={setHeatmapLevel}
+                      heatmapAlphaPower={heatmapAlphaPower}
+                      onHeatmapAlphaPowerChange={setHeatmapAlphaPower}
+                      heatmapSmooth={heatmapSmooth}
+                      onHeatmapSmoothChange={setHeatmapSmooth}
+                      onHeatmapModelChange={setHeatmapModel}
+                      availableModels={scopedProjectModels.map((m) => ({ id: m.id, name: m.name }))}
+                      onControlsReady={(controls) => { viewerControlsRef.current = controls; }}
+                      onZoomChange={setViewerZoom}
+                      annotations={annotations}
+                      activeAnnotationTool={userViewMode === "pathologist" ? activeAnnotationTool : "pointer"}
+                      onAnnotationCreate={userViewMode === "pathologist" ? (ann) => {
+                        handleAddAnnotation({
+                          slideId: selectedSlide.id,
+                          type: (ann.type === "point" ? "marker" : ann.type) as Annotation["type"],
+                          coordinates: ann.coordinates,
+                          text: ann.type === "point" ? "Mitotic marker" : `${ann.type} annotation`,
+                          color: ann.type === "point" ? "#ef4444" : "#8b5cf6",
+                          category: ann.type,
+                        });
+                      } : undefined}
+                      onAnnotationSelect={userViewMode === "pathologist" ? setSelectedAnnotationId : undefined}
+                      onAnnotationDelete={userViewMode === "pathologist" ? handleDeleteAnnotation : undefined}
+                      selectedAnnotationId={selectedAnnotationId}
+                      patchOverlay={patchOverlayData}
+                      patchSelectionMode={patchSelectionMode}
+                      patchCoordinates={patchCoordinates}
+                      onPatchSelected={handlePatchSelectedOnSlide}
+                    />
+                  ) : (
+                    <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 p-4">
+                      <div className="text-center max-w-sm">
+                        <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
+                          <svg
+                            className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                            />
+                          </svg>
+                        </div>
+                        <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-1">
+                          No Slide Selected
+                        </h3>
+                        <p className="text-xs sm:text-sm text-gray-500">
+                          Select a whole-slide image from the{" "}
+                          <button
+                            onClick={() => setMobilePanelTab("slides")}
+                            className="text-clinical-600 font-medium underline lg:no-underline lg:cursor-default"
+                          >
+                            sidebar
+                          </button>{" "}
+                          to begin analysis.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section
+                className={cn(
+                  "border-t border-gray-200 bg-white transition-all duration-200 ease-out",
+                  workspacePanelCollapsed ? "h-14 flex-none" : "flex-[2_1_0%] min-h-[260px]"
+                )}
+              >
+                {workspacePanelCollapsed ? (
+                  <div className="flex h-full items-center justify-between px-4 text-sm text-gray-600">
+                    <span>{activeWorkspacePanelLabel} hidden</span>
+                    <button
+                      onClick={() => setWorkspacePanelCollapsed(false)}
+                      className="text-xs font-medium text-clinical-600 hover:text-clinical-700"
+                    >
+                      Show tools
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex h-full flex-col">
+                    <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/80 px-4 py-2">
+                      <p className="text-sm font-medium text-gray-700">Workspace tools</p>
+                      <span className="text-xs text-gray-500">{activeWorkspacePanelLabel}</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4">
+                      {renderWorkspacePanelContent()}
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+          </Panel>
         </PanelGroup>
 
-        {/* Right Sidebar - Mobile Version */}
+        {/* Workspace Panels - Mobile */}
         <aside
           className={cn(
             "lg:hidden bg-white overflow-y-auto space-y-4",
             mobilePanelTab === "results" ? "flex-1 p-3 sm:p-4" : "hidden"
           )}
         >
-          {renderRightSidebarContent()}
+          {renderWorkspacePanelContent({ compact: true })}
         </aside>
       </main>
 
