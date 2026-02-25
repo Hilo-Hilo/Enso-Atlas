@@ -4,16 +4,11 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: enso-atlas
-    # GPU access via deploy.resources (Compose v2 / Swarm compatible)
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # GPU runtime is optional. On GPU hosts, set NVIDIA_VISIBLE_DEVICES (default: all)
+    # and launch with NVIDIA Container Toolkit installed.
     environment:
-      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
+      NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
       ENSO_CONFIG: /app/config/default.yaml
       TRANSFORMERS_CACHE: /app/cache/huggingface
       HF_HOME: /app/cache/huggingface
@@ -26,17 +21,17 @@ services:
       # PostgreSQL connection
       DATABASE_URL: "postgresql://enso:enso_atlas_2024@atlas-db:5432/enso_atlas"
     volumes:
-      # Bind mount local data directory with full TCGA embeddings
-      - /home/hansonwen/med-gemma-hackathon/data:/app/data
-      - /home/hansonwen/med-gemma-hackathon/outputs:/app/outputs
+      # Repo-relative, override-able host paths for portable setup
+      - ${ENSO_DATA_DIR:-../data}:/app/data
+      - ${ENSO_OUTPUTS_DIR:-../outputs}:/app/outputs
       - atlas-cache:/app/cache
       # Model storage (pre-downloaded)
-      - /home/hansonwen/.cache/huggingface:/root/.cache/huggingface
-      - /home/hansonwen/med-gemma-hackathon/models:/app/models
+      - ${HF_CACHE_DIR:-../.cache/huggingface}:/root/.cache/huggingface
+      - ${ENSO_MODELS_DIR:-../models}:/app/models
       # Config files (projects.yaml, default.yaml)
-      - /home/hansonwen/med-gemma-hackathon/config:/app/config
+      - ${ENSO_CONFIG_DIR:-../config}:/app/config
       # Source code mount for development (allows live editing)
-      - /home/hansonwen/med-gemma-hackathon/src:/app/src:ro
+      - ${ENSO_SRC_DIR:-../src}:/app/src:ro
     ports:
       - "7862:7860"
       - "8003:8000"

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Enso Atlas startup script
-# Runs both the FastAPI backend and Gradio UI
+# Runs the FastAPI backend (Gradio currently disabled)
 
-set -e
+set -euo pipefail
 
 echo "============================================"
 echo "       Starting Enso Atlas v0.1.0"
@@ -18,15 +18,24 @@ if [ "$CUDA_STATUS" = "YES" ]; then
 fi
 echo ""
 
-# Generate demo data if needed
-if [ ! -d "/app/data/demo/embeddings" ]; then
-    echo "Generating demo data..."
-    python /app/scripts/generate_demo_data.py \
-        --output /app/data/demo \
-        --num-slides 10 \
-        --patches-per-slide 500 \
-        --train-model \
-        --model-output /app/models/demo_clam.pt
+# Generate demo data if needed (best-effort)
+DEMO_EMBEDDINGS_DIR="/app/data/demo/embeddings"
+DEMO_GENERATOR_SCRIPT="/app/scripts/generate_demo_data.py"
+
+if [ ! -d "$DEMO_EMBEDDINGS_DIR" ]; then
+    if [ -f "$DEMO_GENERATOR_SCRIPT" ]; then
+        echo "Demo embeddings not found. Generating demo data..."
+        if ! python "$DEMO_GENERATOR_SCRIPT" \
+            --output /app/data/demo \
+            --num-slides 10 \
+            --patches-per-slide 500 \
+            --train-model \
+            --model-output /app/models/demo_clam.pt; then
+            echo "Warning: demo data generation failed; continuing startup without demo data."
+        fi
+    else
+        echo "Demo data generator not found at $DEMO_GENERATOR_SCRIPT; skipping demo data generation."
+    fi
     echo ""
 fi
 
@@ -37,9 +46,10 @@ uvicorn enso_atlas.api.main:app --host 0.0.0.0 --port 8000 &
 API_PID=$!
 
 # Wait for API to be ready
-echo "Waiting for API to start..."
+HEALTH_URL="http://localhost:8000/api/health"
+echo "Waiting for API to start (${HEALTH_URL})..."
 for i in {1..30}; do
-    if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+    if curl -fsS "$HEALTH_URL" > /dev/null 2>&1; then
         echo "API is ready!"
         break
     fi
@@ -47,7 +57,7 @@ for i in {1..30}; do
 done
 
 # Check API health
-curl -s http://localhost:8000/health | python -m json.tool 2>/dev/null || true
+curl -fsS "$HEALTH_URL" | python -m json.tool 2>/dev/null || true
 echo ""
 
 # Gradio UI disabled due to cv2.dnn.DictValue compatibility issue with NVIDIA container
