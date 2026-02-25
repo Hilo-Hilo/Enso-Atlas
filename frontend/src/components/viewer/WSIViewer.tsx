@@ -33,6 +33,8 @@ import {
   Plus,
   Settings2,
   ImageIcon,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import type { PatchCoordinates, HeatmapData, Annotation, PatchOverlay } from "@/types";
 
@@ -205,6 +207,7 @@ export function WSIViewer({
   const [zoom, setZoom] = useState(1);
   const [showToolbar, setShowToolbar] = useState(true);
   const [showHeatmapPanel, setShowHeatmapPanel] = useState(false);
+  const [showOverlayMenu, setShowOverlayMenu] = useState(true);
   const [activeTool, setActiveTool] = useState<"pan" | "crosshair">("pan");
   const [heatmapLoaded, setHeatmapLoaded] = useState(false);
   const [heatmapError, setHeatmapError] = useState(false);
@@ -1796,152 +1799,177 @@ export function WSIViewer({
       {isReady && (
         <div className="absolute top-4 right-4 z-20 w-[min(18rem,calc(100%-2rem))] max-h-[calc(100%-2rem)] overflow-y-auto pr-1">
           <div className="flex flex-col gap-2">
-          {/* Attention Heatmap Section */}
-          {heatmap && (
-            <div className="viewer-toolbar flex-col items-stretch gap-2 p-3 w-full">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Layers className="h-4 w-4 text-gray-600" />
-                  <span className="text-sm font-medium text-gray-700">
-                    Attention Heatmap
-                  </span>
-                  {heatmapLoaded && (
-                    <span className="w-2 h-2 rounded-full bg-green-500" title="Loaded" />
-                  )}
-                  {heatmapError && (
-                    <span className="w-2 h-2 rounded-full bg-red-500" title="Failed to load" />
-                  )}
-                </div>
-                <Toggle
-                  checked={showHeatmap}
-                  onChange={setShowHeatmap}
-                  size="sm"
-                />
-              </div>
-
-              {showHeatmap && (
-                <div className="space-y-2 animate-fade-in">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500">Heatmap only (J)</span>
-                    <Toggle
-                      checked={heatmapOnly}
-                      onChange={(checked) => {
-                        setHeatmapOnly(checked);
-                        if (checked) setShowHeatmap(true);
-                      }}
-                      size="sm"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-xs text-gray-500">Interpolated view</span>
-                      <span className="text-2xs text-gray-400">Visual smoothing only</span>
-                    </div>
-                    <Toggle
-                      checked={heatmapSmooth}
-                      onChange={(checked) => onHeatmapSmoothChange?.(checked)}
-                      size="sm"
-                    />
-                  </div>
-
-                  <ModelSelector />
-                  <Slider
-                    label="Opacity"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={heatmapOpacity}
-                    onChange={(e) => setHeatmapOpacity(Number(e.target.value))}
-                    formatValue={(v) => `${Math.round(v * 100)}%`}
-                  />
-                  <div className="flex items-center justify-between gap-2 mt-1">
-                    <span className="text-2xs text-gray-400 shrink-0">Sensitivity</span>
-                    <div className="flex items-center gap-1.5 flex-1">
-                      <input
-                        type="range"
-                        min={0.1}
-                        max={1.5}
-                        step={0.1}
-                        value={heatmapAlphaPower}
-                        onChange={(e) => onHeatmapAlphaPowerChange?.(Number(e.target.value))}
-                        className="flex-1 h-1 accent-blue-400"
-                      />
-                      <span className="text-2xs text-gray-400 w-6 text-right">{heatmapAlphaPower.toFixed(1)}</span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-2xs text-gray-400 mt-0.5 px-0.5">
-                    <span>More visible</span>
-                    <span>More focused</span>
-                  </div>
-                  <div className="mt-1">
-                    <div className="heatmap-legend h-2.5 rounded" />
-                    <div className="flex justify-between text-2xs text-gray-400 mt-1">
-                      <span>Low attention</span>
-                      <span>High attention</span>
-                    </div>
-                    <p className="text-2xs text-gray-400 mt-1.5 leading-snug">
-                      Heatmap density reflects extracted patch coverage.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {heatmapError && heatmapErrorMessage && (
-                <p className="text-2xs text-red-600 leading-snug mt-1">{heatmapErrorMessage}</p>
-              )}
-            </div>
-          )}
-
-          {/* Patch Grid Section */}
-          <div className="viewer-toolbar flex-col items-stretch gap-2 p-3 w-full">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Grid3X3 className="h-4 w-4 text-gray-600" />
-                <span className="text-sm font-medium text-gray-700">
-                  Patch Grid
+            <button
+              type="button"
+              className="viewer-toolbar w-full flex items-center justify-between px-3 py-2"
+              onClick={() => setShowOverlayMenu((prev) => !prev)}
+              aria-expanded={showOverlayMenu}
+              aria-controls="wsi-overlay-controls-menu"
+              title={showOverlayMenu ? "Collapse overlay controls" : "Expand overlay controls"}
+            >
+              <div className="flex items-center gap-2 text-gray-700">
+                <Settings2 className="h-4 w-4 text-gray-500" />
+                <span className="text-xs font-medium">
+                  {showOverlayMenu ? "Hide controls" : "Show controls"}
                 </span>
               </div>
-              <Toggle
-                checked={showGrid}
-                onChange={setShowGrid}
-                size="sm"
-              />
-            </div>
+              {showOverlayMenu ? (
+                <ChevronUp className="h-4 w-4 text-gray-500" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-gray-500" />
+              )}
+            </button>
 
-            {showGrid && (
-              <div className="space-y-1.5 animate-fade-in">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-2xs text-gray-400">Opacity</span>
-                  <div className="flex items-center gap-1.5 flex-1">
-                    <input
-                      type="range"
-                      min={0.05}
-                      max={1}
-                      step={0.05}
-                      value={gridOpacity}
-                      onChange={(e) => setGridOpacity(Number(e.target.value))}
-                      className="flex-1 h-1 accent-cyan-400"
-                    />
-                    <span className="text-2xs text-gray-400 w-7 text-right">{Math.round(gridOpacity * 100)}%</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-2xs text-gray-400">Color</span>
-                  <div className="flex items-center gap-1.5">
-                    {["#00ffff", "#ffffff", "#ff0000", "#00ff00", "#ffff00"].map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => setGridColor(c)}
-                        className={`w-4 h-4 rounded-full border-2 transition-all ${gridColor === c ? "border-white scale-110" : "border-gray-500 hover:border-gray-300"}`}
-                        style={{ backgroundColor: c }}
+            {showOverlayMenu && (
+              <div id="wsi-overlay-controls-menu" className="flex flex-col gap-2 animate-fade-in">
+                {/* Attention Heatmap Section */}
+                {heatmap && (
+                  <div className="viewer-toolbar flex-col items-stretch gap-2 p-3 w-full">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Layers className="h-4 w-4 text-gray-600" />
+                        <span className="text-sm font-medium text-gray-700">
+                          Attention Heatmap
+                        </span>
+                        {heatmapLoaded && (
+                          <span className="w-2 h-2 rounded-full bg-green-500" title="Loaded" />
+                        )}
+                        {heatmapError && (
+                          <span className="w-2 h-2 rounded-full bg-red-500" title="Failed to load" />
+                        )}
+                      </div>
+                      <Toggle
+                        checked={showHeatmap}
+                        onChange={setShowHeatmap}
+                        size="sm"
                       />
-                    ))}
+                    </div>
+
+                    {showHeatmap && (
+                      <div className="space-y-2 animate-fade-in">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500">Heatmap only (J)</span>
+                          <Toggle
+                            checked={heatmapOnly}
+                            onChange={(checked) => {
+                              setHeatmapOnly(checked);
+                              if (checked) setShowHeatmap(true);
+                            }}
+                            size="sm"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div className="flex flex-col">
+                            <span className="text-xs text-gray-500">Interpolated view</span>
+                            <span className="text-2xs text-gray-400">Visual smoothing only</span>
+                          </div>
+                          <Toggle
+                            checked={heatmapSmooth}
+                            onChange={(checked) => onHeatmapSmoothChange?.(checked)}
+                            size="sm"
+                          />
+                        </div>
+
+                        <ModelSelector />
+                        <Slider
+                          label="Opacity"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={heatmapOpacity}
+                          onChange={(e) => setHeatmapOpacity(Number(e.target.value))}
+                          formatValue={(v) => `${Math.round(v * 100)}%`}
+                        />
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <span className="text-2xs text-gray-400 shrink-0">Sensitivity</span>
+                          <div className="flex items-center gap-1.5 flex-1">
+                            <input
+                              type="range"
+                              min={0.1}
+                              max={1.5}
+                              step={0.1}
+                              value={heatmapAlphaPower}
+                              onChange={(e) => onHeatmapAlphaPowerChange?.(Number(e.target.value))}
+                              className="flex-1 h-1 accent-blue-400"
+                            />
+                            <span className="text-2xs text-gray-400 w-6 text-right">{heatmapAlphaPower.toFixed(1)}</span>
+                          </div>
+                        </div>
+                        <div className="flex justify-between text-2xs text-gray-400 mt-0.5 px-0.5">
+                          <span>More visible</span>
+                          <span>More focused</span>
+                        </div>
+                        <div className="mt-1">
+                          <div className="heatmap-legend h-2.5 rounded" />
+                          <div className="flex justify-between text-2xs text-gray-400 mt-1">
+                            <span>Low attention</span>
+                            <span>High attention</span>
+                          </div>
+                          <p className="text-2xs text-gray-400 mt-1.5 leading-snug">
+                            Heatmap density reflects extracted patch coverage.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {heatmapError && heatmapErrorMessage && (
+                      <p className="text-2xs text-red-600 leading-snug mt-1">{heatmapErrorMessage}</p>
+                    )}
                   </div>
+                )}
+
+                {/* Patch Grid Section */}
+                <div className="viewer-toolbar flex-col items-stretch gap-2 p-3 w-full">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Grid3X3 className="h-4 w-4 text-gray-600" />
+                      <span className="text-sm font-medium text-gray-700">
+                        Patch Grid
+                      </span>
+                    </div>
+                    <Toggle
+                      checked={showGrid}
+                      onChange={setShowGrid}
+                      size="sm"
+                    />
+                  </div>
+
+                  {showGrid && (
+                    <div className="space-y-1.5 animate-fade-in">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-2xs text-gray-400">Opacity</span>
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <input
+                            type="range"
+                            min={0.05}
+                            max={1}
+                            step={0.05}
+                            value={gridOpacity}
+                            onChange={(e) => setGridOpacity(Number(e.target.value))}
+                            className="flex-1 h-1 accent-cyan-400"
+                          />
+                          <span className="text-2xs text-gray-400 w-7 text-right">{Math.round(gridOpacity * 100)}%</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-2xs text-gray-400">Color</span>
+                        <div className="flex items-center gap-1.5">
+                          {["#00ffff", "#ffffff", "#ff0000", "#00ff00", "#ffff00"].map((c) => (
+                            <button
+                              key={c}
+                              onClick={() => setGridColor(c)}
+                              className={`w-4 h-4 rounded-full border-2 transition-all ${gridColor === c ? "border-white scale-110" : "border-gray-500 hover:border-gray-300"}`}
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
-          </div>
           </div>
         </div>
       )}
