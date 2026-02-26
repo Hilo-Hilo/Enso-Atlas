@@ -196,3 +196,95 @@ class TestThemePersistence:
                "ThemeMode = 'light' | 'dark' | 'system'" in src, (
             "ThemeMode type should be defined as light | dark | system"
         )
+
+
+class TestDarkModeAppShellVisibility:
+    """
+    Verify dark mode visibly affects the app shell.
+    Issue: Clicking Dark mode in Settings appeared to do nothing because
+    key layout elements lacked dark: variant classes.
+    """
+
+    def test_layout_body_has_dark_mode_classes(self):
+        """Body in layout.tsx should have dark: variant classes for visible theme change."""
+        layout = _read("frontend/src/app/layout.tsx")
+        assert "dark:bg-navy" in layout, (
+            "layout.tsx body should have dark:bg-navy-* for dark mode background"
+        )
+        assert "dark:text-gray" in layout, (
+            "layout.tsx body should have dark:text-gray-* for dark mode text color"
+        )
+
+    def test_main_page_container_has_dark_mode(self):
+        """Main page container should have dark mode background."""
+        page = _read("frontend/src/app/page.tsx")
+        # The main flex container should have dark mode
+        assert "dark:bg-navy" in page, (
+            "page.tsx main container should have dark:bg-navy-* for dark mode"
+        )
+
+    def test_sidebars_have_dark_mode_styles(self):
+        """Both left and right sidebars should have dark mode backgrounds."""
+        page = _read("frontend/src/app/page.tsx")
+        # Count dark:bg-navy occurrences for sidebars (should have multiple)
+        dark_bg_count = page.count("dark:bg-navy")
+        assert dark_bg_count >= 3, (
+            f"page.tsx should have at least 3 dark:bg-navy-* classes for sidebars and containers (found {dark_bg_count})"
+        )
+
+    def test_sidebar_borders_have_dark_mode(self):
+        """Sidebar borders should have dark mode styling."""
+        page = _read("frontend/src/app/page.tsx")
+        assert "dark:border-navy" in page, (
+            "page.tsx sidebars should have dark:border-navy-* for dark mode borders"
+        )
+
+    def test_mobile_panel_tabs_have_dark_mode(self):
+        """Mobile panel tabs should have dark mode styling."""
+        page = _read("frontend/src/app/page.tsx")
+        # MobilePanelTabs function should have dark mode
+        assert "dark:bg-navy-800" in page, (
+            "Mobile panel tabs should have dark:bg-navy-800 for dark mode"
+        )
+
+
+class TestSettingsOpenHeaderFade:
+    """
+    Verify header/banner visibly fades when Settings modal is open.
+    Issue: While Settings modal is open, header/demo banner still looked too bright.
+    """
+
+    def test_header_fades_when_settings_open(self):
+        """Header should have opacity fade when settingsOpen is true."""
+        src = _read("frontend/src/components/layout/Header.tsx")
+        # Header should conditionally apply opacity based on settingsOpen
+        assert "settingsOpen && " in src and "opacity" in src, (
+            "Header should apply opacity class when settingsOpen is true"
+        )
+
+    def test_header_disables_interaction_when_settings_open(self):
+        """Header should disable pointer events when settingsOpen is true."""
+        src = _read("frontend/src/components/layout/Header.tsx")
+        assert "pointer-events-none" in src, (
+            "Header should have pointer-events-none when settings modal is open"
+        )
+
+    def test_disconnection_banner_fades_when_settings_open(self):
+        """Disconnection banner should also fade when settings is open."""
+        src = _read("frontend/src/components/layout/Header.tsx")
+        # The DisconnectionBanner usage section (in return JSX) should have conditional fade
+        # Find the JSX return section which includes the banner wrapper
+        banner_usage_start = src.find("{/* Disconnection Banner */}")
+        assert banner_usage_start != -1, "Header should have Disconnection Banner comment marker"
+        banner_section = src[banner_usage_start:banner_usage_start + 500]
+        assert "settingsOpen" in banner_section, (
+            "DisconnectionBanner wrapper should reference settingsOpen for fade effect"
+        )
+
+    def test_fade_uses_transition_for_smooth_animation(self):
+        """Fade effect should use CSS transition for smooth animation."""
+        src = _read("frontend/src/components/layout/Header.tsx")
+        # Should have transition-all or transition-opacity for smooth fade
+        assert "transition-all" in src or "transition-opacity" in src, (
+            "Header fade should use CSS transition for smooth animation"
+        )

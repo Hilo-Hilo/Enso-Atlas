@@ -46,7 +46,7 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body className="font-sans antialiased">
+      <body className="font-sans antialiased bg-surface-secondary text-gray-900 dark:bg-navy-900 dark:text-gray-100 transition-colors duration-300">
         <ToastProvider>
           <ProjectProvider>
             <DisclaimerBanner />

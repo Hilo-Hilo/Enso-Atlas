@@ -346,14 +346,22 @@ export function Header({
     <>
       {/* Disconnection Banner */}
       {showDisconnectionBanner && (
-        <DisconnectionBanner
-          onReconnect={handleReconnect}
-          onDismiss={() => setBannerDismissed(true)}
-          isReconnecting={isReconnecting}
-        />
+        <div className={cn(
+          "transition-all duration-300",
+          settingsOpen && "opacity-50 pointer-events-none"
+        )}>
+          <DisconnectionBanner
+            onReconnect={handleReconnect}
+            onDismiss={() => setBannerDismissed(true)}
+            isReconnecting={isReconnecting}
+          />
+        </div>
       )}
 
-      <header className="relative z-[120] h-[4.7rem] sm:h-[5.3rem] bg-sky-100/90 dark:bg-navy-900/95 backdrop-blur-sm border-b border-sky-200 dark:border-navy-700 px-3 sm:px-4 lg:px-6 flex items-center justify-between shrink-0 shadow-md">
+      <header className={cn(
+        "relative z-[120] h-[4.7rem] sm:h-[5.3rem] bg-sky-100/90 dark:bg-navy-900/95 backdrop-blur-sm border-b border-sky-200 dark:border-navy-700 px-3 sm:px-4 lg:px-6 flex items-center justify-between shrink-0 shadow-md transition-all duration-300",
+        settingsOpen && "opacity-50 pointer-events-none"
+      )}>
         {/* Left: Logo and Navigation */}
         <div className="flex items-center gap-2 sm:gap-4">
           {/* Mobile Menu Button */}

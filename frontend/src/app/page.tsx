@@ -75,7 +75,7 @@ function MobilePanelTabs({
   hasResults: boolean;
 }) {
   return (
-    <div className="flex items-center bg-white border-b border-gray-200 lg:hidden">
+    <div className="flex items-center bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700 lg:hidden transition-colors duration-300">
       <button
         onClick={() => onTabChange("slides")}
         className={cn(
@@ -136,7 +136,7 @@ function RightSidebarTabs({
   onPanelChange: (panel: RightSidebarPanelKey) => void;
 }) {
   return (
-    <div className="sticky top-0 z-10 bg-white border-b border-gray-200">
+    <div className="sticky top-0 z-10 bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700 transition-colors duration-300">
       <nav className="flex" role="tablist" aria-label="Analysis tools">
         {options.map((opt) => {
           const Icon = RIGHT_PANEL_ICONS[opt.value];
@@ -2480,7 +2480,7 @@ function HomePage() {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-surface-secondary">
+    <div className="flex flex-col h-screen bg-surface-secondary dark:bg-navy-950 transition-colors duration-300">
       {/* Header */}
       <Header
         isConnected={isConnected}
@@ -2509,7 +2509,7 @@ function HomePage() {
           ref={slideSelectorRef as React.RefObject<HTMLElement>}
           tabIndex={-1}
           className={cn(
-            "bg-white border-b lg:border-b-0 lg:border-r border-surface-border overflow-y-auto overflow-x-hidden shrink-0 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative transition-all duration-300",
+            "bg-white dark:bg-navy-900 border-b lg:border-b-0 lg:border-r border-surface-border dark:border-navy-700 overflow-y-auto overflow-x-hidden shrink-0 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative transition-all duration-300",
             // Mobile: Full width, show/hide based on tab
             "lg:hidden",
             mobilePanelTab === "slides" ? "flex-1 p-3 sm:p-4" : "hidden"
@@ -2541,7 +2541,7 @@ function HomePage() {
           ref={slideSelectorRef as React.RefObject<HTMLElement>}
           tabIndex={-1}
           className={cn(
-            "h-full bg-white border-r border-surface-border space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative overflow-x-hidden",
+            "h-full bg-white dark:bg-navy-900 border-r border-surface-border dark:border-navy-700 space-y-4 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clinical-500 relative overflow-x-hidden transition-colors duration-300",
             leftSidebarOpen ? "p-4 overflow-y-auto overflow-x-hidden" : "overflow-hidden"
           )}
           data-demo="slide-selector"
@@ -2562,9 +2562,9 @@ function HomePage() {
         >
           {/* View Mode Toggle - Only show in oncologist mode */}
           {userViewMode === "oncologist" && selectedSlide && analysisResult && (
-            <div className="flex items-center justify-center gap-2 p-2 bg-white border-b border-gray-200">
+            <div className="flex items-center justify-center gap-2 p-2 bg-white dark:bg-navy-800 border-b border-gray-200 dark:border-navy-700 transition-colors duration-300">
               <span className="text-xs text-gray-500 mr-2 hidden sm:inline">View Mode:</span>
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
+              <div className="flex items-center bg-gray-100 dark:bg-navy-700 rounded-lg p-1 transition-colors duration-300">
                 <button
                   onClick={() => setViewMode("wsi")}
                   className={`px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
@@ -2652,7 +2652,7 @@ function HomePage() {
                 onPatchSelected={handlePatchSelectedOnSlide}
               />
             ) : (
-              <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 p-4">
+              <div className="h-full flex items-center justify-center bg-gray-100 dark:bg-navy-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-navy-600 p-4 transition-colors duration-300">
                 <div className="text-center max-w-sm">
                   <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
                     <svg
@@ -2699,7 +2699,7 @@ function HomePage() {
           maxSize="45%"
         >
         <aside
-          className="h-full bg-white overflow-y-auto overflow-x-hidden relative"
+          className="h-full bg-white dark:bg-navy-900 overflow-y-auto overflow-x-hidden relative transition-colors duration-300"
         >
           {renderRightSidebarContent()}
         </aside>
@@ -2709,7 +2709,7 @@ function HomePage() {
         {/* Right Sidebar - Mobile Version */}
         <aside
           className={cn(
-            "lg:hidden bg-white overflow-y-auto space-y-4",
+            "lg:hidden bg-white dark:bg-navy-900 overflow-y-auto space-y-4 transition-colors duration-300",
             mobilePanelTab === "results" ? "flex-1 p-3 sm:p-4" : "hidden"
           )}
         >
