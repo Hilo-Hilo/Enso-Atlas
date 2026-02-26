@@ -86,13 +86,13 @@ function detectSurvivalContradictions(predictions: ModelPrediction[]): string[] 
 
 function PlaceholderModelRow({ modelName, description }: { modelName: string; description: string }) {
   return (
-    <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+    <div className="rounded-md border border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-900 px-3 py-2">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-gray-500 truncate">{modelName}</p>
-          <p className="text-xs text-gray-400 truncate">{description}</p>
+          <p className="text-sm font-medium text-gray-500 dark:text-gray-300 truncate">{modelName}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{description}</p>
         </div>
-        <div className="text-lg text-gray-400">--</div>
+        <div className="text-lg text-gray-400 dark:text-gray-500">--</div>
       </div>
     </div>
   );
@@ -108,48 +108,48 @@ function PredictionBarRow({ prediction }: { prediction: ModelPrediction }) {
     <div
       className={cn(
         "rounded-md border px-3 py-3",
-        isPositive ? "border-sky-200 bg-sky-50" : "border-orange-200 bg-orange-50"
+        isPositive ? "border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/20" : "border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20"
       )}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-900 truncate">{prediction.modelName}</p>
-          <p className={cn("text-xs font-medium", isPositive ? "text-sky-700" : "text-orange-700")}>
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{prediction.modelName}</p>
+          <p className={cn("text-xs font-medium", isPositive ? "text-sky-700 dark:text-sky-300" : "text-orange-700 dark:text-orange-300")}>
             {prediction.label}
           </p>
         </div>
         <div className="shrink-0 flex items-center gap-2">
-          <span className="text-sm font-mono font-semibold text-gray-900">{scorePercent}%</span>
+          <span className="text-sm font-mono font-semibold text-gray-900 dark:text-gray-100">{scorePercent}%</span>
         </div>
       </div>
 
       <div className="mt-2">
-        <div className="relative h-2.5 rounded-full border border-gray-200 overflow-hidden">
+        <div className="relative h-2.5 rounded-full border border-gray-200 dark:border-navy-600 overflow-hidden">
           <div
-            className="absolute left-0 top-0 h-full bg-gradient-to-r from-orange-100 to-orange-200"
+            className="absolute left-0 top-0 h-full bg-gradient-to-r from-orange-100 to-orange-200 dark:from-orange-900/40 dark:to-orange-800/40"
             style={{ width: `${thresholdPercent}%` }}
           />
           <div
-            className="absolute right-0 top-0 h-full bg-gradient-to-r from-sky-200 to-sky-100"
+            className="absolute right-0 top-0 h-full bg-gradient-to-r from-sky-200 to-sky-100 dark:from-sky-800/40 dark:to-sky-900/40"
             style={{ width: `${100 - thresholdPercent}%` }}
           />
           <div
             className={cn(
               "absolute top-0 h-full w-1.5 rounded-full transition-all",
-              isPositive ? "bg-sky-500" : "bg-orange-500"
+              isPositive ? "bg-sky-500 dark:bg-sky-400" : "bg-orange-500 dark:bg-orange-400"
             )}
             style={{ left: `calc(${scorePercent}% - 3px)` }}
           />
           <div
-            className="absolute top-0 h-full w-px bg-gray-500/70"
+            className="absolute top-0 h-full w-px bg-gray-500/70 dark:bg-gray-400/70"
             style={{ left: `${thresholdPercent}%` }}
           />
         </div>
 
         <div className="mt-1 flex justify-between text-xs">
-          <span className="text-orange-700">{prediction.negativeLabel}</span>
-          <span className="text-gray-500">{thresholdPercent}% threshold</span>
-          <span className="text-sky-700">{prediction.positiveLabel}</span>
+          <span className="text-orange-700 dark:text-orange-300">{prediction.negativeLabel}</span>
+          <span className="text-gray-500 dark:text-gray-400">{thresholdPercent}% threshold</span>
+          <span className="text-sky-700 dark:text-sky-300">{prediction.positiveLabel}</span>
         </div>
       </div>
     </div>
@@ -167,7 +167,7 @@ function PredictionSection({
 
   return (
     <section className="space-y-2">
-      <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
+      <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{title}</h3>
       <div className="space-y-2">
         {predictions.map((prediction) => (
           <PredictionBarRow key={prediction.modelId} prediction={prediction} />
@@ -272,15 +272,15 @@ export function MultiModelPredictionPanel({
         </CardHeader>
         <CardContent>
           <div className="text-center py-4">
-            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-red-100 flex items-center justify-center">
+            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
               <AlertCircle className="h-7 w-7 text-red-500" />
             </div>
-            <p className="text-sm font-medium text-red-700 mb-2">Analysis Failed</p>
+            <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Analysis Failed</p>
           </div>
 
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
             {hasDetails ? (
-              <div className="text-left text-xs text-red-700 space-y-1">
+              <div className="text-left text-xs text-red-700 dark:text-red-300 space-y-1">
                 {errorLines.map((line, i) => (
                   <p key={i} className={line.startsWith("•") ? "pl-2" : ""}>
                     {line}
@@ -288,7 +288,7 @@ export function MultiModelPredictionPanel({
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-red-700 text-center">{error}</p>
+              <p className="text-xs text-red-700 dark:text-red-300 text-center">{error}</p>
             )}
           </div>
 
@@ -322,17 +322,17 @@ export function MultiModelPredictionPanel({
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="text-center py-3">
-            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-clinical-100 flex items-center justify-center">
+            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-clinical-100 dark:bg-clinical-900/30 flex items-center justify-center">
               <Brain className="h-7 w-7 text-clinical-600 animate-pulse" />
             </div>
-            <p className="text-sm font-medium text-gray-700">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
               {isEmbedding ? "Generating Embeddings..." : "Running Model Inference..."}
             </p>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               {embeddingProgress?.message || "Running project models"}
             </p>
             {elapsedSeconds > 0 && (
-              <p className="text-xs text-clinical-600 mt-1">Elapsed: {elapsedSeconds}s</p>
+              <p className="text-xs text-clinical-600 dark:text-clinical-400 mt-1">Elapsed: {elapsedSeconds}s</p>
             )}
           </div>
 
@@ -347,19 +347,19 @@ export function MultiModelPredictionPanel({
   if (!multiModelResult) {
     return (
       <Card className="overflow-hidden">
-        <CardHeader className="bg-gradient-to-r from-gray-50 to-slate-50">
+        <CardHeader className="bg-gradient-to-r from-gray-50 to-slate-50 dark:from-navy-900 dark:to-navy-800">
           <CardTitle className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-gray-400" />
+            <Activity className="h-4 w-4 text-gray-400 dark:text-gray-500" />
             {panelTitle}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
           <div className="text-center py-2">
-            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-gray-100 dark:bg-navy-700 flex items-center justify-center">
               <Sparkles className="h-6 w-6 text-gray-400" />
             </div>
-            <p className="text-sm font-semibold text-gray-700">Models ready</p>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Models ready</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               Run analysis to generate survival and grading predictions.
             </p>
           </div>
@@ -399,25 +399,25 @@ export function MultiModelPredictionPanel({
             <Activity className="h-4 w-4 text-clinical-600" />
             {panelTitle}
             {isCached && (
-              <Badge variant="default" size="sm" className="bg-blue-100 text-blue-700 border-blue-200">
+              <Badge variant="default" size="sm" className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800">
                 Cached
               </Badge>
             )}
           </CardTitle>
           <div className="flex items-center gap-2">
             {isCached && cachedAt && (
-              <span className="text-2xs text-gray-400">{formatCachedTime(cachedAt)}</span>
+              <span className="text-2xs text-gray-400 dark:text-gray-500">{formatCachedTime(cachedAt)}</span>
             )}
             {isCached && onReanalyze && (
               <button
                 onClick={onReanalyze}
-                className="text-2xs text-clinical-600 hover:text-clinical-700 font-medium underline"
+                className="text-2xs text-clinical-600 dark:text-clinical-400 hover:text-clinical-700 dark:hover:text-clinical-300 font-medium underline"
               >
                 Re-analyze
               </button>
             )}
             {processingTime != null && processingTime > 0 && !isCached && (
-              <div className="flex items-center gap-1 text-xs text-gray-500">
+              <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                 <Clock className="h-3 w-3" />
                 {processingTime < 1000
                   ? `${Math.round(processingTime)}ms`
@@ -430,19 +430,19 @@ export function MultiModelPredictionPanel({
 
       <CardContent className="space-y-4">
         {multiModelResult.nPatches > 0 && (
-          <div className="flex items-center gap-2 text-xs text-gray-600">
+          <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
             <Layers className="h-3.5 w-3.5" />
             <span>Analyzed {multiModelResult.nPatches} tissue patches</span>
           </div>
         )}
 
         {survivalContradictions.length > 0 && (
-          <div className="flex items-start gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-md">
-            <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0 mt-0.5" />
+          <div className="flex items-start gap-2 px-3 py-2 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-md">
+            <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-300 shrink-0 mt-0.5" />
             <div>
-              <p className="text-xs font-semibold text-orange-800">Contradictory predictions detected</p>
+              <p className="text-xs font-semibold text-orange-800 dark:text-orange-200">Contradictory predictions detected</p>
               {survivalContradictions.map((line, idx) => (
-                <p key={idx} className="text-xs text-orange-700">
+                <p key={idx} className="text-xs text-orange-700 dark:text-orange-300">
                   {line}
                 </p>
               ))}
@@ -456,16 +456,16 @@ export function MultiModelPredictionPanel({
             <PredictionSection title="AI Tumor Grading" predictions={gradingPredictions} />
           </>
         ) : (
-          <div className="text-center py-4 text-gray-500">
+          <div className="text-center py-4 text-gray-500 dark:text-gray-400">
             <p className="text-sm font-medium">No secondary models configured</p>
             <p className="text-xs mt-1">Platinum sensitivity is shown in the top prediction panel.</p>
           </div>
         )}
 
         {currentProject.disclaimer && (
-          <div className="pt-2 border-t border-gray-100 flex items-start gap-2">
-            <Info className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
-            <p className="text-xs text-gray-500 leading-relaxed">{currentProject.disclaimer}</p>
+          <div className="pt-2 border-t border-gray-100 dark:border-navy-700 flex items-start gap-2">
+            <Info className="h-4 w-4 text-gray-400 dark:text-gray-500 mt-0.5 shrink-0" />
+            <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{currentProject.disclaimer}</p>
           </div>
         )}
       </CardContent>

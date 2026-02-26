@@ -93,18 +93,18 @@ export function KeyboardShortcutsModal({
       />
 
       {/* Modal */}
-      <div className="relative z-10 w-full max-w-2xl mx-4 bg-white rounded-xl shadow-2xl overflow-hidden animate-scale-in">
+      <div className="relative z-10 w-full max-w-2xl mx-4 bg-white dark:bg-navy-800 rounded-xl shadow-2xl overflow-hidden animate-scale-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-900">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-clinical-600 flex items-center justify-center">
               <Keyboard className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 Keyboard Shortcuts
               </h2>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
                 Quick access for power users
               </p>
             </div>
@@ -119,7 +119,7 @@ export function KeyboardShortcutsModal({
           <div className="grid grid-cols-2 gap-6">
             {sortedCategories.map((category) => (
               <div key={category} className="space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
                   {CATEGORY_ICONS[category] || <Keyboard className="h-4 w-4" />}
                   <span>{category}</span>
                 </div>
@@ -134,8 +134,8 @@ export function KeyboardShortcutsModal({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
-          <p className="text-xs text-gray-500 text-center">
+        <div className="px-6 py-4 border-t border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-900">
+          <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
             Press <kbd className="kbd">?</kbd> to toggle this help dialog
           </p>
         </div>
@@ -153,7 +153,7 @@ function ShortcutItem({ shortcut }: ShortcutItemProps) {
 
   return (
     <div className="flex items-center justify-between py-1.5">
-      <span className="text-sm text-gray-600">{shortcut.description}</span>
+      <span className="text-sm text-gray-600 dark:text-gray-300">{shortcut.description}</span>
       <kbd className="kbd">{displayKey}</kbd>
     </div>
   );

@@ -60,8 +60,8 @@ export default function BatchPage() {
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-gray-900">Batch Analysis</h1>
-            <p className="text-sm text-gray-500">
+            <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Batch Analysis</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Run asynchronous multi-slide analysis for the current project scope.
             </p>
           </div>

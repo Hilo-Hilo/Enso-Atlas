@@ -42,58 +42,58 @@ const TISSUE_TYPES: Record<ExtendedTissueType, TissueTypeInfo> = {
   tumor: {
     label: "Tumor Region",
     shortLabel: "Tumor",
-    color: "text-red-700",
-    bgColor: "bg-red-100",
-    borderColor: "border-red-300",
-    hoverBg: "hover:bg-red-200",
+    color: "text-red-700 dark:text-red-300",
+    bgColor: "bg-red-100 dark:bg-red-900/30",
+    borderColor: "border-red-300 dark:border-red-800",
+    hoverBg: "hover:bg-red-200 dark:hover:bg-red-900/40",
   },
   stroma: {
     label: "Stromal Tissue",
     shortLabel: "Stroma",
-    color: "text-blue-700",
-    bgColor: "bg-blue-100",
-    borderColor: "border-blue-300",
-    hoverBg: "hover:bg-blue-200",
+    color: "text-blue-700 dark:text-blue-300",
+    bgColor: "bg-blue-100 dark:bg-blue-900/30",
+    borderColor: "border-blue-300 dark:border-blue-800",
+    hoverBg: "hover:bg-blue-200 dark:hover:bg-blue-900/40",
   },
   necrosis: {
     label: "Necrosis",
     shortLabel: "Necrosis",
-    color: "text-gray-700",
-    bgColor: "bg-gray-200",
-    borderColor: "border-gray-400",
-    hoverBg: "hover:bg-gray-300",
+    color: "text-gray-700 dark:text-gray-300",
+    bgColor: "bg-gray-200 dark:bg-navy-700",
+    borderColor: "border-gray-400 dark:border-navy-500",
+    hoverBg: "hover:bg-gray-300 dark:hover:bg-navy-600",
   },
   inflammatory: {
     label: "Inflammatory Infiltrate",
     shortLabel: "Inflam.",
-    color: "text-purple-700",
-    bgColor: "bg-purple-100",
-    borderColor: "border-purple-300",
-    hoverBg: "hover:bg-purple-200",
+    color: "text-purple-700 dark:text-purple-300",
+    bgColor: "bg-purple-100 dark:bg-purple-900/30",
+    borderColor: "border-purple-300 dark:border-purple-800",
+    hoverBg: "hover:bg-purple-200 dark:hover:bg-purple-900/40",
   },
   normal: {
     label: "Normal Tissue",
     shortLabel: "Normal",
-    color: "text-green-700",
-    bgColor: "bg-green-100",
-    borderColor: "border-green-300",
-    hoverBg: "hover:bg-green-200",
+    color: "text-green-700 dark:text-green-300",
+    bgColor: "bg-green-100 dark:bg-green-900/30",
+    borderColor: "border-green-300 dark:border-green-800",
+    hoverBg: "hover:bg-green-200 dark:hover:bg-green-900/40",
   },
   artifact: {
     label: "Artifact",
     shortLabel: "Artifact",
-    color: "text-amber-700",
-    bgColor: "bg-amber-100",
-    borderColor: "border-amber-300",
-    hoverBg: "hover:bg-amber-200",
+    color: "text-amber-700 dark:text-amber-300",
+    bgColor: "bg-amber-100 dark:bg-amber-900/30",
+    borderColor: "border-amber-300 dark:border-amber-800",
+    hoverBg: "hover:bg-amber-200 dark:hover:bg-amber-900/40",
   },
   unknown: {
     label: "Unclassified",
     shortLabel: "Unknown",
-    color: "text-gray-500",
-    bgColor: "bg-gray-100",
-    borderColor: "border-gray-200",
-    hoverBg: "hover:bg-gray-200",
+    color: "text-gray-500 dark:text-gray-400",
+    bgColor: "bg-gray-100 dark:bg-navy-800",
+    borderColor: "border-gray-200 dark:border-navy-600",
+    hoverBg: "hover:bg-gray-200 dark:hover:bg-navy-700",
   },
 };
 
@@ -213,13 +213,13 @@ export function EvidencePanel({
         </CardHeader>
         <CardContent>
           <div className="text-center py-6">
-            <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-red-100 flex items-center justify-center">
+            <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
               <AlertCircle className="h-6 w-6 text-red-500" />
             </div>
-            <p className="text-sm font-medium text-red-700 mb-1">
+            <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-1">
               Failed to load patches
             </p>
-            <p className="text-xs text-red-600 mb-3">{error}</p>
+            <p className="text-xs text-red-600 dark:text-red-400 mb-3">{error}</p>
             {onRetry && (
               <Button
                 variant="ghost"
@@ -247,7 +247,7 @@ export function EvidencePanel({
         </CardHeader>
         <CardContent>
           <SkeletonEvidenceGrid />
-          <p className="text-xs text-gray-500 text-center mt-3 animate-pulse">
+          <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-3 animate-pulse">
             Extracting top attention regions...
           </p>
         </CardContent>
@@ -260,19 +260,19 @@ export function EvidencePanel({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Layers className="h-4 w-4 text-gray-400" />
+            <Layers className="h-4 w-4 text-gray-400 dark:text-gray-500" />
             Evidence Patches
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-8 text-gray-500">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-              <Grid3X3 className="h-8 w-8 text-gray-400" />
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-navy-700 flex items-center justify-center">
+              <Grid3X3 className="h-8 w-8 text-gray-400 dark:text-gray-500" />
             </div>
-            <p className="text-sm font-medium text-gray-600">
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
               No evidence patches
             </p>
-            <p className="text-xs mt-1.5 text-gray-500 max-w-[200px] mx-auto">
+            <p className="text-xs mt-1.5 text-gray-500 dark:text-gray-400 max-w-[200px] mx-auto">
               Run analysis to extract the most influential tissue regions.
             </p>
           </div>
@@ -292,14 +292,14 @@ export function EvidencePanel({
               {patches.length}
             </Badge>
           </CardTitle>
-          <div className="flex items-center gap-1 bg-surface-secondary rounded-lg p-0.5">
+          <div className="flex items-center gap-1 bg-surface-secondary dark:bg-navy-900 rounded-lg p-0.5">
             <button
               onClick={() => setViewMode("grid")}
               className={cn(
                 "p-1.5 rounded-md transition-all",
                 viewMode === "grid"
-                  ? "bg-white shadow-clinical text-clinical-700"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "bg-white dark:bg-navy-700 shadow-clinical text-clinical-700 dark:text-clinical-300"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
               )}
               title="Grid view"
             >
@@ -310,8 +310,8 @@ export function EvidencePanel({
               className={cn(
                 "p-1.5 rounded-md transition-all",
                 viewMode === "list"
-                  ? "bg-white shadow-clinical text-clinical-700"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "bg-white dark:bg-navy-700 shadow-clinical text-clinical-700 dark:text-clinical-300"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
               )}
               title="List view"
             >
@@ -322,14 +322,14 @@ export function EvidencePanel({
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
         {/* Tissue Type Filter */}
-        <div className="flex flex-wrap gap-1.5 pb-2 border-b border-gray-100">
+        <div className="flex flex-wrap gap-1.5 pb-2 border-b border-gray-100 dark:border-navy-700">
           <button
             onClick={() => handleFilterChange(null)}
             className={cn(
               "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all",
               tissueFilter === null
-                ? "bg-clinical-100 text-clinical-700 ring-1 ring-clinical-300"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                ? "bg-clinical-100 dark:bg-clinical-900/40 text-clinical-700 dark:text-clinical-300 ring-1 ring-clinical-300 dark:ring-clinical-700"
+                : "bg-gray-100 dark:bg-navy-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-navy-600"
             )}
           >
             <Filter className="h-3 w-3" />
@@ -347,7 +347,7 @@ export function EvidencePanel({
                     "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all border",
                     tissueFilter === type
                       ? cn(info.bgColor, info.color, info.borderColor, "ring-1")
-                      : cn("bg-white border-gray-200 text-gray-600", info.hoverBg)
+                      : cn("bg-white dark:bg-navy-800 border-gray-200 dark:border-navy-600 text-gray-600 dark:text-gray-300", info.hoverBg)
                   )}
                 >
                   <Circle className={cn("h-2 w-2", tissueFilter === type ? "fill-current" : "")} />
@@ -358,7 +358,7 @@ export function EvidencePanel({
           {tissueFilter && (
             <button
               onClick={() => handleFilterChange(null)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-navy-700"
               title="Clear filter"
             >
               <X className="h-3 w-3" />
@@ -380,11 +380,11 @@ export function EvidencePanel({
 
         {/* Empty state when filter yields no results */}
         {filteredPatches.length === 0 && tissueFilter && (
-          <div className="text-center py-6 text-gray-500">
+          <div className="text-center py-6 text-gray-500 dark:text-gray-400">
             <p className="text-sm">No patches match this filter</p>
             <button
               onClick={() => handleFilterChange(null)}
-              className="text-xs text-clinical-600 hover:text-clinical-700 mt-2"
+              className="text-xs text-clinical-600 dark:text-clinical-400 hover:text-clinical-700 dark:hover:text-clinical-300 mt-2"
             >
               Clear filter
             </button>
@@ -446,8 +446,8 @@ export function EvidencePanel({
                   className={cn(
                     "w-2 h-2 rounded-full transition-all",
                     currentPage === i
-                      ? "bg-clinical-600 w-4"
-                      : "bg-gray-300 hover:bg-gray-400"
+                      ? "bg-clinical-600 dark:bg-clinical-400 w-4"
+                      : "bg-gray-300 dark:bg-navy-600 hover:bg-gray-400 dark:hover:bg-navy-500"
                   )}
                 />
               ))}
@@ -467,13 +467,13 @@ export function EvidencePanel({
         )}
 
         {/* Legend */}
-        <div className="pt-3 border-t border-gray-100">
-          <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+        <div className="pt-3 border-t border-gray-100 dark:border-navy-700">
+          <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-2">
             <span className="font-medium">Attention Weight</span>
             <span>Click to navigate</span>
           </div>
           <div className="heatmap-legend h-2 rounded-full" />
-          <div className="flex justify-between text-2xs text-gray-400 mt-1">
+          <div className="flex justify-between text-2xs text-gray-400 dark:text-gray-500 mt-1">
             <span>Low</span>
             <span>High</span>
           </div>
@@ -527,11 +527,11 @@ function PatchThumbnail({
       className={cn(
         "relative aspect-square rounded-xl overflow-hidden border-2 transition-all duration-200 group",
         "hover:border-clinical-400 hover:shadow-lg hover:shadow-clinical-200/50 hover:scale-[1.03]",
-        "focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:ring-offset-2",
+        "focus:outline-none focus:ring-2 focus:ring-clinical-500 dark:focus:ring-clinical-400 focus:ring-offset-2 dark:focus:ring-offset-navy-900",
         "active:scale-[0.98]",
         isSelected
-          ? "border-clinical-500 ring-2 ring-clinical-200 shadow-lg shadow-clinical-200/40"
-          : "border-gray-200 hover:border-clinical-300"
+          ? "border-clinical-500 dark:border-clinical-400 ring-2 ring-clinical-200 dark:ring-clinical-700 shadow-lg shadow-clinical-200/40 dark:shadow-clinical-900/50"
+          : "border-gray-200 dark:border-navy-600 hover:border-clinical-300 dark:hover:border-clinical-500"
       )}
     >
       {/* Patch Image or Tissue Type Placeholder */}
@@ -542,7 +542,7 @@ function PatchThumbnail({
               "absolute inset-0 flex items-center justify-center animate-pulse",
               tissueInfo.bgColor
             )}>
-              <Layers className="h-6 w-6 text-gray-400" />
+              <Layers className="h-6 w-6 text-gray-400 dark:text-gray-500" />
             </div>
           )}
           <img
@@ -649,10 +649,10 @@ function PatchThumbnail({
                     onZoom?.();
                   }
                 }}
-                className="p-1 bg-white rounded hover:bg-white transition-colors cursor-pointer"
+                className="p-1 bg-white dark:bg-navy-800 rounded hover:bg-white dark:hover:bg-navy-700 transition-colors cursor-pointer"
                 title="View enlarged"
               >
-                <ZoomIn className="h-4 w-4" />
+                <ZoomIn className="h-4 w-4 text-navy-700 dark:text-gray-200" />
               </div>
             </div>
           </div>
@@ -698,15 +698,15 @@ function PatchListItem({
       onClick={onClick}
       className={cn(
         "w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left group",
-        "hover:border-clinical-500 hover:bg-clinical-50/50 hover:shadow-clinical",
+        "hover:border-clinical-500 hover:bg-clinical-50/50 dark:hover:bg-clinical-900/30 hover:shadow-clinical",
         "focus:outline-none focus:ring-2 focus:ring-clinical-500",
         isSelected
-          ? "border-clinical-600 bg-clinical-50 ring-1 ring-clinical-200"
-          : "border-gray-200 bg-white"
+          ? "border-clinical-600 dark:border-clinical-500 bg-clinical-50 dark:bg-clinical-900/30 ring-1 ring-clinical-200 dark:ring-clinical-700"
+          : "border-gray-200 dark:border-navy-600 bg-white dark:bg-navy-800"
       )}
     >
       {/* Thumbnail */}
-      <div className="relative w-16 h-16 rounded-lg overflow-hidden shrink-0 border border-gray-200 group-hover:border-clinical-300">
+      <div className="relative w-16 h-16 rounded-lg overflow-hidden shrink-0 border border-gray-200 dark:border-navy-600 group-hover:border-clinical-300 dark:group-hover:border-clinical-500">
         <img
           src={patch.thumbnailUrl}
           alt={`Evidence patch ${rank}`}
@@ -720,7 +720,7 @@ function PatchListItem({
       {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-sm font-medium text-gray-900">
+          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
             Patch {patch.patchId.slice(0, 8)}
           </span>
           <Badge
@@ -752,7 +752,7 @@ function PatchListItem({
           </span>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-gray-500">
+        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
           <MapPin className="h-3 w-3" />
           <span className="font-mono">
             ({patch.coordinates.x.toLocaleString()}, {patch.coordinates.y.toLocaleString()})
@@ -760,7 +760,7 @@ function PatchListItem({
         </div>
 
         {patch.morphologyDescription && (
-          <p className="text-xs text-gray-600 mt-1.5 line-clamp-2 leading-relaxed">
+          <p className="text-xs text-gray-600 dark:text-gray-300 mt-1.5 line-clamp-2 leading-relaxed">
             {patch.morphologyDescription}
           </p>
         )}
@@ -786,12 +786,12 @@ function PatchListItem({
             className={cn(
               "p-1.5 rounded-lg transition-all cursor-pointer",
               isSearching
-                ? "bg-clinical-100 cursor-wait"
-                : "hover:bg-clinical-100"
+                ? "bg-clinical-100 dark:bg-clinical-900/40 cursor-wait"
+                : "hover:bg-clinical-100 dark:hover:bg-clinical-900/40"
             )}
             title="Find similar patches"
           >
-            <Search className={cn("h-4 w-4 text-clinical-600", isSearching && "animate-pulse")} />
+            <Search className={cn("h-4 w-4 text-clinical-600 dark:text-clinical-400", isSearching && "animate-pulse")} />
           </div>
         )}
         <div
@@ -808,10 +808,10 @@ function PatchListItem({
               onZoom?.();
             }
           }}
-          className="p-1.5 rounded-lg hover:bg-clinical-100 cursor-pointer"
+          className="p-1.5 rounded-lg hover:bg-clinical-100 dark:hover:bg-clinical-900/40 cursor-pointer"
           title="View enlarged"
         >
-          <ZoomIn className="h-4 w-4 text-clinical-600" />
+          <ZoomIn className="h-4 w-4 text-clinical-600 dark:text-clinical-400" />
         </div>
       </div>
     </button>

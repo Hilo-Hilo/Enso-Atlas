@@ -95,13 +95,13 @@ export function PredictionPanel({
         </CardHeader>
         <CardContent>
           <div className="text-center py-6">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 flex items-center justify-center">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
               <AlertCircle className="h-8 w-8 text-red-500" />
             </div>
-            <p className="text-sm font-medium text-red-700 mb-2">
+            <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">
               Analysis Failed
             </p>
-            <p className="text-xs text-red-600 mb-4 max-w-[220px] mx-auto">
+            <p className="text-xs text-red-600 dark:text-red-400 mb-4 max-w-[220px] mx-auto">
               {error}
             </p>
             {onRetry && (
@@ -142,13 +142,13 @@ export function PredictionPanel({
             />
 
             {/* Skeleton preview while waiting */}
-            <div className="pt-4 border-t border-gray-100">
+            <div className="pt-4 border-t border-gray-100 dark:border-navy-700">
               <SkeletonPrediction />
             </div>
 
             {/* Estimated time */}
             <div className="text-center">
-              <p className="text-xs text-gray-500">Estimated time: ~2-4 seconds</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Estimated time: ~2-4 seconds</p>
             </div>
           </div>
         </CardContent>
@@ -161,19 +161,19 @@ export function PredictionPanel({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-gray-400" />
+            <Activity className="h-4 w-4 text-gray-400 dark:text-gray-500" />
             {panelTitle}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-8 text-gray-500">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-navy-700 flex items-center justify-center">
               <Target className="h-8 w-8 text-gray-400" />
             </div>
-            <p className="text-sm font-medium text-gray-600">
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
               No analysis results yet
             </p>
-            <p className="text-xs mt-1.5 text-gray-500 max-w-[220px] mx-auto">
+            <p className="text-xs mt-1.5 text-gray-500 dark:text-gray-400 max-w-[220px] mx-auto">
               Select a slide and run analysis to see {predictionTargetLabel.toLowerCase()} predictions.
             </p>
           </div>
@@ -218,14 +218,14 @@ export function PredictionPanel({
             <Activity className="h-4 w-4 text-clinical-600" />
             {panelTitle}
             {isCached && (
-              <Badge variant="default" size="sm" className="bg-blue-100 text-blue-700 border-blue-200">
+              <Badge variant="default" size="sm" className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800">
                 Cached
               </Badge>
             )}
           </CardTitle>
           <div className="flex items-center gap-2">
             {isCached && cachedAt && (
-              <span className="text-2xs text-gray-400">
+              <span className="text-2xs text-gray-400 dark:text-gray-500">
                 {(() => {
                   try {
                     const diffMs = Date.now() - new Date(cachedAt).getTime();
@@ -242,13 +242,13 @@ export function PredictionPanel({
             {isCached && onReanalyze && (
               <button
                 onClick={onReanalyze}
-                className="text-2xs text-clinical-600 hover:text-clinical-700 font-medium underline"
+                className="text-2xs text-clinical-600 dark:text-clinical-400 hover:text-clinical-700 dark:hover:text-clinical-300 font-medium underline"
               >
                 Re-analyze
               </button>
             )}
             {processingTime != null && processingTime > 0 && !isCached && (
-              <div className="flex items-center gap-1 text-xs text-gray-500">
+              <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                 <Clock className="h-3 w-3" />
                 {processingTime < 1000
                   ? `${processingTime}ms`
@@ -264,8 +264,8 @@ export function PredictionPanel({
           className={cn(
             "p-4 rounded-xl border-2 transition-all",
             useFavorableStyling
-              ? "bg-sky-50 border-sky-200"
-              : "bg-orange-50 border-orange-200"
+              ? "bg-sky-50 dark:bg-sky-900/20 border-sky-200 dark:border-sky-800"
+              : "bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800"
           )}
         >
           <div className="flex items-center justify-between mb-3">
@@ -274,8 +274,8 @@ export function PredictionPanel({
                 className={cn(
                   "h-6 w-6 rounded-full flex items-center justify-center border shadow-sm",
                   useFavorableStyling
-                    ? "bg-white border-sky-400 shadow-sky-200/60"
-                    : "bg-white border-orange-400 shadow-orange-200/60"
+                    ? "bg-white dark:bg-navy-800 border-sky-400 dark:border-sky-600 shadow-sky-200/60 dark:shadow-sky-900/40"
+                    : "bg-white dark:bg-navy-800 border-orange-400 dark:border-orange-600 shadow-orange-200/60 dark:shadow-orange-900/40"
                 )}
                 aria-hidden="true"
               >
@@ -292,8 +292,8 @@ export function PredictionPanel({
                 className={cn(
                   "text-[17.5px] font-bold tracking-tight",
                   useFavorableStyling
-                    ? "text-sky-700"
-                    : "text-orange-700"
+                    ? "text-sky-700 dark:text-sky-300"
+                    : "text-orange-700 dark:text-orange-300"
                 )}
               >
                 {predictedClassLabel.toUpperCase()}
@@ -310,7 +310,7 @@ export function PredictionPanel({
                 isFavorable={useFavorableStyling}
               />
               <div className="flex-1 space-y-2">
-                <p className="text-xs text-gray-600 leading-relaxed">
+                <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
                   {predictionSummaryText}
                 </p>
               </div>
@@ -320,8 +320,8 @@ export function PredictionPanel({
         {/* Probability Bar with Threshold */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600 font-medium">{predictionTargetLabel} Score</span>
-            <span className="font-mono font-semibold text-gray-900">
+            <span className="text-gray-600 dark:text-gray-300 font-medium">{predictionTargetLabel} Score</span>
+            <span className="font-mono font-semibold text-gray-900 dark:text-gray-100">
               {formatProbability(prediction.score)}
             </span>
           </div>
@@ -333,8 +333,8 @@ export function PredictionPanel({
               className={cn(
                 "absolute left-0 top-0 h-full",
                 leftSideFavorable
-                  ? "bg-gradient-to-r from-sky-100 to-sky-200"
-                  : "bg-gradient-to-r from-orange-100 to-orange-200"
+                  ? "bg-gradient-to-r from-sky-100 to-sky-200 dark:from-sky-900/40 dark:to-sky-800/40"
+                  : "bg-gradient-to-r from-orange-100 to-orange-200 dark:from-orange-900/40 dark:to-orange-800/40"
               )}
               style={{ width: "50%" }}
             />
@@ -343,8 +343,8 @@ export function PredictionPanel({
               className={cn(
                 "absolute right-0 top-0 h-full",
                 rightSideFavorable
-                  ? "bg-gradient-to-r from-sky-200 to-sky-100"
-                  : "bg-gradient-to-r from-orange-200 to-orange-100"
+                  ? "bg-gradient-to-r from-sky-200 to-sky-100 dark:from-sky-800/40 dark:to-sky-900/40"
+                  : "bg-gradient-to-r from-orange-200 to-orange-100 dark:from-orange-800/40 dark:to-orange-900/40"
               )}
               style={{ width: "50%" }}
             />
@@ -352,7 +352,7 @@ export function PredictionPanel({
             <div
               className={cn(
                 "absolute top-0 h-full w-1.5 rounded-full shadow-md transition-all duration-700 ease-out",
-                useFavorableStyling ? "bg-sky-500" : "bg-orange-500"
+                useFavorableStyling ? "bg-sky-500 dark:bg-sky-400" : "bg-orange-500 dark:bg-orange-400"
               )}
               style={{ left: `calc(${probabilityPercent}% - 3px)` }}
             />
@@ -362,24 +362,24 @@ export function PredictionPanel({
 
           {/* Scale Labels */}
           <div className="flex justify-between text-xs">
-            <span className={cn("font-medium", leftSideFavorable ? "text-sky-600" : "text-orange-600")}>{negativeLabel}</span>
-            <span className="text-gray-400">50% threshold</span>
-            <span className={cn("font-medium", rightSideFavorable ? "text-sky-600" : "text-orange-600")}>{positiveLabel}</span>
+            <span className={cn("font-medium", leftSideFavorable ? "text-sky-600 dark:text-sky-300" : "text-orange-600 dark:text-orange-300")}>{negativeLabel}</span>
+            <span className="text-gray-400 dark:text-gray-500">50% threshold</span>
+            <span className={cn("font-medium", rightSideFavorable ? "text-sky-600 dark:text-sky-300" : "text-orange-600 dark:text-orange-300")}>{positiveLabel}</span>
           </div>
         </div>
 
         {/* Confidence Bar */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600 font-medium">Model Confidence</span>
-            <span className="font-mono font-semibold text-gray-900">
+            <span className="text-gray-600 dark:text-gray-300 font-medium">Model Confidence</span>
+            <span className="font-mono font-semibold text-gray-900 dark:text-gray-100">
               {confidencePercent}%
             </span>
           </div>
 
-          <div className="probability-bar h-3 bg-emerald-50">
+          <div className="probability-bar h-3 bg-emerald-50 dark:bg-emerald-900/20">
             <div
-              className="absolute left-0 top-0 h-full bg-gradient-to-r from-emerald-100 to-emerald-200 transition-all duration-700 ease-out"
+              className="absolute left-0 top-0 h-full bg-gradient-to-r from-emerald-100 to-emerald-200 dark:from-emerald-900/40 dark:to-emerald-800/40 transition-all duration-700 ease-out"
               style={{ width: `${confidencePercent}%` }}
             />
             <div className="probability-bar-threshold left-1/3 z-10 bg-emerald-300" />
@@ -391,9 +391,9 @@ export function PredictionPanel({
           </div>
 
           <div className="flex justify-between text-xs">
-            <span className="text-emerald-600 font-medium">low</span>
+            <span className="text-emerald-600 dark:text-emerald-300 font-medium">low</span>
             <span className="text-gray-400">moderate</span>
-            <span className="text-emerald-600 font-medium">high</span>
+            <span className="text-emerald-600 dark:text-emerald-300 font-medium">high</span>
           </div>
         </div>
 
@@ -405,15 +405,15 @@ export function PredictionPanel({
             samples={uncertaintyResult.samples}
           />
         ) : onRunUncertaintyAnalysis ? (
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="p-3 bg-gray-50 dark:bg-navy-900 rounded-lg border border-gray-200 dark:border-navy-700">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <BarChart3 className="h-4 w-4 text-gray-500" />
+                <BarChart3 className="h-4 w-4 text-gray-500 dark:text-gray-400" />
                 <div>
-                  <p className="text-xs font-medium text-gray-700">
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-200">
                     Uncertainty Analysis
                   </p>
-                  <p className="text-2xs text-gray-500">
+                  <p className="text-2xs text-gray-500 dark:text-gray-400">
                     Run MC Dropout for confidence intervals
                   </p>
                 </div>
@@ -439,14 +439,14 @@ export function PredictionPanel({
 
         {/* Slide Quality Warning */}
         {qcMetrics && qcMetrics.overallQuality === "poor" && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg animate-fade-in">
+          <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg animate-fade-in">
             <div className="flex items-start gap-2">
-              <ShieldAlert className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+              <ShieldAlert className="h-4 w-4 text-red-600 dark:text-red-300 mt-0.5 shrink-0" />
               <div>
-                <p className="text-xs font-semibold text-red-800">
+                <p className="text-xs font-semibold text-red-800 dark:text-red-200">
                   Slide Quality Warning
                 </p>
-                <p className="text-xs text-red-700 mt-1 leading-relaxed">
+                <p className="text-xs text-red-700 dark:text-red-300 mt-1 leading-relaxed">
                   Slide quality may affect prediction accuracy. Issues detected:{" "}
                   {[
                     qcMetrics.blurScore > 0.2 && "blur",
@@ -466,14 +466,14 @@ export function PredictionPanel({
 
         {/* Acceptable Quality Note */}
         {qcMetrics && qcMetrics.overallQuality === "acceptable" && (
-          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg animate-fade-in">
+          <div className="p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg animate-fade-in">
             <div className="flex items-start gap-2">
-              <ShieldAlert className="h-4 w-4 text-yellow-600 mt-0.5 shrink-0" />
+              <ShieldAlert className="h-4 w-4 text-yellow-600 dark:text-yellow-300 mt-0.5 shrink-0" />
               <div>
-                <p className="text-xs font-semibold text-yellow-800">
+                <p className="text-xs font-semibold text-yellow-800 dark:text-yellow-200">
                   Quality Note
                 </p>
-                <p className="text-xs text-yellow-700 mt-1 leading-relaxed">
+                <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1 leading-relaxed">
                   Slide quality is acceptable but not optimal. Review prediction with caution.
                 </p>
               </div>
@@ -482,10 +482,10 @@ export function PredictionPanel({
         )}
 
         {/* Clinical Disclaimer */}
-        <div className="pt-3 border-t border-gray-100">
+        <div className="pt-3 border-t border-gray-100 dark:border-navy-700">
           <div className="flex items-start gap-2">
-            <Info className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
-            <p className="text-xs text-gray-500 leading-relaxed">
+            <Info className="h-4 w-4 text-gray-400 dark:text-gray-500 mt-0.5 shrink-0" />
+            <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
               {projectDisclaimer}
             </p>
           </div>

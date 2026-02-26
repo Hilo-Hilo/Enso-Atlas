@@ -135,9 +135,9 @@ export function PatchZoomModal({
       />
 
       {/* Modal Content */}
-      <div className="relative z-10 w-full max-w-4xl mx-4 bg-white rounded-xl shadow-2xl overflow-hidden animate-scale-in">
+      <div className="relative z-10 w-full max-w-4xl mx-4 bg-white dark:bg-navy-800 rounded-xl shadow-2xl overflow-hidden animate-scale-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-900">
           <div className="flex items-center gap-3">
             <div
               className={cn(
@@ -148,10 +148,10 @@ export function PatchZoomModal({
               #{currentRank}
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 Evidence Patch Analysis
               </h2>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
                 Patch {patch.patchId.slice(0, 12)}... | Attention:{" "}
                 {attentionPercent}%
               </p>
@@ -160,7 +160,7 @@ export function PatchZoomModal({
 
           <div className="flex items-center gap-2">
             {/* Zoom Controls */}
-            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            <div className="flex items-center gap-1 bg-gray-100 dark:bg-navy-700 rounded-lg p-1">
               <Button
                 variant="ghost"
                 size="sm"
@@ -170,7 +170,7 @@ export function PatchZoomModal({
               >
                 <ZoomOut className="h-4 w-4" />
               </Button>
-              <span className="text-xs font-mono px-2 min-w-[3rem] text-center">
+              <span className="text-xs font-mono px-2 min-w-[3rem] text-center text-gray-700 dark:text-gray-200">
                 {Math.round(zoomLevel * 100)}%
               </span>
               <Button
@@ -204,17 +204,17 @@ export function PatchZoomModal({
             {currentIndex > 0 && (
               <button
                 onClick={() => onNavigate?.("prev")}
-                className="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/90 hover:bg-white shadow-lg flex items-center justify-center transition-all"
+                className="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/90 dark:bg-navy-700/90 hover:bg-white dark:hover:bg-navy-600 shadow-lg flex items-center justify-center transition-all"
               >
-                <ChevronLeft className="h-6 w-6 text-gray-700" />
+                <ChevronLeft className="h-6 w-6 text-gray-700 dark:text-gray-200" />
               </button>
             )}
             {currentIndex < allPatches.length - 1 && (
               <button
                 onClick={() => onNavigate?.("next")}
-                className="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/90 hover:bg-white shadow-lg flex items-center justify-center transition-all"
+                className="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/90 dark:bg-navy-700/90 hover:bg-white dark:hover:bg-navy-600 shadow-lg flex items-center justify-center transition-all"
               >
-                <ChevronRight className="h-6 w-6 text-gray-700" />
+                <ChevronRight className="h-6 w-6 text-gray-700 dark:text-gray-200" />
               </button>
             )}
 
@@ -238,23 +238,23 @@ export function PatchZoomModal({
           </div>
 
           {/* Info Panel */}
-          <div className="w-80 bg-white border-l border-gray-200 p-6 overflow-y-auto max-h-[60vh]">
+          <div className="w-80 bg-white dark:bg-navy-800 border-l border-gray-200 dark:border-navy-700 p-6 overflow-y-auto max-h-[60vh]">
             {/* Attention Score */}
             <div className="mb-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
                 <Target className="h-4 w-4 text-clinical-600" />
                 Attention Score
               </h3>
               <div className="relative pt-2">
-                <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-3 bg-gray-100 dark:bg-navy-700 rounded-full overflow-hidden">
                   <div
                     className={cn("h-full rounded-full transition-all", attentionColor)}
                     style={{ width: `${attentionPercent}%` }}
                   />
                 </div>
-                <div className="flex justify-between mt-2 text-xs text-gray-500">
+                <div className="flex justify-between mt-2 text-xs text-gray-500 dark:text-gray-400">
                   <span>Low</span>
-                  <span className="font-semibold text-gray-900">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">
                     {attentionPercent}%
                   </span>
                   <span>High</span>
@@ -264,32 +264,32 @@ export function PatchZoomModal({
 
             {/* Coordinates */}
             <div className="mb-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-clinical-600" />
                 Location
               </h3>
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs text-gray-500 mb-1">X Position</p>
-                  <p className="text-sm font-mono font-medium text-gray-900">
+                <div className="bg-gray-50 dark:bg-navy-900 rounded-lg p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">X Position</p>
+                  <p className="text-sm font-mono font-medium text-gray-900 dark:text-gray-100">
                     {patch.coordinates.x.toLocaleString()}
                   </p>
                 </div>
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs text-gray-500 mb-1">Y Position</p>
-                  <p className="text-sm font-mono font-medium text-gray-900">
+                <div className="bg-gray-50 dark:bg-navy-900 rounded-lg p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Y Position</p>
+                  <p className="text-sm font-mono font-medium text-gray-900 dark:text-gray-100">
                     {patch.coordinates.y.toLocaleString()}
                   </p>
                 </div>
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs text-gray-500 mb-1">Patch Size</p>
-                  <p className="text-sm font-mono font-medium text-gray-900">
+                <div className="bg-gray-50 dark:bg-navy-900 rounded-lg p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Patch Size</p>
+                  <p className="text-sm font-mono font-medium text-gray-900 dark:text-gray-100">
                     {patch.coordinates.width}x{patch.coordinates.height}
                   </p>
                 </div>
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs text-gray-500 mb-1">Level</p>
-                  <p className="text-sm font-mono font-medium text-gray-900">
+                <div className="bg-gray-50 dark:bg-navy-900 rounded-lg p-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Level</p>
+                  <p className="text-sm font-mono font-medium text-gray-900 dark:text-gray-100">
                     {patch.coordinates.level}
                   </p>
                 </div>
@@ -298,12 +298,12 @@ export function PatchZoomModal({
 
             {/* Morphology Description */}
             <div className="mb-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
                 <Crosshair className="h-4 w-4 text-clinical-600" />
                 Morphology Insights
               </h3>
-              <div className="bg-clinical-50 border border-clinical-200 rounded-lg p-4">
-                <p className="text-sm text-gray-700 leading-relaxed">
+              <div className="bg-clinical-50 dark:bg-clinical-900/30 border border-clinical-200 dark:border-clinical-800 rounded-lg p-4">
+                <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
                   {getMorphologyDescription(patch)}
                 </p>
               </div>
@@ -328,7 +328,7 @@ export function PatchZoomModal({
                   Top {currentRank} of {allPatches.length}
                 </Badge>
                 {currentRank <= 3 && (
-                  <span className="text-xs text-clinical-600 font-medium">
+                  <span className="text-xs text-clinical-600 dark:text-clinical-400 font-medium">
                     Primary Evidence
                   </span>
                 )}
@@ -336,26 +336,26 @@ export function PatchZoomModal({
             </div>
 
             {/* Keyboard Shortcuts */}
-            <div className="border-t border-gray-200 pt-4">
-              <p className="text-xs text-gray-500 mb-2 font-medium">
+            <div className="border-t border-gray-200 dark:border-navy-700 pt-4">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">
                 Keyboard Shortcuts
               </p>
-              <div className="space-y-1.5 text-xs text-gray-500">
+              <div className="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">
                 <div className="flex justify-between">
                   <span>Navigate patches</span>
-                  <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">
+                  <span className="font-mono bg-gray-100 dark:bg-navy-700 px-1.5 py-0.5 rounded">
                     Arrow Left/Right
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Zoom in/out</span>
-                  <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">
+                  <span className="font-mono bg-gray-100 dark:bg-navy-700 px-1.5 py-0.5 rounded">
                     +/-
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Close modal</span>
-                  <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">
+                  <span className="font-mono bg-gray-100 dark:bg-navy-700 px-1.5 py-0.5 rounded">
                     Esc
                   </span>
                 </div>
