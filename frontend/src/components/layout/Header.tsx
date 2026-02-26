@@ -45,6 +45,22 @@ interface HeaderProps {
   onReconnect?: () => void;
 }
 
+type FloatingBannerTone = "amber" | "sky";
+
+type FloatingBannerItem = {
+  id: string;
+  title: string;
+  message: string;
+  tone: FloatingBannerTone;
+};
+
+const FLOATING_BANNER_TONE_CLASSES: Record<FloatingBannerTone, string> = {
+  amber:
+    "border-amber-300/80 bg-amber-100/95 text-amber-900 dark:border-amber-700/80 dark:bg-amber-900/80 dark:text-amber-100",
+  sky:
+    "border-sky-300/80 bg-sky-100/95 text-sky-900 dark:border-sky-700/80 dark:bg-sky-900/80 dark:text-sky-100",
+};
+
 // Disconnection Banner Component
 function DisconnectionBanner({
   onReconnect,
@@ -300,6 +316,42 @@ export function Header({
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [dismissedTopBanners, setDismissedTopBanners] = useState<string[]>([]);
+  const [crossingBannerId, setCrossingBannerId] = useState<string | null>(null);
+  const { currentProject } = useProject();
+
+  const researchPreviewMessage =
+    currentProject?.disclaimer?.trim() ||
+    "These predictions are research-only and should not be used as the sole basis for clinical decisions.";
+
+  const topFloatingBanners: FloatingBannerItem[] = [
+    {
+      id: "research-preview",
+      title: "Research Preview",
+      message: researchPreviewMessage,
+      tone: "amber",
+    },
+    {
+      id: "dgx-capacity",
+      title: "Demo Backend Capacity Notice",
+      message:
+        "Backend is hosted on NVIDIA DGX Spark. This is a private submitter server also running other projects, so please avoid stress testing and avoid sending many job requests at once. It is designed for local on-premise use with strict permissions and is exposed publicly only for demo purposes.",
+      tone: "sky",
+    },
+  ];
+
+  const visibleTopBanners = topFloatingBanners.filter(
+    (banner) => !dismissedTopBanners.includes(banner.id)
+  );
+
+  const handleCrossOutBanner = (bannerId: string) => {
+    if (dismissedTopBanners.includes(bannerId)) return;
+    setCrossingBannerId(bannerId);
+    setTimeout(() => {
+      setDismissedTopBanners((prev) => (prev.includes(bannerId) ? prev : [...prev, bannerId]));
+      setCrossingBannerId((current) => (current === bannerId ? null : current));
+    }, 180);
+  };
 
   // Reset banner dismissed state when connection changes
   useEffect(() => {
@@ -344,6 +396,39 @@ export function Header({
 
   return (
     <>
+      {/* Floating Research/Capacity Banners */}
+      {visibleTopBanners.length > 0 && (
+        <div className="pointer-events-none fixed top-2 left-1/2 z-[260] flex w-[min(96vw,1080px)] -translate-x-1/2 flex-col gap-2">
+          {visibleTopBanners.map((banner) => (
+            <div
+              key={banner.id}
+              className={cn(
+                "pointer-events-auto relative rounded-2xl border px-3 sm:px-4 py-2 shadow-xl backdrop-blur-md transition-all duration-200",
+                FLOATING_BANNER_TONE_CLASSES[banner.tone],
+                crossingBannerId === banner.id &&
+                  "scale-[0.985] opacity-45 before:absolute before:left-3 before:right-3 before:top-1/2 before:h-0.5 before:-translate-y-1/2 before:rotate-[-4deg] before:bg-red-500/80"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide opacity-85">
+                    {banner.title}
+                  </p>
+                  <p className="text-[11px] sm:text-xs leading-relaxed mt-0.5">{banner.message}</p>
+                </div>
+                <button
+                  onClick={() => handleCrossOutBanner(banner.id)}
+                  className="shrink-0 rounded-md p-1.5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                  title="Cross out banner"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Disconnection Banner */}
       {showDisconnectionBanner && (
         <div className={cn(
