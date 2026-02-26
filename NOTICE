@@ -1,0 +1,32 @@
+Enso Atlas licensing notice
+==========================
+
+This repository is prepared for Kaggle submission requirements.
+
+1) Repository-level content license
+-----------------------------------
+Unless otherwise noted, repository content is licensed under:
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+
+See: LICENSE
+
+2) Software code license (additional permission)
+------------------------------------------------
+Software source code in this repository is additionally available under the
+MIT License (at your option), including files under:
+- src/
+- scripts/
+- frontend/
+- tests/
+- docker/
+- config/
+- models/
+
+See: LICENSE-CODE-MIT
+
+3) Third-party materials
+------------------------
+Third-party code, models, datasets, trademarks, and assets retain their
+respective licenses and terms. Use of external datasets/models must follow
+the upstream license and usage policies.

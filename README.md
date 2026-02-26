@@ -15,7 +15,8 @@ Test it out here: https://atlas.ensohealth.ai/
 [![Deployment](https://img.shields.io/badge/Deployment-On--Premise%20Only-166534?style=for-the-badge)](#)
 [![PHI Boundary](https://img.shields.io/badge/PHI-Data%20Stays%20On%20Site-1D4ED8?style=for-the-badge)](#)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-2563EB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-MIT-EAB308?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/License-CC%20BY%204.0-0EA5E9?style=for-the-badge)](https://creativecommons.org/licenses/by/4.0/)
+[![Code License](https://img.shields.io/badge/Code%20License-MIT-EAB308?style=for-the-badge)](LICENSE-CODE-MIT)
 
 [Competition Write-up](https://www.kaggle.com/competitions/med-gemma-impact-challenge/writeups/Enso-Atlas) • [Documentation](docs.md) • [Quick Start](#quick-start) • [Pipeline Scripts](#pipeline-scripts)
 
@@ -424,7 +425,12 @@ cd frontend && npm run lint
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+This repository uses a Kaggle-compatible licensing layout:
+
+- **Repository content (default):** [Creative Commons Attribution 4.0 (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/) — see [LICENSE](LICENSE)
+- **Software source code (additional permission):** MIT License — see [LICENSE-CODE-MIT](LICENSE-CODE-MIT)
+
+For scope and third-party terms, see [NOTICE](NOTICE).
 
 ---
 
