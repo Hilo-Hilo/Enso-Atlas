@@ -76,23 +76,23 @@ export function AnalysisControls({
         />
 
         {!hasSlideSelection && (
-          <p className="text-xs text-gray-500">Select a case to enable analysis.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Select a case to enable analysis.</p>
         )}
 
         {isGeneratingEmbeddings && embeddingProgress && (
-          <div className="p-3 bg-violet-50 border border-violet-200 rounded-md">
+          <div className="p-3 bg-violet-50 dark:bg-violet-900/30 border border-violet-200 dark:border-violet-700 rounded-md">
             <div className="flex items-center gap-2 mb-2">
-              <Cpu className="h-4 w-4 text-violet-600 animate-pulse" />
-              <span className="text-sm font-medium text-violet-800">Generating Embeddings</span>
+              <Cpu className="h-4 w-4 text-violet-600 dark:text-violet-400 animate-pulse" />
+              <span className="text-sm font-medium text-violet-800 dark:text-violet-300">Generating Embeddings</span>
             </div>
-            <p className="text-xs text-violet-700 mb-2">{embeddingProgress.message}</p>
-            <div className="w-full h-2 bg-violet-200 rounded-full overflow-hidden">
+            <p className="text-xs text-violet-700 dark:text-violet-400 mb-2">{embeddingProgress.message}</p>
+            <div className="w-full h-2 bg-violet-200 dark:bg-violet-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-violet-600 transition-all duration-500"
                 style={{ width: `${embeddingProgress.progress}%` }}
               />
             </div>
-            <div className="flex items-center justify-between mt-2 text-2xs text-violet-700">
+            <div className="flex items-center justify-between mt-2 text-2xs text-violet-700 dark:text-violet-400">
               <span>{Math.round(embeddingProgress.progress)}%</span>
               <span className="inline-flex items-center gap-1">
                 <Clock className="h-3 w-3" />
@@ -103,7 +103,7 @@ export function AnalysisControls({
         )}
 
         {isAnalyzing && analysisStep >= 0 ? (
-          <div className="p-3 bg-clinical-50 border border-clinical-200 rounded-md">
+          <div className="p-3 bg-clinical-50 dark:bg-clinical-900/30 border border-clinical-200 dark:border-clinical-700 rounded-md">
             <InlineProgress
               steps={ANALYSIS_STEPS.map((s) => s.label)}
               currentStep={analysisStep}
@@ -117,10 +117,10 @@ export function AnalysisControls({
             !isGeneratingEmbeddings &&
             onGenerateEmbeddings ? (
               <div className="space-y-2">
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-md">
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-md">
                   <div className="flex items-start gap-2">
-                    <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-                    <p className="text-xs text-amber-700">
+                    <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
                       Level 0 embeddings are not ready for this case. Generate them first, or switch
                       to Level 1 for faster startup.
                     </p>
@@ -131,7 +131,7 @@ export function AnalysisControls({
                   size="lg"
                   onClick={onGenerateEmbeddings}
                   disabled={!hasSlideSelection || isAnalyzing || isGeneratingEmbeddings}
-                  className="w-full border-violet-300 text-violet-700 hover:bg-violet-50"
+                  className="w-full border-violet-300 dark:border-violet-600 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/30"
                 >
                   <Cpu className="h-4 w-4 mr-2" />
                   Generate Level 0 Embeddings
@@ -145,7 +145,7 @@ export function AnalysisControls({
                   onClick={onAnalyze}
                   disabled={!hasSlideSelection || !hasSelectedModels || isAnalyzing || isGeneratingEmbeddings}
                   isLoading={isAnalyzing}
-                  className="w-full border-sky-300 bg-sky-100 text-sky-900 hover:bg-sky-200"
+                  className="w-full border-sky-300 dark:border-sky-600 bg-sky-100 dark:bg-sky-900/30 text-sky-900 dark:text-sky-200 hover:bg-sky-200 dark:hover:bg-sky-900/50"
                   data-action="run-analysis"
                   data-demo="analyze-button"
                 >
@@ -156,7 +156,7 @@ export function AnalysisControls({
                     : "Run Analysis"}
                 </Button>
                 {hasSlideSelection && !hasSelectedModels && (
-                  <p className="text-2xs text-amber-700">
+                  <p className="text-2xs text-amber-700 dark:text-amber-400">
                     Select one or more models before running analysis.
                   </p>
                 )}
