@@ -1697,7 +1697,7 @@ def create_app(
             "active_batch_embedding": active_batch_embedding,
         }
 
-    # ====== Tags & Groups stubs ======
+    # ====== Tags stubs ======
     # These endpoints are called by the Slide Manager frontend.
     # Return empty arrays until full implementation is needed.
 
@@ -1711,16 +1711,7 @@ def create_app(
         """Create a tag (stub)."""
         return {"name": request.get("name", ""), "color": request.get("color", "#888"), "count": 0}
 
-    @app.get("/api/groups")
-    async def get_groups():
-        """List all slide groups (stub)."""
-        return []
-
-    @app.post("/api/groups")
-    async def create_group(request: dict):
-        """Create a slide group (stub)."""
-        import uuid
-        return {"id": str(uuid.uuid4()), "name": request.get("name", ""), "description": request.get("description", ""), "slide_ids": [], "created_at": "", "updated_at": ""}
+    # NOTE: Group endpoints (/api/groups) are implemented below after metadata_manager is created
 
     @app.get("/api/health")
     async def api_health_check():
@@ -7296,6 +7287,141 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         return list(available_slides.keys())
     metadata_router = create_metadata_router(metadata_manager, get_available_slide_ids)
     app.include_router(metadata_router)
+
+    # ====== Groups API (/api/groups) ======
+    # Full implementation using SlideMetadataManager for persistence
+    
+    @app.get("/api/groups")
+    async def get_groups():
+        """List all slide groups with persistent storage."""
+        groups = metadata_manager.list_groups()
+        # Return as array of BackendGroup-compatible objects
+        return [
+            {
+                "id": g.id,
+                "name": g.name,
+                "description": g.description,
+                "slide_ids": g.slide_ids,
+                "created_at": g.created_at,
+                "updated_at": g.updated_at,
+            }
+            for g in groups
+        ]
+    
+    @app.post("/api/groups")
+    async def create_group_endpoint(request: dict):
+        """Create a new slide group with persistent storage."""
+        name = request.get("name", "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Group name is required")
+        description = request.get("description")
+        color = request.get("color")
+        group = metadata_manager.create_group(name, description, color)
+        return {
+            "id": group.id,
+            "name": group.name,
+            "description": group.description,
+            "slide_ids": group.slide_ids,
+            "created_at": group.created_at,
+            "updated_at": group.updated_at,
+        }
+    
+    @app.get("/api/groups/{group_id}")
+    async def get_group_endpoint(group_id: str):
+        """Get a specific slide group."""
+        group = metadata_manager.get_group(group_id)
+        if not group:
+            raise HTTPException(status_code=404, detail=f"Group {group_id} not found")
+        return {
+            "id": group.id,
+            "name": group.name,
+            "description": group.description,
+            "slide_ids": group.slide_ids,
+            "created_at": group.created_at,
+            "updated_at": group.updated_at,
+        }
+    
+    @app.patch("/api/groups/{group_id}")
+    async def update_group_endpoint(group_id: str, request: dict):
+        """Update a slide group."""
+        try:
+            group = metadata_manager.update_group(
+                group_id,
+                name=request.get("name"),
+                description=request.get("description"),
+                color=request.get("color"),
+            )
+            return {
+                "id": group.id,
+                "name": group.name,
+                "description": group.description,
+                "slide_ids": group.slide_ids,
+                "created_at": group.created_at,
+                "updated_at": group.updated_at,
+            }
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    
+    @app.delete("/api/groups/{group_id}")
+    async def delete_group_endpoint(group_id: str):
+        """Delete a slide group."""
+        try:
+            metadata_manager.delete_group(group_id)
+            return {"success": True}
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    
+    @app.post("/api/groups/{group_id}/slides")
+    async def add_slides_to_group_endpoint(group_id: str, request: dict):
+        """Add slides to a group."""
+        slide_ids = request.get("slide_ids", [])
+        if not slide_ids:
+            raise HTTPException(status_code=400, detail="slide_ids is required")
+        try:
+            group = metadata_manager.add_slides_to_group(group_id, slide_ids)
+            return {"success": True, "group": {
+                "id": group.id,
+                "name": group.name,
+                "description": group.description,
+                "slide_ids": group.slide_ids,
+                "created_at": group.created_at,
+                "updated_at": group.updated_at,
+            }}
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    
+    @app.delete("/api/groups/{group_id}/slides/{slide_id}")
+    async def remove_slide_from_group_endpoint(group_id: str, slide_id: str):
+        """Remove a slide from a group."""
+        try:
+            group = metadata_manager.remove_slide_from_group(group_id, slide_id)
+            return {"success": True, "group": {
+                "id": group.id,
+                "name": group.name,
+                "description": group.description,
+                "slide_ids": group.slide_ids,
+                "created_at": group.created_at,
+                "updated_at": group.updated_at,
+            }}
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    
+    # ====== Bulk API ======
+    
+    @app.post("/api/bulk/group")
+    async def bulk_add_to_group(request: dict):
+        """Add multiple slides to a group (bulk operation)."""
+        slide_ids = request.get("slide_ids", [])
+        group_id = request.get("group_id", "")
+        if not slide_ids:
+            raise HTTPException(status_code=400, detail="slide_ids is required")
+        if not group_id:
+            raise HTTPException(status_code=400, detail="group_id is required")
+        try:
+            group = metadata_manager.add_slides_to_group(group_id, slide_ids)
+            return {"success": True, "count": len(slide_ids)}
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
 
     # Project system routes (config-driven multi-cancer support)
     app.include_router(project_router)

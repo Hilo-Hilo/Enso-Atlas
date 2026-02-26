@@ -214,6 +214,25 @@ class SlideMetadataManager:
             
             return slide
     
+    def remove_tags(self, slide_id: str, tags: List[str]) -> SlideMetadata:
+        """Remove multiple tags from a slide."""
+        with self._lock:
+            if slide_id not in self._store.slides:
+                raise ValueError(f"Slide {slide_id} not found")
+            
+            slide = self._store.slides[slide_id]
+            modified = False
+            for tag in tags:
+                if tag in slide.tags:
+                    slide.tags.remove(tag)
+                    modified = True
+            
+            if modified:
+                slide.updated_at = self._get_timestamp()
+                self._save()
+            
+            return slide
+    
     # ============== Group Operations ==============
     
     def get_all_groups(self) -> List[GroupResponse]:
@@ -232,6 +251,27 @@ class SlideMetadataManager:
                 )
                 for group in self._store.groups.values()
             ]
+    
+    def list_groups(self) -> List[GroupResponse]:
+        """Alias for get_all_groups() for router compatibility."""
+        return self.get_all_groups()
+    
+    def get_group(self, group_id: str) -> Optional[GroupResponse]:
+        """Get a single group by ID."""
+        with self._lock:
+            if group_id not in self._store.groups:
+                return None
+            group = self._store.groups[group_id]
+            return GroupResponse(
+                id=group.id,
+                name=group.name,
+                description=group.description,
+                color=group.color,
+                slide_count=len(group.slide_ids),
+                slide_ids=group.slide_ids,
+                created_at=group.created_at,
+                updated_at=group.updated_at,
+            )
     
     def create_group(self, name: str, description: Optional[str] = None, 
                      color: Optional[str] = None) -> GroupResponse:
@@ -362,6 +402,39 @@ class SlideMetadataManager:
                     slide.groups.remove(group_id)
                     slide.updated_at = self._get_timestamp()
             
+            self._save()
+            
+            return GroupResponse(
+                id=group.id,
+                name=group.name,
+                description=group.description,
+                color=group.color,
+                slide_count=len(group.slide_ids),
+                slide_ids=group.slide_ids,
+                created_at=group.created_at,
+                updated_at=group.updated_at,
+            )
+    
+    def remove_slides_from_group(self, group_id: str, slide_ids: List[str]) -> GroupResponse:
+        """Remove multiple slides from a group."""
+        with self._lock:
+            if group_id not in self._store.groups:
+                raise ValueError(f"Group {group_id} not found")
+            
+            group = self._store.groups[group_id]
+            
+            for slide_id in slide_ids:
+                if slide_id in group.slide_ids:
+                    group.slide_ids.remove(slide_id)
+                
+                # Also update slide's groups list
+                if slide_id in self._store.slides:
+                    slide = self._store.slides[slide_id]
+                    if group_id in slide.groups:
+                        slide.groups.remove(group_id)
+                        slide.updated_at = self._get_timestamp()
+            
+            group.updated_at = self._get_timestamp()
             self._save()
             
             return GroupResponse(
