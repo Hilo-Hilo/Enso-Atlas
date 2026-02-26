@@ -156,11 +156,11 @@ export function SystemStatusModal({ isOpen, onClose, isConnected }: SystemStatus
   const getStatusColor = (status: ServiceStatus["status"]) => {
     switch (status) {
       case "online":
-        return "text-green-600 bg-green-50 border-green-200";
+        return "text-green-600 bg-green-50 border-green-200 dark:text-green-400 dark:bg-green-900/30 dark:border-green-800";
       case "offline":
-        return "text-red-600 bg-red-50 border-red-200";
+        return "text-red-600 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-900/30 dark:border-red-800";
       case "degraded":
-        return "text-amber-600 bg-amber-50 border-amber-200";
+        return "text-amber-600 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-900/30 dark:border-amber-800";
     }
   };
 
@@ -179,9 +179,9 @@ export function SystemStatusModal({ isOpen, onClose, isConnected }: SystemStatus
       />
 
       {/* Modal */}
-      <div className="relative z-10 w-full max-w-md mx-4 bg-white rounded-xl shadow-2xl overflow-hidden animate-scale-in">
+      <div className="relative z-10 w-full max-w-md mx-4 bg-white dark:bg-navy-800 rounded-xl shadow-2xl overflow-hidden animate-scale-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900">
           <div className="flex items-center gap-3">
             <div className={cn(
               "w-10 h-10 rounded-lg flex items-center justify-center",
@@ -190,16 +190,16 @@ export function SystemStatusModal({ isOpen, onClose, isConnected }: SystemStatus
               <Activity className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">System Status</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">System Status</h2>
               <p className={cn(
                 "text-sm font-medium",
-                overallStatus === "online" ? "text-green-600" : overallStatus === "degraded" ? "text-amber-600" : "text-red-600"
+                overallStatus === "online" ? "text-green-600 dark:text-green-400" : overallStatus === "degraded" ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400"
               )}>
                 {overallStatus === "online" ? "All Systems Operational" : overallStatus === "degraded" ? "Partial Outage" : "System Offline"}
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={onClose} className="p-2">
+          <Button variant="ghost" size="sm" onClick={onClose} className="p-2 dark:text-gray-300 dark:hover:bg-navy-700">
             <X className="h-5 w-5" />
           </Button>
         </div>
@@ -208,25 +208,25 @@ export function SystemStatusModal({ isOpen, onClose, isConnected }: SystemStatus
         <div className="p-6 space-y-6">
           {/* Quick Stats */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-              <Clock className="h-5 w-5 text-gray-400" />
+            <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-navy-700/50 rounded-lg">
+              <Clock className="h-5 w-5 text-gray-400 dark:text-gray-500" />
               <div>
-                <p className="text-xs text-gray-500">Uptime</p>
-                <p className="text-sm font-semibold text-gray-900">{metrics.uptime}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Uptime</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{metrics.uptime}</p>
               </div>
             </div>
-            <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-              <Server className="h-5 w-5 text-gray-400" />
+            <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-navy-700/50 rounded-lg">
+              <Server className="h-5 w-5 text-gray-400 dark:text-gray-500" />
               <div>
-                <p className="text-xs text-gray-500">Version</p>
-                <p className="text-sm font-semibold text-gray-900">v{metrics.version}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Version</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">v{metrics.version}</p>
               </div>
             </div>
           </div>
 
           {/* Services */}
           <div>
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Services</h3>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">Services</h3>
             <div className="space-y-2">
               {metrics.services.map((service) => (
                 <div
@@ -254,13 +254,13 @@ export function SystemStatusModal({ isOpen, onClose, isConnected }: SystemStatus
           </div>
 
           {/* Last Checked */}
-          <p className="text-xs text-gray-500 text-center">
+          <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
             Last checked: {metrics.lastChecked.toLocaleTimeString()}
           </p>
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end px-6 py-4 border-t border-gray-200 bg-gray-50">
+        <div className="flex items-center justify-end px-6 py-4 border-t border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900">
           <Button
             variant="secondary"
             size="sm"
