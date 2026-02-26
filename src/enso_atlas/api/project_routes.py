@@ -193,71 +193,17 @@ async def create_project(body: CreateProjectRequest):
     """
     Create a new project.
 
-    Adds the project to projects.yaml and creates modular data directories
-    under the project's configured dataset paths (slides and embeddings).
-    Returns the created project config.
+    **DISABLED**: Project creation via the API is disabled. Projects must be
+    configured directly in config/projects.yaml on the backend. This endpoint
+    returns 403 Forbidden to prevent UI-based project creation.
     """
-    reg = get_registry()
-
-    # Build config dict from the request body
-    dataset_paths = default_dataset_paths(body.id)
-    config = {
-        "name": body.name,
-        "cancer_type": body.cancer_type,
-        "prediction_target": body.prediction_target,
-        "classes": body.classes,
-        "positive_class": body.positive_class,
-        "description": body.description,
-        "dataset": {
-            **dataset_paths,
-            "label_column": body.prediction_target,
-        },
-    }
-
-    try:
-        project = reg.add_project(body.id, config)
-    except ValueError:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Project '{body.id}' already exists",
-        )
-
-    # Create data directories on disk
-    os.makedirs(project.dataset.slides_dir, exist_ok=True)
-    os.makedirs(project.dataset.embeddings_dir, exist_ok=True)
-    logger.info(
-        "Created project '%s' with directories: %s, %s",
-        body.id,
-        project.dataset.slides_dir,
-        project.dataset.embeddings_dir,
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Project creation via API is disabled. "
+            "Projects must be configured in config/projects.yaml on the backend."
+        ),
     )
-
-    # Seed project_slides and project_models if provided
-    slides_assigned = 0
-    models_assigned = 0
-    slide_ids = _dedupe_non_empty_ids(body.slide_ids or [])
-    validated_model_ids = (
-        _validate_project_model_ids(project_id=body.id, model_ids=body.model_ids, reg=reg)
-        if body.model_ids
-        else []
-    )
-
-    try:
-        from . import database as db
-
-        if slide_ids:
-            slides_assigned = await db.assign_slides_to_project(body.id, slide_ids)
-        if validated_model_ids:
-            models_assigned = await db.assign_models_to_project(body.id, validated_model_ids)
-    except Exception as e:
-        logger.warning("Failed to seed slide/model assignments for project '%s': %s", body.id, e)
-
-    return {
-        "project": project.to_dict(),
-        "is_default": body.id == reg.default_project_id,
-        "slides_assigned": slides_assigned,
-        "models_assigned": models_assigned,
-    }
 
 
 @router.get("/{project_id}")

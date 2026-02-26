@@ -140,18 +140,7 @@ async function fetchProjectStatus(projectId: string): Promise<ProjectStatus> {
   return res.json();
 }
 
-async function createProject(body: Record<string, unknown>): Promise<ProjectDetail> {
-  const res = await fetch(`${API_BASE}/api/projects`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `Failed to create project: ${res.status}`);
-  }
-  return res.json();
-}
+// createProject removed - project creation disabled, must use backend config/projects.yaml
 
 async function updateProject(
   projectId: string,
@@ -1082,7 +1071,7 @@ export default function ProjectsPage() {
   }, []);
 
   // Modal state
-  const [showCreate, setShowCreate] = useState(false);
+  // Note: showCreate removed - project creation disabled, must use backend config/projects.yaml
   const [editProject, setEditProject] = useState<ProjectDetail | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectDetail | null>(null);
   const [uploadTarget, setUploadTarget] = useState<ProjectDetail | null>(null);
@@ -1120,21 +1109,7 @@ export default function ProjectsPage() {
   }, [loadProjects]);
 
   // Handlers
-  const handleCreate = async (form: CreateProjectForm) => {
-    const classes = form.classes.split(",").map((c) => c.trim()).filter(Boolean);
-    await createProject({
-      id: form.id,
-      name: form.name,
-      cancer_type: form.cancer_type,
-      prediction_target: form.prediction_target,
-      classes,
-      positive_class: form.positive_class,
-      description: form.description,
-    });
-    toast.success("Project created", `${form.name} is ready for slides`);
-    setShowCreate(false);
-    loadProjects();
-  };
+  // Note: handleCreate removed - project creation disabled, must use backend config/projects.yaml
 
   const handleEdit = async (form: CreateProjectForm) => {
     if (!editProject) return;
@@ -1199,10 +1174,7 @@ export default function ProjectsPage() {
               <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
               Refresh
             </Button>
-            <Button onClick={() => setShowCreate(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              New Project
-            </Button>
+            {/* Project creation disabled - projects must be configured via backend config/projects.yaml */}
           </div>
         </div>
 
@@ -1241,14 +1213,10 @@ export default function ProjectsPage() {
         {!loading && projects.length === 0 && !error && (
           <div className="text-center py-16 bg-white rounded-2xl border border-gray-200">
             <FolderOpen className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900">No projects yet</h3>
+            <h3 className="text-lg font-medium text-gray-900">No projects configured</h3>
             <p className="text-sm text-gray-500 mt-1 max-w-sm mx-auto">
-              Create a project to organize slides by cancer type and prediction target.
+              Projects must be configured in <code className="px-1 py-0.5 bg-gray-100 rounded font-mono text-xs">config/projects.yaml</code> on the backend.
             </p>
-            <Button onClick={() => setShowCreate(true)} className="mt-4">
-              <Plus className="h-4 w-4 mr-2" />
-              Create First Project
-            </Button>
           </div>
         )}
 
@@ -1282,14 +1250,7 @@ export default function ProjectsPage() {
       </div>
 
       {/* Modals */}
-      {showCreate && (
-        <ProjectFormModal
-          mode="create"
-          initial={EMPTY_FORM}
-          onClose={() => setShowCreate(false)}
-          onSave={handleCreate}
-        />
-      )}
+      {/* Project creation modal removed - projects must be configured via backend config/projects.yaml */}
 
       {editProject && (
         <ProjectFormModal
