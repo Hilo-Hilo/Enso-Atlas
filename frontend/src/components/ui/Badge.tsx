@@ -14,11 +14,11 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
   ({ className, variant = "default", size = "md", dot = false, pulse = false, children, ...props }, ref) => {
     const variants = {
       default: "bg-gray-100 text-gray-700 border-gray-200 dark:bg-navy-700 dark:text-gray-300 dark:border-navy-600",
-      success: "bg-gradient-to-r from-green-50 to-emerald-50 text-green-800 border-green-200 dark:from-green-900/40 dark:to-emerald-900/40 dark:text-green-300 dark:border-green-800",
-      warning: "bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 border-amber-200 dark:from-amber-900/40 dark:to-yellow-900/40 dark:text-amber-300 dark:border-amber-800",
-      danger: "bg-gradient-to-r from-red-50 to-rose-50 text-red-800 border-red-200 dark:from-red-900/40 dark:to-rose-900/40 dark:text-red-300 dark:border-red-800",
-      info: "bg-gradient-to-r from-blue-50 to-sky-50 text-blue-800 border-blue-200 dark:from-blue-900/40 dark:to-sky-900/40 dark:text-blue-300 dark:border-blue-800",
-      clinical: "bg-gradient-to-r from-clinical-50 to-cyan-50 text-clinical-800 border-clinical-200 dark:from-clinical-900/40 dark:to-cyan-900/40 dark:text-clinical-300 dark:border-clinical-700",
+      success: "bg-gradient-to-r from-green-50 to-emerald-50 text-green-800 border-green-200 dark:from-green-900/30 dark:to-emerald-900/30 dark:text-green-300 dark:border-green-700 dark:border-green-800",
+      warning: "bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 border-amber-200 dark:from-amber-900/30 dark:to-yellow-900/30 dark:text-amber-300 dark:border-amber-700",
+      danger: "bg-gradient-to-r from-red-50 to-rose-50 text-red-800 border-red-200 dark:from-red-900/30 dark:to-rose-900/30 dark:text-red-300 dark:border-red-700 dark:border-red-800",
+      info: "bg-gradient-to-r from-blue-50 to-sky-50 text-blue-800 border-blue-200 dark:from-blue-900/30 dark:to-sky-900/30 dark:text-blue-300 dark:border-blue-700",
+      clinical: "bg-gradient-to-r from-clinical-50 to-cyan-50 text-clinical-800 border-clinical-200 dark:from-clinical-900/30 dark:to-cyan-900/30 dark:text-clinical-300 dark:border-clinical-700",
     };
 
     const dotColors = {
