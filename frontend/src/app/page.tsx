@@ -153,8 +153,8 @@ function RightSidebarTabs({
               className={cn(
                 "flex-1 flex items-center justify-center gap-1.5 px-1 py-2.5 text-xs font-medium transition-colors border-b-2 min-w-0",
                 isActive
-                  ? "text-clinical-700 border-clinical-500 bg-clinical-50/40"
-                  : "text-gray-400 border-transparent hover:text-gray-600 hover:bg-gray-50"
+                  ? "text-clinical-700 dark:text-clinical-300 border-clinical-500 dark:border-clinical-500 bg-clinical-50/40 dark:bg-clinical-900/40"
+                  : "text-gray-400 dark:text-gray-500 border-transparent hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-navy-700/80"
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
@@ -2278,7 +2278,7 @@ function HomePage() {
     if (activeRightPanel === "pathologist-workspace") {
       if (!selectedSlide) {
         return (
-          <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 text-sm text-violet-800">
+          <div className="rounded-lg border border-violet-200 dark:border-violet-800/70 bg-violet-50 dark:bg-violet-950/40 p-4 text-sm text-violet-800 dark:text-violet-200">
             Select a slide to open Pathologist Workspace.
           </div>
         );
@@ -2591,11 +2591,11 @@ function HomePage() {
 
           {/* Pathologist mode header */}
           {userViewMode === "pathologist" && selectedSlide && (
-            <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-violet-50 border-b border-violet-200">
-              <span className="text-xs sm:text-sm font-medium text-violet-700">
+            <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-violet-50 dark:bg-violet-950/40 border-b border-violet-200 dark:border-violet-800/70">
+              <span className="text-xs sm:text-sm font-medium text-violet-700 dark:text-violet-200">
                 WSI Viewer
               </span>
-              <span className="text-2xs sm:text-xs text-violet-500 hidden sm:inline">
+              <span className="text-2xs sm:text-xs text-violet-500 dark:text-violet-300 hidden sm:inline">
                 Pan, zoom, and annotate
               </span>
             </div>
