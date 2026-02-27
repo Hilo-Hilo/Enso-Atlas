@@ -146,7 +146,7 @@ projects:
   lung-stage:
     name: "Lung Adenocarcinoma - Stage Classification"
     cancer_type: Lung Cancer
-    prediction_target: tumor_stage
+    prediction_target: lung_stage
     classes: ["early", "advanced"]
     positive_class: advanced
     description: "Predicts pathologic stage (early I/II vs advanced III/IV) in lung adenocarcinoma"

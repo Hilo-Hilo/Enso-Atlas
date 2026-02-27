@@ -192,6 +192,8 @@ def validate_project_paths(config_path: Path) -> List[str]:
 
     registry = ProjectRegistry(config_path)
     projects = registry.list_projects()
+    top_level_classification_models = registry.classification_models
+    has_top_level_classification_catalog = bool(top_level_classification_models)
     if not projects:
         return [f"No projects found in {config_path}"]
 
@@ -248,6 +250,30 @@ def validate_project_paths(config_path: Path) -> List[str]:
                     f"{pid}: dataset.{field_name} resolves outside expected project root "
                     f"'{expected_root_abs}': '{configured_abs}' -> '{resolved}'{symlink_hint}"
                 )
+
+        project_classification_models = project.classification_models or []
+        if (
+            project_classification_models
+            and project.prediction_target not in project_classification_models
+        ):
+            errors.append(
+                f"{pid}: prediction_target '{project.prediction_target}' must be listed in "
+                "project.classification_models when that list is non-empty"
+            )
+
+        if has_top_level_classification_catalog:
+            if project.prediction_target not in top_level_classification_models:
+                errors.append(
+                    f"{pid}: prediction_target '{project.prediction_target}' not found in "
+                    "top-level classification_models catalog"
+                )
+
+            for model_id in project_classification_models:
+                if model_id not in top_level_classification_models:
+                    errors.append(
+                        f"{pid}: project.classification_models includes '{model_id}' not found in "
+                        "top-level classification_models catalog"
+                    )
 
     # 2) Ensure no projects share exact dataset paths
     seen = {}

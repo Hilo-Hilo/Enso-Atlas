@@ -57,6 +57,12 @@ def _write_project_config(tmp_path: Path, *, slides_dir: str, embeddings_dir: st
     return cfg
 
 
+def _write_config_text(tmp_path: Path, text: str) -> Path:
+    cfg = tmp_path / "projects.yaml"
+    cfg.write_text(textwrap.dedent(text).strip() + "\n", encoding="utf-8")
+    return cfg
+
+
 def test_project_config_defaults_are_project_scoped():
     proj = ProjectConfig.from_dict(
         "demo-proj",
@@ -123,6 +129,96 @@ def test_modularity_validation_fails_for_inconsistent_dataset_relationships(tmp_
     assert result.returncode != 0
     assert "embeddings_dir must be one of" in output
     assert "labels_file must be one of" in output
+
+
+def test_validate_project_paths_requires_prediction_target_in_project_classification_models(
+    tmp_path: Path,
+):
+    cfg = _write_config_text(
+        tmp_path,
+        """
+        projects:
+          demo-proj:
+            name: Demo
+            cancer_type: Demo Cancer
+            prediction_target: lung_stage
+            classification_models:
+              - tumor_grade
+            dataset:
+              slides_dir: data/projects/demo-proj/slides
+              embeddings_dir: data/projects/demo-proj/embeddings
+              labels_file: data/projects/demo-proj/labels.csv
+        """,
+    )
+
+    errors = validator_module.validate_project_paths(cfg)
+    assert any(
+        "prediction_target 'lung_stage' must be listed in project.classification_models"
+        in err
+        for err in errors
+    )
+
+
+def test_validate_project_paths_flags_prediction_target_missing_from_top_level_catalog(tmp_path: Path):
+    cfg = _write_config_text(
+        tmp_path,
+        """
+        classification_models:
+          tumor_grade:
+            model_dir: transmil_grade
+            display_name: Tumor Grade
+        projects:
+          demo-proj:
+            name: Demo
+            cancer_type: Demo Cancer
+            prediction_target: lung_stage
+            dataset:
+              slides_dir: data/projects/demo-proj/slides
+              embeddings_dir: data/projects/demo-proj/embeddings
+              labels_file: data/projects/demo-proj/labels.csv
+        """,
+    )
+
+    errors = validator_module.validate_project_paths(cfg)
+    assert any(
+        "prediction_target 'lung_stage' not found in top-level classification_models catalog"
+        in err
+        for err in errors
+    )
+
+
+def test_validate_project_paths_flags_unknown_project_classification_model_in_top_level_catalog(
+    tmp_path: Path,
+):
+    cfg = _write_config_text(
+        tmp_path,
+        """
+        classification_models:
+          lung_stage:
+            model_dir: luad_transmil_stage
+            display_name: Tumor Stage
+        projects:
+          demo-proj:
+            name: Demo
+            cancer_type: Demo Cancer
+            prediction_target: lung_stage
+            classification_models:
+              - lung_stage
+              - tumor_grade
+            dataset:
+              slides_dir: data/projects/demo-proj/slides
+              embeddings_dir: data/projects/demo-proj/embeddings
+              labels_file: data/projects/demo-proj/labels.csv
+        """,
+    )
+
+    errors = validator_module.validate_project_paths(cfg)
+    assert any(
+        "project.classification_models includes 'tumor_grade' not found in top-level "
+        "classification_models catalog"
+        in err
+        for err in errors
+    )
 
 
 def test_legacy_pattern_scan_detects_forbidden_snippets(tmp_path: Path):
