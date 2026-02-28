@@ -246,7 +246,7 @@ const tourSteps: Step[] = [
         </p>
       </div>
     ),
-    placement: "auto" as const,
+    placement: "left" as const,
     disableBeacon: true,
     data: {
       icon: <BarChart3 className="w-6 h-6 text-white" />,
@@ -271,7 +271,7 @@ const tourSteps: Step[] = [
         </p>
       </div>
     ),
-    placement: "auto" as const,
+    placement: "left" as const,
     disableBeacon: true,
     data: {
       icon: <Layers className="w-6 h-6 text-white" />,
@@ -296,7 +296,7 @@ const tourSteps: Step[] = [
         </p>
       </div>
     ),
-    placement: "auto" as const,
+    placement: "left" as const,
     disableBeacon: true,
     data: {
       icon: <Sparkles className="w-6 h-6 text-white" />,
@@ -321,7 +321,7 @@ const tourSteps: Step[] = [
         </p>
       </div>
     ),
-    placement: "auto" as const,
+    placement: "left" as const,
     disableBeacon: true,
     data: {
       icon: <FileText className="w-6 h-6 text-white" />,
