@@ -334,6 +334,7 @@ function HomePage() {
     report: StructuredReport | null;
     qc: SlideQCMetrics | null;
   } | null>(null);
+  const slideListRef = useRef<SlideInfo[]>([]);
 
   // Inject / clear mock data when demo mode toggles
   useEffect(() => {
@@ -345,11 +346,43 @@ function HomePage() {
         report: agentReport,
         qc: slideQCMetrics,
       };
-      // Inject mock data so every tour target has content
-      setSelectedSlide(DEMO_SLIDE);
-      setDemoAnalysisResult(DEMO_ANALYSIS_RESULT);
-      setMultiModelResult(DEMO_MULTI_MODEL);
-      setAgentReport(DEMO_REPORT);
+
+      // Keep the currently selected real WSI when possible.
+      // Falling back to DEMO_SLIDE here causes step 3 (WSI viewer) to show
+      // "WSI not available" in connected demos because TCGA-DEMO-001 is synthetic.
+      const fallbackSlide =
+        slideListRef.current.find((slide) => slide.hasWsi !== false) ??
+        slideListRef.current[0] ??
+        null;
+      const demoViewerSlide =
+        (selectedSlide && selectedSlide.hasWsi !== false ? selectedSlide : null) ??
+        fallbackSlide ??
+        selectedSlide ??
+        DEMO_SLIDE;
+
+      if (selectedSlide?.id !== demoViewerSlide.id) {
+        setSelectedSlide(demoViewerSlide);
+      }
+
+      const demoAnalysisSlideInfo = {
+        ...DEMO_ANALYSIS_RESULT.slideInfo,
+        ...demoViewerSlide,
+        patient: demoViewerSlide.patient ?? DEMO_ANALYSIS_RESULT.slideInfo.patient,
+      };
+
+      setDemoAnalysisResult({
+        ...DEMO_ANALYSIS_RESULT,
+        slideInfo: demoAnalysisSlideInfo,
+      });
+      setMultiModelResult({
+        ...DEMO_MULTI_MODEL,
+        slideId: demoAnalysisSlideInfo.id,
+      });
+      setAgentReport({
+        ...DEMO_REPORT,
+        caseId: demoAnalysisSlideInfo.id,
+        patientContext: demoAnalysisSlideInfo.patient ?? DEMO_REPORT.patientContext,
+      });
       setSlideQCMetrics(DEMO_QC_METRICS);
       setIsCachedResult(false);
       setCachedResultTimestamp(null);
@@ -456,6 +489,10 @@ function HomePage() {
   const [slideListLoading, setSlideListLoading] = useState(true);
   const [slideListError, setSlideListError] = useState<string | null>(null);
   const [slideIndex, setSlideIndex] = useState<number>(-1);
+
+  useEffect(() => {
+    slideListRef.current = slideList;
+  }, [slideList]);
 
   // Refs for panel focusing
   const slideSelectorRef = useRef<HTMLElement>(null);
