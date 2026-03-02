@@ -1,0 +1,71 @@
+# Enso Atlas isolated development stack (performance lab / DGX)
+# Safety guardrail: this stack must never point to production databases or services.
+# No schema migrations against production DB are allowed without explicit approval.
+services:
+  enso-atlas-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: enso-atlas-dev
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
+      NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
+      ENSO_CONFIG: /app/config/default.yaml
+      TRANSFORMERS_CACHE: /app/cache/huggingface
+      HF_HOME: /app/cache/huggingface
+      MIL_ARCHITECTURE: transmil
+      MIL_THRESHOLD_CONFIG: /app/models/threshold_config.json
+      TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-0}"
+      HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
+
+      # Dev-only DB endpoint. Do not connect this stack to production DB.
+      DATABASE_URL: "${DEV_DATABASE_URL:-postgresql://enso_dev:enso_dev_2026@atlas-dev-db:5432/enso_atlas_dev}"
+      DB_ENVIRONMENT: dev
+      DB_MIGRATIONS_REQUIRE_APPROVAL: "true"
+      DB_SAFETY_NOTICE: "NO_SCHEMA_MIGRATIONS_AGAINST_PROD_WITHOUT_APPROVAL"
+    volumes:
+      - ${ENSO_DEV_DATA_DIR:-../data-dev}:/app/data
+      - ${ENSO_DEV_OUTPUTS_DIR:-../outputs-dev}:/app/outputs
+      - atlas-dev-cache:/app/cache
+      - ${HF_CACHE_DIR:-../.cache/huggingface}:/root/.cache/huggingface
+      - ${ENSO_MODELS_DIR:-../models}:/app/models
+      - ${ENSO_CONFIG_DIR:-../config}:/app/config
+      - ${ENSO_SRC_DIR:-../src}:/app/src:ro
+    ports:
+      - "17862:7860"
+      - "18003:8000"
+    restart: unless-stopped
+    depends_on:
+      atlas-dev-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  atlas-dev-db:
+    image: postgres:16
+    container_name: atlas-dev-db
+    environment:
+      POSTGRES_DB: "${DEV_POSTGRES_DB:-enso_atlas_dev}"
+      POSTGRES_USER: "${DEV_POSTGRES_USER:-enso_dev}"
+      POSTGRES_PASSWORD: "${DEV_POSTGRES_PASSWORD:-enso_dev_2026}"
+    volumes:
+      - atlas-dev-pgdata:/var/lib/postgresql/data
+    ports:
+      - "15433:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DEV_POSTGRES_USER:-enso_dev} -d ${DEV_POSTGRES_DB:-enso_atlas_dev}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  atlas-dev-cache:
+    driver: local
+  atlas-dev-pgdata:
+    driver: local
