@@ -2414,25 +2414,6 @@ function HomePage() {
     [scopedProjectModels]
   );
 
-  useEffect(() => {
-    if (demoMode || !selectedSlide?.id || !effectiveHeatmapModel) return;
-
-    // Warm default model heatmap shortly after slide selection so first render
-    // usually hits cache instead of blocking on attention inference.
-    const timer = window.setTimeout(() => {
-      void prewarmHeatmapsForSlide(selectedSlide.id, [effectiveHeatmapModel], {
-        maxModels: 1,
-        reason: "slide-select",
-      });
-    }, 350);
-
-    return () => window.clearTimeout(timer);
-  }, [demoMode, selectedSlide?.id, effectiveHeatmapModel, prewarmHeatmapsForSlide]);
-
-  const availableHeatmapModels = useMemo(
-    () => scopedProjectModels.map((m) => ({ id: m.id, name: m.name })),
-    [scopedProjectModels]
-  );
 
   const primaryMultiModelPrediction =
     multiModelResult?.predictions?.[currentProject.prediction_target];
