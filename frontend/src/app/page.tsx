@@ -2452,7 +2452,7 @@ function HomePage() {
         onSlideSelect={handleSlideSelect}
         onAnalyze={handleAnalyze}
         onGenerateEmbeddings={handleGenerateEmbeddings}
-        isAnalyzing={isAnalyzing}
+        isAnalyzing={isAnyAnalysisRunning}
         analysisStep={analysisStep}
         selectedModels={selectedModels}
         onModelsChange={setSelectedModels}
@@ -2473,7 +2473,7 @@ function HomePage() {
         onResolutionChange={setResolutionLevel}
         onAnalyze={handleAnalyze}
         onGenerateEmbeddings={handleGenerateEmbeddings}
-        isAnalyzing={isAnalyzing}
+        isAnalyzing={isAnyAnalysisRunning}
         analysisStep={analysisStepForControls}
         isGeneratingEmbeddings={isGeneratingEmbeddings}
         embeddingProgress={embeddingProgress}
@@ -2589,12 +2589,12 @@ function HomePage() {
         >
           <EvidencePanel
             patches={significantEvidencePatches}
-            isLoading={isAnalyzing}
+            isLoading={isAnyAnalysisRunning}
             onPatchClick={handlePatchClick}
             onPatchZoom={handlePatchZoom}
             onFindSimilar={handleVisualSearch}
             selectedPatchId={selectedPatchId}
-            error={!isAnalyzing && error && !analysisResult ? error : null}
+            error={!isAnyAnalysisRunning && error && !analysisResult ? error : null}
             onRetry={retryAnalysis}
             isSearchingVisual={isSearchingVisual}
           />
@@ -2612,10 +2612,10 @@ function HomePage() {
         >
           <PredictionPanel
             prediction={sidebarPrediction}
-            isLoading={isAnalyzing}
+            isLoading={isAnyAnalysisRunning}
             processingTime={sidebarPredictionProcessingTime}
             analysisStep={analysisStep}
-            error={!isAnalyzing && !analysisResult && !multiModelResult ? error : null}
+            error={!isAnyAnalysisRunning && !analysisResult && !multiModelResult ? error : null}
             onRetry={retryAnalysis}
             qcMetrics={slideQCMetrics}
             isCached={sidebarPredictionIsCached}
@@ -2675,9 +2675,9 @@ function HomePage() {
         <div data-demo="similar-cases">
           <SimilarCasesPanel
             cases={visualSearchResults.length > 0 ? visualSearchResults : (analysisResult?.similarCases ?? [])}
-            isLoading={isAnalyzing || isSearchingVisual}
+            isLoading={isAnyAnalysisRunning || isSearchingVisual}
             onCaseClick={handleCaseClick}
-            error={visualSearchError || (!isAnalyzing && error && !analysisResult ? error : null)}
+            error={visualSearchError || (!isAnyAnalysisRunning && error && !analysisResult ? error : null)}
             onRetry={visualSearchResults.length > 0 ? () => {
               setVisualSearchResults([]);
               setVisualSearchError(null);
@@ -2736,7 +2736,7 @@ function HomePage() {
       {/* Header */}
       <Header
         isConnected={isConnected}
-        isProcessing={isAnalyzing || isGeneratingReport}
+        isProcessing={isAnyAnalysisRunning || isGeneratingReport}
         version="0.1.0"
         institutionName="Enso Labs"
         userName="Clinician"

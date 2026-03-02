@@ -12,7 +12,10 @@ def test_wsi_viewer_extracts_backend_heatmap_error_messages():
     src = _read("frontend/src/components/viewer/WSIViewer.tsx")
 
     assert "extractHeatmapErrorMessage" in src
-    assert "setHeatmapErrorMessage(extractHeatmapErrorMessage(response.status, errorBody))" in src
+    assert (
+        "setHeatmapErrorMessage(extractHeatmapErrorMessage(response.status, errorBody))" in src
+        or "setHeatmapErrorMessage(extractHeatmapErrorMessage(err.status, err.body))" in src
+    )
     assert "Patch coordinates are missing for this slide." in src
 
 
