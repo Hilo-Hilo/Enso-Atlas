@@ -508,6 +508,8 @@ function HomePage() {
   const visualSearchRequestRef = useRef(0);
   const embeddingRequestRef = useRef(0);
   const multiModelRequestRef = useRef(0);
+  const heatmapPrewarmAbortRef = useRef<AbortController | null>(null);
+  const heatmapPrewarmedKeysRef = useRef<Set<string>>(new Set());
 
   // Current viewer zoom level (synced from WSIViewer)
   const [viewerZoom, setViewerZoom] = useState(1);
@@ -557,6 +559,20 @@ function HomePage() {
     setIsSearching(false);
     setIsSearchingVisual(false);
   }, [selectedSlide?.id]);
+
+  // Cancel any in-flight heatmap prewarm whenever scope changes.
+  useEffect(() => {
+    heatmapPrewarmAbortRef.current?.abort();
+    heatmapPrewarmAbortRef.current = null;
+    heatmapPrewarmedKeysRef.current.clear();
+  }, [selectedSlide?.id, currentProject.id]);
+
+  useEffect(() => {
+    return () => {
+      heatmapPrewarmAbortRef.current?.abort();
+      heatmapPrewarmAbortRef.current = null;
+    };
+  }, []);
 
   // UX gating: hide low-signal evidence by default
   const EVIDENCE_SIGNIFICANCE_THRESHOLD = 0.6;
@@ -1462,6 +1478,75 @@ function HomePage() {
     }
   }, [selectedSlide, resolutionLevel, forceReembed, toast, currentProject.id]);
 
+  const prewarmHeatmapsForSlide = useCallback(
+    async (
+      slideId: string,
+      modelIds: string[],
+      options: { maxModels?: number; reason?: string } = {}
+    ) => {
+      if (!slideId || modelIds.length === 0) return;
+
+      const maxModels = Math.max(1, options.maxModels ?? 2);
+      const uniqueModels = Array.from(new Set(modelIds.filter(Boolean))).slice(0, maxModels);
+      if (uniqueModels.length === 0) return;
+
+      // Replace any previous prewarm run to avoid stale work when user changes slides.
+      heatmapPrewarmAbortRef.current?.abort();
+      const controller = new AbortController();
+      heatmapPrewarmAbortRef.current = controller;
+
+      for (const modelId of uniqueModels) {
+        if (controller.signal.aborted) return;
+
+        const cacheKey = [
+          currentProject.id,
+          slideId,
+          modelId,
+          heatmapLevel,
+          debouncedAlphaPower.toFixed(2),
+          heatmapSmooth ? "smooth" : "truthful",
+        ].join("|");
+
+        if (heatmapPrewarmedKeysRef.current.has(cacheKey)) {
+          continue;
+        }
+
+        const heatmapUrl = getHeatmapUrl(
+          slideId,
+          modelId,
+          heatmapLevel,
+          debouncedAlphaPower,
+          currentProject.id,
+          heatmapSmooth
+        );
+
+        try {
+          const response = await fetch(heatmapUrl, {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            continue;
+          }
+          // Read body to completion so backend generation + cache write fully finishes.
+          await response.blob();
+          heatmapPrewarmedKeysRef.current.add(cacheKey);
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            console.debug("Heatmap prewarm skipped", {
+              slideId,
+              modelId,
+              reason: options.reason,
+              error,
+            });
+          }
+        }
+      }
+    },
+    [currentProject.id, heatmapLevel, debouncedAlphaPower, heatmapSmooth]
+  );
+
   // Handle multi-model analysis with improved error handling and progress
   const handleMultiModelAnalyze = useCallback(async (forceRefresh: boolean = false) => {
     if (!selectedSlide) return;
@@ -1600,6 +1685,24 @@ function HomePage() {
 
       setMultiModelResult(scopedResult);
 
+      // Heatmap throughput fix: prewarm cache for the most likely model(s)
+      // so first overlay render doesn't pay full attention inference latency.
+      const preferredHeatmapModel =
+        heatmapModel && modelIdsForAnalysis.includes(heatmapModel)
+          ? heatmapModel
+          : (modelIdsForAnalysis[0] ?? null);
+
+      if (preferredHeatmapModel) {
+        const warmQueue = [
+          preferredHeatmapModel,
+          ...modelIdsForAnalysis.filter((mid) => mid !== preferredHeatmapModel),
+        ];
+        void prewarmHeatmapsForSlide(slideId, warmQueue, {
+          maxModels: Math.min(2, warmQueue.length),
+          reason: "post-analysis",
+        });
+      }
+
       // Success toast
       toast.removeToast(toastId);
       toast.success(
@@ -1681,7 +1784,17 @@ function HomePage() {
         setEmbeddingProgress(null);
       }
     }
-  }, [selectedSlide, selectedModels, scopedProjectModels.length, resolutionLevel, forceReembed, toast, currentProject.id]);
+  }, [
+    selectedSlide,
+    selectedModels,
+    scopedProjectModels.length,
+    resolutionLevel,
+    forceReembed,
+    toast,
+    currentProject.id,
+    heatmapModel,
+    prewarmHeatmapsForSlide,
+  ]);
   // Handle analyze button
   const handleAnalyze = useCallback(async () => {
     if (!selectedSlide) return;
@@ -2237,6 +2350,26 @@ function HomePage() {
     maxValue: 1,
     colorScale: "viridis" as const,
   } : undefined;
+
+  useEffect(() => {
+    if (demoMode || !selectedSlide?.id || !effectiveHeatmapModel) return;
+
+    // Warm default model heatmap shortly after slide selection so first render
+    // usually hits cache instead of blocking on attention inference.
+    const timer = window.setTimeout(() => {
+      void prewarmHeatmapsForSlide(selectedSlide.id, [effectiveHeatmapModel], {
+        maxModels: 1,
+        reason: "slide-select",
+      });
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [demoMode, selectedSlide?.id, effectiveHeatmapModel, prewarmHeatmapsForSlide]);
+
+  const availableHeatmapModels = useMemo(
+    () => scopedProjectModels.map((m) => ({ id: m.id, name: m.name })),
+    [scopedProjectModels]
+  );
 
   const primaryMultiModelPrediction =
     multiModelResult?.predictions?.[currentProject.prediction_target];
