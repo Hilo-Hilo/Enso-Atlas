@@ -9,24 +9,18 @@ import { Footer } from "@/components/layout/Footer";
 import { DemoMode, WelcomeModal, DEMO_SLIDE, DEMO_ANALYSIS_RESULT, DEMO_MULTI_MODEL, DEMO_REPORT, DEMO_QC_METRICS } from "@/components/demo";
 import {
   SlideSelector,
-  PredictionPanel,
-  MultiModelPredictionPanel,
-  EvidencePanel,
-  SimilarCasesPanel,
-  ReportPanel,
-  SemanticSearchPanel,
   CaseNotesPanel,
-  OncologistSummaryView,
-  PathologistView,
-  AIAssistantPanel,
   AnalysisControls,
-  OutlierDetectorPanel,
-  PatchClassifierPanel,
   recordAnalysis,
   getCaseNotes,
 } from "@/components/panels";
 import type { UserViewMode } from "@/components/layout/Header";
-import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
+import {
+  ensureActiveRightPanel,
+  getRightPanelAfterViewModeChange,
+  getRightSidebarPanelOptions,
+  type RightSidebarPanelKey,
+} from "@/components/layout/rightSidebarPanels";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
 import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords, getProjectAvailableModels, type AvailableModelDetail } from "@/lib/api";
@@ -49,23 +43,66 @@ const WSIViewer = nextDynamic(
   { ssr: false, loading: () => <div className="h-full flex items-center justify-center bg-gray-100 rounded-lg">Loading viewer...</div> }
 );
 
+const PanelLoadingFallback = () => (
+  <div className="rounded-lg border border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-800/70 p-4 text-sm text-gray-500 dark:text-gray-400">
+    Loading panel…
+  </div>
+);
+
+const PredictionPanel = nextDynamic(
+  () => import("@/components/panels/PredictionPanel").then((mod) => mod.PredictionPanel),
+  { loading: PanelLoadingFallback }
+);
+const MultiModelPredictionPanel = nextDynamic(
+  () => import("@/components/panels/MultiModelPredictionPanel").then((mod) => mod.MultiModelPredictionPanel),
+  { loading: PanelLoadingFallback }
+);
+const EvidencePanel = nextDynamic(
+  () => import("@/components/panels/EvidencePanel").then((mod) => mod.EvidencePanel),
+  { loading: PanelLoadingFallback }
+);
+const SimilarCasesPanel = nextDynamic(
+  () => import("@/components/panels/SimilarCasesPanel").then((mod) => mod.SimilarCasesPanel),
+  { loading: PanelLoadingFallback }
+);
+const ReportPanel = nextDynamic(
+  () => import("@/components/panels/ReportPanel").then((mod) => mod.ReportPanel),
+  { loading: PanelLoadingFallback }
+);
+const SemanticSearchPanel = nextDynamic(
+  () => import("@/components/panels/SemanticSearchPanel").then((mod) => mod.SemanticSearchPanel),
+  { loading: PanelLoadingFallback }
+);
+const OncologistSummaryView = nextDynamic(
+  () => import("@/components/panels/OncologistSummaryView").then((mod) => mod.OncologistSummaryView),
+  { loading: () => <div className="h-full rounded-lg bg-gray-100 dark:bg-navy-800 animate-pulse" /> }
+);
+const PathologistView = nextDynamic(
+  () => import("@/components/panels/PathologistView").then((mod) => mod.PathologistView),
+  { loading: PanelLoadingFallback }
+);
+const OutlierDetectorPanel = nextDynamic(
+  () => import("@/components/panels/OutlierDetectorPanel").then((mod) => mod.OutlierDetectorPanel),
+  { loading: PanelLoadingFallback }
+);
+
+const PatchZoomModal = nextDynamic(
+  () => import("@/components/modals/PatchZoomModal").then((mod) => mod.PatchZoomModal),
+  { ssr: false }
+);
+const KeyboardShortcutsModal = nextDynamic(
+  () => import("@/components/modals/KeyboardShortcutsModal").then((mod) => mod.KeyboardShortcutsModal),
+  { ssr: false }
+);
+
 const API_BASE = getClientApiBaseUrl();
 
 // Fallback heatmap models -- derived from shared model config
 
 // Mobile Panel Tab Component
 type MobilePanelTab = "slides" | "results";
-type RightSidebarPanelKey =
-  | "pathologist-workspace"
-  | "medgemma"
-  | "evidence"
-  | "prediction"
-  | "multi-model"
-  | "semantic-search"
-  | "similar-cases"
-  | "outlier-detector";
 
-function MobilePanelTabs({
+const MobilePanelTabs = React.memo(function MobilePanelTabs({
   activeTab,
   onTabChange,
   hasResults,
@@ -105,7 +142,7 @@ function MobilePanelTabs({
       </button>
     </div>
   );
-}
+});
 
 // Icon mapping for right sidebar panel tabs
 const RIGHT_PANEL_ICONS: Record<RightSidebarPanelKey, React.ElementType> = {
@@ -126,7 +163,7 @@ const DEMO_RIGHT_PANEL_BY_STEP: Partial<Record<number, RightSidebarPanelKey>> = 
   6: "medgemma",
 };
 
-function RightSidebarTabs({
+const RightSidebarTabs = React.memo(function RightSidebarTabs({
   options,
   activePanel,
   onPanelChange,
@@ -165,7 +202,7 @@ function RightSidebarTabs({
       </nav>
     </div>
   );
-}
+});
 
 function humanizeModelId(modelId: string): string {
   return modelId
@@ -244,11 +281,7 @@ function HomePage() {
   const [userViewMode, setUserViewMode] = useState<UserViewMode>("oncologist");
   const handleUserViewModeChange = useCallback((mode: UserViewMode) => {
     setUserViewMode(mode);
-    setActiveRightPanel((prev) => {
-      if (mode === "pathologist") return "pathologist-workspace";
-      if (prev === "pathologist-workspace") return "medgemma";
-      return prev;
-    });
+    setActiveRightPanel((prev) => getRightPanelAfterViewModeChange(mode, prev));
   }, []);
 
   // View mode: "wsi" for full WSI viewer, "summary" for oncologist summary
@@ -581,28 +614,18 @@ function HomePage() {
     Array<{ value: RightSidebarPanelKey; label: string }>
   >(
     () =>
-      userViewMode === "pathologist"
-        ? [
-            { value: "pathologist-workspace" as const, label: "Pathologist Workspace" },
-            { value: "semantic-search", label: "MedSigLIP Semantic Search" },
-            { value: "evidence", label: "Evidence Patches" },
-            { value: "outlier-detector", label: "Outlier Tissue Detector" },
-          ]
-        : [
-            { value: "medgemma", label: "MedGemma" },
-            { value: "prediction", label: primaryPredictionPanelLabel },
-            ...(showMultiModelPanel
-              ? [{ value: "multi-model" as const, label: "Survival AI Predictions" }]
-              : []),
-            { value: "semantic-search", label: "Semantic Search" },
-            { value: "similar-cases", label: "Similar Cases" },
-          ],
+      getRightSidebarPanelOptions({
+        userViewMode,
+        showMultiModelPanel,
+        primaryPredictionPanelLabel,
+      }),
     [showMultiModelPanel, userViewMode, primaryPredictionPanelLabel]
   );
 
   useEffect(() => {
-    if (!rightSidebarPanelOptions.some((panel) => panel.value === activeRightPanel)) {
-      setActiveRightPanel(rightSidebarPanelOptions[0]?.value ?? "medgemma");
+    const ensuredPanel = ensureActiveRightPanel(activeRightPanel, rightSidebarPanelOptions);
+    if (ensuredPanel !== activeRightPanel) {
+      setActiveRightPanel(ensuredPanel);
     }
   }, [activeRightPanel, rightSidebarPanelOptions]);
 
@@ -1989,6 +2012,7 @@ function HomePage() {
     selectedSlide,
     isAnalyzing,
     analysisResult,
+    multiModelResult,
     report,
     isGeneratingReport,
   ]);
@@ -2182,12 +2206,14 @@ function HomePage() {
   }, [showOutlierHeatmap, outlierHeatmapData, showClassifyHeatmap, classifyResult]);
 
   // Load patch coordinates when slide changes (for spatial selection)
+  const selectedSlideId = selectedSlide?.id ?? null;
+
   useEffect(() => {
-    if (!selectedSlide) {
+    if (!selectedSlideId) {
       setPatchCoordinates(null);
       return;
     }
-    getPatchCoords(selectedSlide.id)
+    getPatchCoords(selectedSlideId)
       .then((result) => {
         setPatchCoordinates(result.coords.map(([x, y]) => ({ x, y })));
       })
@@ -2195,7 +2221,7 @@ function HomePage() {
         // Coordinates not available -- spatial selection will be disabled
         setPatchCoordinates(null);
       });
-  }, [selectedSlide?.id]);
+  }, [selectedSlideId]);
 
   // Handler for spatial patch selection on the WSI viewer
   const handlePatchSelectedOnSlide = useCallback((patchIdx: number, x: number, y: number) => {
@@ -2208,7 +2234,7 @@ function HomePage() {
   }, [patchSelectionMode]);
 
   // Get DZI and heatmap URLs
-  const dziUrl = selectedSlide ? getDziUrl(selectedSlide.id, currentProject?.id) : undefined;
+  const dziUrl = selectedSlideId ? getDziUrl(selectedSlideId, currentProject?.id) : undefined;
   
   // Build heatmap data with selected model
   const scopedProjectModelIds = useMemo(
@@ -2222,30 +2248,52 @@ function HomePage() {
   const effectiveHeatmapModel =
     normalizedHeatmapModel ?? scopedProjectModels[0]?.id ?? currentProject?.prediction_target ?? null;
 
-  const heatmapData = selectedSlide && effectiveHeatmapModel ? {
-    imageUrl: getHeatmapUrl(
-      selectedSlide.id,
+  const heatmapData = useMemo(
+    () =>
+      selectedSlideId && effectiveHeatmapModel
+        ? {
+            imageUrl: getHeatmapUrl(
+              selectedSlideId,
+              effectiveHeatmapModel,
+              heatmapLevel,
+              debouncedAlphaPower,
+              currentProject?.id,
+              // Old behavior: interpolated mode uses backend Gaussian smoothing.
+              heatmapSmooth,
+            ),
+            minValue: 0,
+            maxValue: 1,
+            colorScale: "viridis" as const,
+          }
+        : undefined,
+    [
+      selectedSlideId,
       effectiveHeatmapModel,
       heatmapLevel,
       debouncedAlphaPower,
       currentProject?.id,
-      // Old behavior: interpolated mode uses backend Gaussian smoothing.
       heatmapSmooth,
-    ),
-    minValue: 0,
-    maxValue: 1,
-    colorScale: "viridis" as const,
-  } : undefined;
+    ]
+  );
+
+  const availableHeatmapModels = useMemo(
+    () => scopedProjectModels.map((m) => ({ id: m.id, name: m.name })),
+    [scopedProjectModels]
+  );
 
   const primaryMultiModelPrediction =
     multiModelResult?.predictions?.[currentProject.prediction_target];
-  const sidebarPrediction = primaryMultiModelPrediction
-    ? {
-        score: primaryMultiModelPrediction.score,
-        label: primaryMultiModelPrediction.label,
-        confidence: primaryMultiModelPrediction.confidence,
-      }
-    : analysisResult?.prediction ?? null;
+  const sidebarPrediction = useMemo(
+    () =>
+      primaryMultiModelPrediction
+        ? {
+            score: primaryMultiModelPrediction.score,
+            label: primaryMultiModelPrediction.label,
+            confidence: primaryMultiModelPrediction.confidence,
+          }
+        : analysisResult?.prediction ?? null,
+    [primaryMultiModelPrediction, analysisResult?.prediction]
+  );
   const sidebarPredictionProcessingTime = primaryMultiModelPrediction
     ? multiModelResult?.processingTimeMs
     : analysisResult?.processingTimeMs;
@@ -2253,7 +2301,10 @@ function HomePage() {
     isCachedResult && (!!primaryMultiModelPrediction || !analysisResult);
 
   // Determine if we have results to show (cached multi-model counts too)
-  const hasResults = !!analysisResult || !!multiModelResult || isAnalyzing;
+  const hasResults = useMemo(
+    () => !!analysisResult || !!multiModelResult || isAnalyzing,
+    [analysisResult, multiModelResult, isAnalyzing]
+  );
 
   // Render left sidebar content
   const renderLeftSidebarContent = () => (
@@ -2695,7 +2746,7 @@ function HomePage() {
                 heatmapSmooth={heatmapSmooth}
                 onHeatmapSmoothChange={setHeatmapSmooth}
                 onHeatmapModelChange={setHeatmapModel}
-                availableModels={scopedProjectModels.map((m) => ({ id: m.id, name: m.name }))}
+                availableModels={availableHeatmapModels}
                 onControlsReady={(controls) => { viewerControlsRef.current = controls; }}
                 onZoomChange={setViewerZoom}
                 annotations={annotations}
@@ -2790,21 +2841,25 @@ function HomePage() {
       </div>
 
       {/* Patch Zoom Modal */}
-      <PatchZoomModal
-        isOpen={zoomModalOpen}
-        onClose={() => setZoomModalOpen(false)}
-        patch={zoomedPatch}
-        allPatches={analysisResult?.evidencePatches ?? []}
-        onNavigate={handlePatchModalNavigate}
-        slideId={selectedSlide?.id}
-      />
+      {zoomModalOpen && (
+        <PatchZoomModal
+          isOpen={zoomModalOpen}
+          onClose={() => setZoomModalOpen(false)}
+          patch={zoomedPatch}
+          allPatches={analysisResult?.evidencePatches ?? []}
+          onNavigate={handlePatchModalNavigate}
+          slideId={selectedSlide?.id}
+        />
+      )}
 
       {/* Keyboard Shortcuts Modal */}
-      <KeyboardShortcutsModal
-        isOpen={shortcutsModalOpen}
-        onClose={() => setShortcutsModalOpen(false)}
-        shortcuts={shortcuts}
-      />
+      {shortcutsModalOpen && (
+        <KeyboardShortcutsModal
+          isOpen={shortcutsModalOpen}
+          onClose={() => setShortcutsModalOpen(false)}
+          shortcuts={shortcuts}
+        />
+      )}
 
       {/* Demo Mode */}
       <DemoMode
