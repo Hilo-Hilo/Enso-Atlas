@@ -6,6 +6,7 @@ import { ToastProvider } from "@/components/ui";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { DisclaimerBanner } from "@/components/layout/DisclaimerBanner";
 import { ThemeScript } from "@/components/ThemeScript";
+import { PerfObserver } from "@/components/PerfObserver";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -51,6 +52,7 @@ export default function RootLayout({
           <ProjectProvider>
             <DisclaimerBanner />
             <ErrorBoundary>{children}</ErrorBoundary>
+            <PerfObserver />
           </ProjectProvider>
         </ToastProvider>
       </body>

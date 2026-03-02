@@ -11,12 +11,15 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 import asyncio
 import logging
+import os
 import json
 import base64
 import io
 import time
 import hashlib
+import uuid
 from datetime import datetime
+from threading import Lock
 from .embedding_tasks import task_manager, TaskStatus, EmbeddingTask
 from .report_tasks import report_task_manager, ReportTaskStatus, ReportTask
 from .batch_tasks import batch_task_manager, BatchTaskStatus, BatchTask, BatchSlideResult
@@ -31,6 +34,7 @@ from .model_scope import (
 )
 from .heatmap_grid import compute_heatmap_grid_coverage
 from collections import deque
+from .perf_observability import InMemoryLatencyTracker, RequestLatencyRecord, normalize_perf_path, should_track_path
 
 import numpy as np
 from PIL import Image
@@ -924,6 +928,105 @@ def create_app(
     _data_root: Path = Path("data")
     slides_dir: Path = _data_root / "slides"
 
+    def _env_flag(name: str, default: bool) -> bool:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _env_int(name: str, default: int, minimum: int = 1) -> int:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        try:
+            return max(minimum, int(raw))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid integer for %s=%r; using default=%d",
+                name,
+                raw,
+                default,
+            )
+            return default
+
+    perf_enabled = _env_flag("ENSO_PERF_ENABLED", default=True)
+    perf_summary_enabled = _env_flag("ENSO_PERF_SUMMARY_ENABLED", default=perf_enabled)
+    perf_max_samples = _env_int("ENSO_PERF_MAX_SAMPLES", default=2000, minimum=100)
+    perf_route_limit = _env_int("ENSO_PERF_ROUTE_LIMIT", default=25, minimum=1)
+    perf_tracker = InMemoryLatencyTracker(max_samples=perf_max_samples)
+    perf_logger = logging.getLogger("enso_atlas.perf")
+
+    if perf_enabled:
+
+        @app.middleware("http")
+        async def request_timing_middleware(request: Request, call_next):
+            request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+            request.state.request_id = request_id
+            started_at = time.perf_counter()
+
+            response = None
+            status_code = 500
+
+            try:
+                response = await call_next(request)
+                status_code = response.status_code
+            except Exception:
+                status_code = 500
+                raise
+            finally:
+                route_obj = request.scope.get("route")
+                route_path = getattr(route_obj, "path", None) or request.url.path
+                normalized_path = normalize_perf_path(route_path)
+                duration_ms = (time.perf_counter() - started_at) * 1000.0
+
+                if should_track_path(normalized_path):
+                    perf_tracker.add(
+                        RequestLatencyRecord(
+                            method=request.method.upper(),
+                            path=normalized_path,
+                            status=status_code,
+                            duration_ms=duration_ms,
+                            request_id=request_id,
+                            ts_unix=time.time(),
+                        )
+                    )
+                    perf_logger.info(
+                        "request_timing %s",
+                        json.dumps(
+                            {
+                                "method": request.method.upper(),
+                                "path": normalized_path,
+                                "status": status_code,
+                                "duration_ms": round(duration_ms, 3),
+                                "request_id": request_id,
+                            },
+                            separators=(",", ":"),
+                        ),
+                    )
+
+            if response is not None:
+                response.headers.setdefault("X-Request-ID", request_id)
+                return response
+
+            raise RuntimeError("request_timing_middleware reached unexpected state")
+
+    logger.info(
+        "Perf observability enabled=%s summary_enabled=%s max_samples=%d",
+        perf_enabled,
+        perf_summary_enabled,
+        perf_max_samples,
+    )
+
+    # Hot-path memoization caches (small TTL to avoid stale scope semantics).
+    _PROJECT_SCOPE_CACHE_TTL_S = 15.0
+    _SLIDE_DIMS_CACHE_TTL_S = 300.0
+    _project_model_scope_cache: Dict[str, Dict[str, Any]] = {}
+    _labels_slide_ids_cache: Dict[str, Dict[str, Any]] = {}
+    _slide_dims_cache: Dict[str, Dict[str, Any]] = {}
+    _legacy_project_column_exists: Optional[bool] = None
+    _cpu_heatmap_model_cache: Dict[str, Any] = {"signature": None, "model": None}
+    _cpu_heatmap_model_lock = Lock()
+
     def _classifier_threshold(default: float = 0.5) -> float:
         """Return a safe numeric decision threshold for binary predictions."""
         raw_threshold = getattr(classifier, "threshold", None)
@@ -957,6 +1060,42 @@ def create_app(
             return _resolve_dataset_path(proj_cfg.dataset.labels_file)
         except Exception:
             return None
+
+    def _log_timing(event: str, started_at: float, **fields: Any) -> float:
+        """Emit a structured timing log and return elapsed milliseconds."""
+        elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+        payload = {"event": event, "duration_ms": round(elapsed_ms, 2), **fields}
+        logger.info("PERF %s", json.dumps(payload, sort_keys=True, default=str))
+        return elapsed_ms
+
+    def _path_signature(path: Optional[Path]) -> Optional[str]:
+        """Return a cheap file signature for cache invalidation."""
+        if path is None or not path.exists():
+            return None
+        try:
+            st = path.stat()
+            return f"{path}:{int(st.st_mtime_ns)}:{int(st.st_size)}"
+        except Exception:
+            return None
+
+    def _load_slide_ids_from_labels_file_cached(labels_path: Path | None) -> set[str]:
+        """Memoize labels-file slide IDs by file signature to avoid repeated I/O."""
+        if labels_path is None or not labels_path.exists():
+            return set()
+
+        cache_key = str(labels_path)
+        signature = _path_signature(labels_path)
+        cached = _labels_slide_ids_cache.get(cache_key)
+        if cached and cached.get("signature") == signature:
+            return set(cached.get("slide_ids", ()))
+
+        slide_ids = _load_slide_ids_from_labels_file(labels_path)
+        _labels_slide_ids_cache[cache_key] = {
+            "signature": signature,
+            "slide_ids": tuple(sorted(slide_ids)),
+            "ts": time.time(),
+        }
+        return slide_ids
 
     def resolve_slide_path(slide_id: str, project_id: Optional[str] = None) -> Path | None:
         """Resolve slide file path across possible slide directories.
@@ -1041,6 +1180,102 @@ def create_app(
                 detail=f"Embeddings directory not found for project '{project_id}'",
             )
         return proj_emb_dir
+
+    async def _resolve_project_model_scope_cached(project_id: str):
+        """Resolve project model scope with short-lived in-memory memoization."""
+        now = time.time()
+        cached = _project_model_scope_cache.get(project_id)
+        if cached and (now - float(cached.get("ts", 0.0))) < _PROJECT_SCOPE_CACHE_TTL_S:
+            return cached["scope"]
+
+        started_at = time.perf_counter()
+        scope = await resolve_project_model_scope(
+            project_id,
+            project_registry=project_registry,
+            get_project_models=db.get_project_models,
+            logger=logger,
+        )
+        _project_model_scope_cache[project_id] = {
+            "scope": scope,
+            "ts": now,
+        }
+        _log_timing(
+            "project_model_scope.resolve",
+            started_at,
+            project_id=project_id,
+            cache_hit=False,
+            allowed_count=len(scope.allowed_model_ids),
+            project_exists=scope.project_exists,
+        )
+        return scope
+
+    def _slide_dims_from_coords(coords_arr: Optional[np.ndarray], *, patch_size: int = 224) -> tuple[int, int]:
+        """Derive slide dimensions from coordinates when WSI metadata is unavailable."""
+        if coords_arr is None:
+            return (patch_size, patch_size)
+
+        arr = np.asarray(coords_arr)
+        if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] < 2:
+            return (patch_size, patch_size)
+
+        x_max = int(arr[:, 0].max()) + patch_size
+        y_max = int(arr[:, 1].max()) + patch_size
+        return (x_max, y_max)
+
+    def _resolve_slide_dims_cached(
+        slide_id: str,
+        *,
+        project_id: Optional[str],
+        coord_path: Optional[Path] = None,
+        coords_arr: Optional[np.ndarray] = None,
+        patch_size: int = 224,
+    ) -> tuple[tuple[int, int], str]:
+        """Resolve slide dimensions with lightweight memoization."""
+        cache_key = f"{project_id or '__global__'}::{slide_id}"
+        now = time.time()
+
+        slide_path = resolve_slide_path(slide_id, project_id=project_id)
+        slide_sig = _path_signature(slide_path)
+        coord_sig = _path_signature(coord_path)
+        expected_signature = slide_sig or coord_sig
+
+        cached = _slide_dims_cache.get(cache_key)
+        if cached and (now - float(cached.get("ts", 0.0))) < _SLIDE_DIMS_CACHE_TTL_S:
+            if cached.get("signature") == expected_signature:
+                dims = cached.get("dims")
+                if isinstance(dims, (tuple, list)) and len(dims) == 2:
+                    return (int(dims[0]), int(dims[1])), "cache"
+
+        if slide_path is not None and slide_path.exists():
+            try:
+                import openslide
+
+                with openslide.OpenSlide(str(slide_path)) as slide:
+                    dims = (int(slide.dimensions[0]), int(slide.dimensions[1]))
+                _slide_dims_cache[cache_key] = {
+                    "dims": dims,
+                    "signature": slide_sig,
+                    "source": "wsi",
+                    "ts": now,
+                }
+                return dims, "wsi"
+            except Exception as e:
+                logger.warning("Could not read slide dimensions for %s/%s: %s", project_id, slide_id, e)
+
+        if coords_arr is None and coord_path is not None and coord_path.exists():
+            try:
+                coords_arr = np.load(coord_path).astype(np.int64, copy=False)
+            except Exception as e:
+                logger.warning("Could not load coords for dimension fallback %s/%s: %s", project_id, slide_id, e)
+
+        dims = _slide_dims_from_coords(coords_arr, patch_size=patch_size)
+        _slide_dims_cache[cache_key] = {
+            "dims": dims,
+            "signature": expected_signature,
+            "source": "coords",
+            "ts": now,
+        }
+        return dims, "coords"
 
     def _candidate_embedding_dirs_for_level(
         base_embeddings_dir: Path,
@@ -1155,26 +1390,40 @@ def create_app(
         if not project_id:
             return None
 
+        started_at = time.perf_counter()
         _require_project(project_id)
 
         if db_available:
             try:
                 assigned = [sid for sid in (await db.get_project_slides(project_id)) if sid]
                 if assigned:
+                    _log_timing(
+                        "project_slide_scope.resolve",
+                        started_at,
+                        project_id=project_id,
+                        source="project_slides",
+                        count=len(assigned),
+                    )
                     return set(assigned)
             except Exception as e:
                 logger.warning(f"DB project_slides query failed for {project_id}: {e}")
 
             try:
-                pool = await db.get_pool()
-                async with pool.acquire() as conn:
-                    col_check = await conn.fetchval(
-                        """
-                        SELECT COUNT(*) FROM information_schema.columns
-                        WHERE table_name = 'slides' AND column_name = 'project_id'
-                        """
-                    )
-                    if col_check and int(col_check) > 0:
+                nonlocal _legacy_project_column_exists
+                if _legacy_project_column_exists is None:
+                    pool = await db.get_pool()
+                    async with pool.acquire() as conn:
+                        col_check = await conn.fetchval(
+                            """
+                            SELECT COUNT(*) FROM information_schema.columns
+                            WHERE table_name = 'slides' AND column_name = 'project_id'
+                            """
+                        )
+                        _legacy_project_column_exists = bool(col_check and int(col_check) > 0)
+
+                if _legacy_project_column_exists:
+                    pool = await db.get_pool()
+                    async with pool.acquire() as conn:
                         rows = await conn.fetch(
                             """
                             SELECT slide_id FROM slides
@@ -1183,27 +1432,62 @@ def create_app(
                             """,
                             project_id,
                         )
-                        legacy_ids = {str(r["slide_id"]) for r in rows if r["slide_id"]}
-                        if legacy_ids:
-                            return legacy_ids
+                    legacy_ids = {str(r["slide_id"]) for r in rows if r["slide_id"]}
+                    if legacy_ids:
+                        _log_timing(
+                            "project_slide_scope.resolve",
+                            started_at,
+                            project_id=project_id,
+                            source="legacy_slides.project_id",
+                            count=len(legacy_ids),
+                        )
+                        return legacy_ids
             except Exception as e:
                 logger.warning(f"DB legacy project_id query failed for {project_id}: {e}")
 
-        labels_ids = _load_slide_ids_from_labels_file(_project_labels_path(project_id))
+        labels_ids = _load_slide_ids_from_labels_file_cached(_project_labels_path(project_id))
         if labels_ids:
+            _log_timing(
+                "project_slide_scope.resolve",
+                started_at,
+                project_id=project_id,
+                source="labels",
+                count=len(labels_ids),
+            )
             return labels_ids
 
         if not include_embedding_fallback:
+            _log_timing(
+                "project_slide_scope.resolve",
+                started_at,
+                project_id=project_id,
+                source="none",
+                count=0,
+            )
             return set()
 
         proj_emb_dir = _resolve_project_embeddings_dir(project_id, require_exists=True)
         if not proj_emb_dir.exists():
+            _log_timing(
+                "project_slide_scope.resolve",
+                started_at,
+                project_id=project_id,
+                source="embeddings_missing",
+                count=0,
+            )
             return set()
 
         slide_ids = set()
         for f in proj_emb_dir.glob("*.npy"):
             if not f.name.endswith("_coords.npy"):
                 slide_ids.add(f.stem)
+        _log_timing(
+            "project_slide_scope.resolve",
+            started_at,
+            project_id=project_id,
+            source="embeddings",
+            count=len(slide_ids),
+        )
         return slide_ids
 
     async def _batch_embed_inventory_slide_ids(project_id: Optional[str]) -> list[str]:
@@ -1295,12 +1579,7 @@ def create_app(
         if not project_id:
             return None
 
-        scope = await resolve_project_model_scope(
-            project_id,
-            project_registry=project_registry,
-            get_project_models=db.get_project_models,
-            logger=logger,
-        )
+        scope = await _resolve_project_model_scope_cached(project_id)
         if not scope.project_exists:
             raise HTTPException(status_code=404, detail=f"Unknown project_id: {project_id}")
 
@@ -1725,6 +2004,30 @@ def create_app(
     async def api_health_check():
         """Health check endpoint (aliased for frontend compatibility)."""
         return await health_check()
+
+    @app.get("/api/perf/latency-summary")
+    async def perf_latency_summary():
+        """Return rolling p50/p95 latency stats from in-memory request timings."""
+        if not perf_enabled:
+            return {
+                "enabled": False,
+                "summary_enabled": False,
+                "reason": "Set ENSO_PERF_ENABLED=1 to collect request timings.",
+            }
+
+        if not perf_summary_enabled:
+            raise HTTPException(
+                status_code=404,
+                detail="Perf latency summary endpoint disabled. Set ENSO_PERF_SUMMARY_ENABLED=1.",
+            )
+
+        return {
+            "enabled": True,
+            "summary_enabled": True,
+            "max_samples": perf_max_samples,
+            "route_limit": perf_route_limit,
+            "summary": perf_tracker.summary(limit_routes=perf_route_limit),
+        }
 
     @app.get("/")
     async def root():
@@ -4349,11 +4652,11 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         ``project_id`` scopes embedding lookup and slide-path resolution. Level 0
         embeddings and coordinate files are required for truthful localization.
         """
+        started_at = time.perf_counter()
         # Map level to thumbnail size (level 0 = highest res, level 4 = lowest/fastest)
         LEVEL_SIZES = {0: 2048, 1: 1024, 2: 512, 3: 256, 4: 128}
         thumbnail_size = LEVEL_SIZES.get(level, 512)
-        import torch
-        
+
         if classifier is None or evidence_gen is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
 
@@ -4406,68 +4709,52 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
         # Helper function for CPU-only inference (avoids CUDA driver issues)
         def cpu_predict(embs):
-            """Predict using CPU only to avoid CUDA errors."""
+            """Predict using cached CPU model to avoid per-request model reloads."""
             import torch
-            from enso_atlas.config import MILConfig
-            from enso_atlas.mil.clam import CLAMClassifier, LegacyCLAMModel
-            
-            # Create CPU tensor
+            from enso_atlas.mil.clam import LegacyCLAMModel
+
             x = torch.from_numpy(embs).float()
-            
-            # Create a fresh CPU-only model
-            model = LegacyCLAMModel(input_dim=384, hidden_dim=256)
-            
-            # Load weights
             model_path = Path(__file__).parent.parent.parent.parent / "models" / "clam_attention.pt"
-            if model_path.exists():
-                checkpoint = torch.load(model_path, map_location=torch.device("cpu"), weights_only=False)
-                if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-                    state_dict = checkpoint["model_state_dict"]
-                else:
-                    state_dict = checkpoint
-                model.load_state_dict(state_dict)
-            
-            model.eval()
-            
+            model_sig = _path_signature(model_path) or "no_checkpoint"
+
+            model = _cpu_heatmap_model_cache.get("model")
+            cached_sig = _cpu_heatmap_model_cache.get("signature")
+            if model is None or cached_sig != model_sig:
+                with _cpu_heatmap_model_lock:
+                    model = _cpu_heatmap_model_cache.get("model")
+                    cached_sig = _cpu_heatmap_model_cache.get("signature")
+                    if model is None or cached_sig != model_sig:
+                        model = LegacyCLAMModel(input_dim=384, hidden_dim=256)
+                        if model_path.exists():
+                            checkpoint = torch.load(model_path, map_location=torch.device("cpu"), weights_only=False)
+                            if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+                                state_dict = checkpoint["model_state_dict"]
+                            else:
+                                state_dict = checkpoint
+                            model.load_state_dict(state_dict)
+                        model.eval()
+                        _cpu_heatmap_model_cache["model"] = model
+                        _cpu_heatmap_model_cache["signature"] = model_sig
+
             with torch.no_grad():
                 prob, attention = model(x, return_attention=True)
-            
-            return prob.item(), attention.numpy()
+
+            return prob.item(), attention.numpy(), model_sig
 
         # Always use CPU for heatmap to avoid CUDA driver issues
         try:
-            score, attention = cpu_predict(embeddings)
+            score, attention, model_signature = cpu_predict(embeddings)
         except Exception as e:
             logger.error(f"CPU prediction failed: {e}")
             raise HTTPException(status_code=500, detail=f"Heatmap generation failed: {str(e)}")
         
-        # Get actual slide dimensions from slide file
-        slide_path = resolve_slide_path(slide_id, project_id=project_id)
-        if slide_path is not None and slide_path.exists():
-            try:
-                import openslide
-                with openslide.OpenSlide(str(slide_path)) as slide:
-                    slide_dims = slide.dimensions
-                    logger.info(f"Heatmap using actual slide dims: {slide_dims}")
-            except Exception as e:
-                logger.warning(f"Could not read slide dimensions: {e}")
-                slide_dims = None
-        else:
-            slide_dims = None
-        
-        # Fall back to computing bounds from coordinates if no slide available
-        if slide_dims is None:
-            if coords_arr.size == 0:
-                slide_dims = (patch_size, patch_size)
-                logger.warning(
-                    f"No coordinates available to derive dims for {slide_id}; "
-                    f"falling back to {slide_dims}"
-                )
-            else:
-                x_max = int(coords_arr[:, 0].max()) + patch_size  # Add patch size
-                y_max = int(coords_arr[:, 1].max()) + patch_size
-                slide_dims = (x_max, y_max)
-                logger.info(f"Heatmap using coords-derived dims: {slide_dims}")
+        slide_dims, dims_source = _resolve_slide_dims_cached(
+            slide_id,
+            project_id=project_id,
+            coord_path=coord_path,
+            coords_arr=coords_arr,
+            patch_size=patch_size,
+        )
         
         # Calculate aspect-ratio-preserving thumbnail dimensions
         # This ensures the heatmap matches the slide geometry for correct overlay alignment
@@ -4493,7 +4780,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         buf.seek(0)
 
         # Return with bounds headers so frontend can position correctly
-        return StreamingResponse(
+        response = StreamingResponse(
             buf,
             media_type="image/png",
             headers={
@@ -4503,6 +4790,18 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 "Access-Control-Expose-Headers": "X-Slide-Width, X-Slide-Height",
             },
         )
+        _log_timing(
+            "api.heatmap.slide",
+            started_at,
+            slide_id=slide_id,
+            project_id=project_id,
+            dims_source=dims_source,
+            thumb_width=thumb_w,
+            thumb_height=thumb_h,
+            attention_patches=len(coords),
+            model_signature=model_signature,
+        )
+        return response
 
 
     @app.post("/api/embed", response_model=EmbedResponse)
@@ -6019,6 +6318,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         1) ``project_models`` DB assignments, then
         2) ``projects.yaml`` ``classification_models`` fallback.
         """
+        started_at = time.perf_counter()
         if multi_model_inference is None:
             raise HTTPException(status_code=503, detail="Multi-model inference not initialized")
 
@@ -6028,7 +6328,15 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         if allowed_ids is not None:
             models = [m for m in models if m.get("id", m.get("model_id")) in allowed_ids]
 
-        return AvailableModelsResponse(models=models)
+        response = AvailableModelsResponse(models=models)
+        _log_timing(
+            "api.models",
+            started_at,
+            project_id=project_id,
+            total_models=len(response.models),
+            scoped=allowed_ids is not None,
+        )
+        return response
 
 
     @app.post("/api/embed-slide")
@@ -7102,6 +7410,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         When ``project_id`` is provided, the model must be assigned to that
         project and embeddings are loaded from project-scoped paths.
         """
+        started_at = time.perf_counter()
         if multi_model_inference is None:
             raise HTTPException(status_code=503, detail="Multi-model inference not initialized")
         
@@ -7111,14 +7420,11 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                 detail=f"Unknown model: {model_id}. Available: {list(MODEL_CONFIGS.keys())}"
             )
 
+        scoped_allowed_model_ids: Optional[set[str]] = None
         if project_id:
-            scope = await resolve_project_model_scope(
-                project_id,
-                project_registry=project_registry,
-                get_project_models=db.get_project_models,
-                logger=logger,
-            )
+            scope = await _resolve_project_model_scope_cached(project_id)
             require_model_allowed_for_scope(model_id, scope, project_id=project_id)
+            scoped_allowed_model_ids = scope.allowed_model_ids
 
         project_requested = project_id is not None
         _model_heatmap_embeddings_dir = _resolve_project_embeddings_dir(
@@ -7244,19 +7550,13 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
             if cached_path_to_serve is not None:
                 # Serve cached heatmap — still need slide dims for alignment headers.
-                slide_path = resolve_slide_path(slide_id, project_id=project_id)
-                _slide_dims = None
-                if slide_path is not None and slide_path.exists():
-                    try:
-                        import openslide
-                        with openslide.OpenSlide(str(slide_path)) as _slide:
-                            _slide_dims = _slide.dimensions
-                    except Exception:
-                        pass
-                if _slide_dims is None:
-                    patch_size_c = 224
-                    _ca = np.load(coord_path).astype(np.int64, copy=False)
-                    _slide_dims = (int(_ca[:, 0].max()) + patch_size_c, int(_ca[:, 1].max()) + patch_size_c)
+                _slide_dims, dims_source = _resolve_slide_dims_cached(
+                    slide_id,
+                    project_id=project_id,
+                    coord_path=coord_path,
+                    coords_arr=None,
+                    patch_size=224,
+                )
                 _coverage = compute_heatmap_grid_coverage(_slide_dims[0], _slide_dims[1], patch_size=224)
                 logger.info(
                     "Serving cached heatmap for %s/%s (checkpoint=%s, alpha=%s)",
@@ -7265,7 +7565,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     checkpoint_signature,
                     alpha_key,
                 )
-                return FileResponse(
+                response = FileResponse(
                     str(cached_path_to_serve),
                     media_type="image/png",
                     headers={
@@ -7281,6 +7581,19 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                         "Access-Control-Expose-Headers": "X-Model-Id, X-Model-Name, X-Slide-Width, X-Slide-Height, X-Coverage-Width, X-Coverage-Height",
                     }
                 )
+                _log_timing(
+                    "api.heatmap.model",
+                    started_at,
+                    slide_id=slide_id,
+                    model_id=model_id,
+                    project_id=project_id,
+                    cache_hit=True,
+                    attention_cache_hit=attention_cache_path.exists(),
+                    dims_source=dims_source,
+                    force_refresh=force_refresh,
+                    alpha=alpha_key,
+                )
+                return response
 
         patch_size = 224
         coords_arr = np.load(coord_path).astype(np.int64, copy=False)
@@ -7340,7 +7653,9 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         # switching becomes near-instant after the first model load.
         if not attention_cache_hit and project_id and not force_refresh:
             try:
-                allowed_model_ids = await _resolve_project_model_ids(project_id)
+                allowed_model_ids = scoped_allowed_model_ids
+                if allowed_model_ids is None:
+                    allowed_model_ids = await _resolve_project_model_ids(project_id)
                 sibling_model_ids = sorted(mid for mid in (allowed_model_ids or set()) if mid != model_id)
 
                 if sibling_model_ids:
@@ -7448,34 +7763,14 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
 
         # Generate heatmap image using EvidenceGenerator for proper coordinate scaling
         try:
-            # Get actual slide dimensions
-            slide_path = resolve_slide_path(slide_id, project_id=project_id)
-            if slide_path is not None and slide_path.exists():
-                try:
-                    import openslide
-                    with openslide.OpenSlide(str(slide_path)) as slide:
-                        slide_dims = slide.dimensions
-                        logger.info(f"Model heatmap using actual slide dims: {slide_dims}")
-                except Exception as e:
-                    logger.warning(f"Could not read slide dimensions: {e}")
-                    slide_dims = None
-            else:
-                slide_dims = None
-            
-            # Fall back to computing bounds from coordinates
-            if slide_dims is None:
-                if coords_arr.size == 0:
-                    slide_dims = (patch_size, patch_size)
-                    logger.warning(
-                        f"No coordinates available to derive dims for {slide_id}; "
-                        f"falling back to {slide_dims}"
-                    )
-                else:
-                    x_max = int(coords_arr[:, 0].max()) + patch_size
-                    y_max = int(coords_arr[:, 1].max()) + patch_size
-                    slide_dims = (x_max, y_max)
-                    logger.info(f"Model heatmap using coords-derived dims: {slide_dims}")
-            
+            slide_dims, dims_source = _resolve_slide_dims_cached(
+                slide_id,
+                project_id=project_id,
+                coord_path=coord_path,
+                coords_arr=coords_arr,
+                patch_size=patch_size,
+            )
+
             # Generate a patch-resolution heatmap: 1 pixel = 1 patch (224x224).
             # This produces crisp discrete patches when rendered with image-rendering: pixelated.
             coords_list = [tuple(map(int, c)) for c in coords_arr]
@@ -7510,7 +7805,7 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
             except Exception as cache_err:
                 logger.warning(f"Failed to cache heatmap: {cache_err}")
             
-            return StreamingResponse(
+            response = StreamingResponse(
                 buf,
                 media_type="image/png",
                 headers={
@@ -7526,6 +7821,20 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     "Access-Control-Expose-Headers": "X-Model-Id, X-Model-Name, X-Slide-Width, X-Slide-Height, X-Coverage-Width, X-Coverage-Height",
                 }
             )
+            _log_timing(
+                "api.heatmap.model",
+                started_at,
+                slide_id=slide_id,
+                model_id=model_id,
+                project_id=project_id,
+                cache_hit=False,
+                attention_cache_hit=attention_cache_hit,
+                dims_source=dims_source,
+                force_refresh=force_refresh,
+                alpha=alpha_key,
+                smooth=smooth,
+            )
+            return response
             
         except Exception as e:
             logger.error(f"Heatmap generation failed: {e}")

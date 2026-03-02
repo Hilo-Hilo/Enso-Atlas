@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -117,6 +117,33 @@ function Pagination({
   );
 }
 
+
+const FILTER_DEBOUNCE_MS = 250;
+
+type SlidesPayload = {
+  slides: (SlideInfo & Partial<ExtendedSlideInfo>)[];
+  total: number;
+};
+
+function hasActiveFilters(filters: SlideFilters): boolean {
+  return Boolean(
+    filters.search ||
+      filters.tags?.length ||
+      filters.groupId ||
+      filters.label ||
+      filters.hasEmbeddings !== undefined ||
+      filters.minPatches !== undefined ||
+      filters.maxPatches !== undefined ||
+      filters.starred ||
+      filters.dateFrom ||
+      filters.dateTo
+  );
+}
+
+function getSlidesCacheKey(filters: SlideFilters, projectId: string): string {
+  return `${projectId}:${JSON.stringify(filters)}`;
+}
+
 export default function SlidesPage() {
   const router = useRouter();
   const { showToast } = useToast();
@@ -144,6 +171,17 @@ export default function SlidesPage() {
     sortBy: "date",
     sortOrder: "desc",
   });
+  const [queryFilters, setQueryFilters] = useState<SlideFilters>({
+    page: 1,
+    perPage: 20,
+    sortBy: "date",
+    sortOrder: "desc",
+  });
+
+  const filterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slidesCacheRef = useRef<Map<string, SlidesPayload>>(new Map());
+  const inFlightRequestRef = useRef<Map<string, Promise<SlidesPayload>>>(new Map());
+  const latestRequestRef = useRef(0);
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -199,46 +237,107 @@ export default function SlidesPage() {
     fetchMetadata();
   }, []);
 
-  // Fetch slides when filters change
-  const fetchSlides = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      // Use searchSlides if we have any filters, otherwise use getSlides
-      const hasFilters =
-        filters.search ||
-        filters.tags?.length ||
-        filters.groupId ||
-        filters.label ||
-        filters.hasEmbeddings !== undefined ||
-        filters.minPatches !== undefined ||
-        filters.maxPatches !== undefined ||
-        filters.starred ||
-        filters.dateFrom ||
-        filters.dateTo;
+  useEffect(() => {
+    return () => {
+      if (filterDebounceRef.current) {
+        clearTimeout(filterDebounceRef.current);
+      }
+    };
+  }, []);
 
-      if (hasFilters) {
-        const result = await searchSlides(filters, currentProject.id);
-        setSlides(result.slides);
-        setTotalSlides(result.total);
+  const commitQueryFilters = useCallback((nextFilters: SlideFilters, debounce = false) => {
+    if (filterDebounceRef.current) {
+      clearTimeout(filterDebounceRef.current);
+      filterDebounceRef.current = null;
+    }
+
+    if (debounce) {
+      filterDebounceRef.current = setTimeout(() => {
+        setQueryFilters(nextFilters);
+      }, FILTER_DEBOUNCE_MS);
+      return;
+    }
+
+    setQueryFilters(nextFilters);
+  }, []);
+
+  // Fetch slides when filters change
+  const fetchSlides = useCallback(
+    async ({ forceNetwork = false }: { forceNetwork?: boolean } = {}) => {
+      const activeFilters = queryFilters;
+      const cacheKey = getSlidesCacheKey(activeFilters, currentProject.id);
+      const cached = forceNetwork ? undefined : slidesCacheRef.current.get(cacheKey);
+
+      if (cached) {
+        setSlides(cached.slides);
+        setTotalSlides(cached.total);
+        setIsLoading(false);
       } else {
+        setIsLoading(true);
+      }
+
+      const requestId = ++latestRequestRef.current;
+
+      const executeRequest = async (): Promise<SlidesPayload> => {
+        if (hasActiveFilters(activeFilters)) {
+          const result = await searchSlides(activeFilters, currentProject.id);
+          return {
+            slides: result.slides,
+            total: result.total,
+          };
+        }
+
         const result = await getSlides({
-          page: filters.page,
-          perPage: filters.perPage,
+          page: activeFilters.page,
+          perPage: activeFilters.perPage,
           projectId: currentProject.id,
         });
-        setSlides(result.slides);
-        setTotalSlides(result.total);
+        return {
+          slides: result.slides,
+          total: result.total,
+        };
+      };
+
+      let requestPromise: Promise<SlidesPayload>;
+      if (forceNetwork) {
+        requestPromise = executeRequest();
+      } else {
+        const inFlightRequest = inFlightRequestRef.current.get(cacheKey);
+        if (inFlightRequest) {
+          requestPromise = inFlightRequest;
+        } else {
+          requestPromise = executeRequest();
+          inFlightRequestRef.current.set(cacheKey, requestPromise);
+        }
       }
-    } catch (error) {
-      console.error("Failed to fetch slides:", error);
-      showToast({
-        type: "error",
-        message: "Failed to load slides. Please try again.",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [filters, showToast, currentProject.id]);
+
+      try {
+        const result = await requestPromise;
+        slidesCacheRef.current.set(cacheKey, result);
+
+        if (latestRequestRef.current === requestId) {
+          setSlides(result.slides);
+          setTotalSlides(result.total);
+        }
+      } catch (error) {
+        if (latestRequestRef.current === requestId) {
+          console.error("Failed to fetch slides:", error);
+          showToast({
+            type: "error",
+            message: "Failed to load slides. Please try again.",
+          });
+        }
+      } finally {
+        if (!forceNetwork) {
+          inFlightRequestRef.current.delete(cacheKey);
+        }
+        if (latestRequestRef.current === requestId) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [queryFilters, showToast, currentProject.id]
+  );
 
   useEffect(() => {
     fetchSlides();
@@ -247,21 +346,29 @@ export default function SlidesPage() {
   // Reset selection and pagination when switching projects.
   useEffect(() => {
     setSelectedIds(new Set());
-    setFilters((prev) => ({ ...prev, page: 1 }));
-  }, [currentProject.id]);
+    setFilters((prev) => {
+      const next = { ...prev, page: 1 };
+      commitQueryFilters(next, false);
+      return next;
+    });
+  }, [currentProject.id, commitQueryFilters]);
 
   // Handlers
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await fetchSlides();
+    await fetchSlides({ forceNetwork: true });
     setIsRefreshing(false);
     showToast({ type: "success", message: "Slides refreshed" });
   };
 
-  const handleFiltersChange = useCallback((newFilters: SlideFilters) => {
-    setFilters(newFilters);
-    setSelectedIds(new Set());
-  }, []);
+  const handleFiltersChange = useCallback(
+    (newFilters: SlideFilters) => {
+      setFilters(newFilters);
+      commitQueryFilters(newFilters, true);
+      setSelectedIds(new Set());
+    },
+    [commitQueryFilters]
+  );
 
   const handleSelectSlide = useCallback((id: string, selected: boolean) => {
     setSelectedIds((prev) => {
@@ -332,20 +439,32 @@ export default function SlidesPage() {
 
   const handleSort = useCallback(
     (field: string) => {
-      setFilters((prev) => ({
-        ...prev,
-        sortBy: field,
-        sortOrder: prev.sortBy === field && prev.sortOrder === "asc" ? "desc" : "asc",
-        page: 1,
-      }));
+      setFilters((prev) => {
+        const next: SlideFilters = {
+          ...prev,
+          sortBy: field,
+          sortOrder: prev.sortBy === field && prev.sortOrder === "asc" ? "desc" : "asc",
+          page: 1,
+        };
+        commitQueryFilters(next, false);
+        return next;
+      });
+      setSelectedIds(new Set());
     },
-    []
+    [commitQueryFilters]
   );
 
-  const handlePageChange = useCallback((page: number) => {
-    setFilters((prev) => ({ ...prev, page }));
-    setSelectedIds(new Set());
-  }, []);
+  const handlePageChange = useCallback(
+    (page: number) => {
+      setFilters((prev) => {
+        const next = { ...prev, page };
+        commitQueryFilters(next, false);
+        return next;
+      });
+      setSelectedIds(new Set());
+    },
+    [commitQueryFilters]
+  );
 
   // Bulk action handlers
   const handleBulkAddTags = useCallback(
@@ -358,7 +477,7 @@ export default function SlidesPage() {
           type: "success",
           message: `Added ${tagNames.length} tag(s) to ${selectedIds.size} slide(s)`,
         });
-        fetchSlides();
+        fetchSlides({ forceNetwork: true });
         // Refresh tags
         const newTags = await getAllTags();
         setTags(newTags);
@@ -587,7 +706,7 @@ export default function SlidesPage() {
         {/* Slides content */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Slides view */}
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 min-h-0 p-4">
             {viewMode === "grid" ? (
               <SlideGrid
                 slides={slides}
@@ -602,7 +721,7 @@ export default function SlidesPage() {
                 isLoading={isLoading && slides.length === 0}
               />
             ) : (
-              <div className="bg-white dark:bg-navy-800 rounded-xl shadow-sm border border-gray-200 dark:border-navy-700 overflow-hidden">
+              <div className="bg-white dark:bg-navy-800 rounded-xl shadow-sm border border-gray-200 dark:border-navy-700 overflow-hidden h-full">
                 <SlideTable
                   slides={slides}
                   selectedIds={selectedIds}

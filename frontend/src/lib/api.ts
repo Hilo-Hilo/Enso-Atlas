@@ -108,6 +108,66 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+interface AdaptivePollDelayInput {
+  baseIntervalMs: number;
+  minIntervalMs: number;
+  maxIntervalMs: number;
+  status?: string;
+  progress?: number;
+  previousProgress?: number | null;
+  stablePollCount?: number;
+  consecutiveErrors?: number;
+  includeJitter?: boolean;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+/**
+ * Adaptive poll cadence to reduce network chatter during idle phases while
+ * still feeling responsive when progress is moving quickly.
+ */
+function getAdaptivePollDelay(input: AdaptivePollDelayInput): number {
+  const stablePollCount = input.stablePollCount ?? 0;
+  const consecutiveErrors = input.consecutiveErrors ?? 0;
+  const includeJitter = input.includeJitter ?? true;
+
+  let delay = input.baseIntervalMs;
+
+  if (input.status === "pending") {
+    delay *= 1.5;
+  }
+
+  if (typeof input.progress === "number") {
+    const previousProgress = input.previousProgress;
+    const progressed =
+      typeof previousProgress !== "number" || input.progress > previousProgress;
+
+    if (progressed) {
+      delay *= 0.75;
+    } else {
+      delay *= Math.min(2.5, 1 + stablePollCount * 0.3);
+    }
+
+    // Near completion, tighten the cadence for snappier perceived finish.
+    if (input.progress >= 90) {
+      delay *= 0.5;
+    }
+  }
+
+  if (consecutiveErrors > 0) {
+    delay *= Math.min(4, Math.pow(1.7, consecutiveErrors));
+  }
+
+  const jitter = includeJitter ? delay * Math.random() * 0.15 : 0;
+  return clamp(Math.round(delay + jitter), input.minIntervalMs, input.maxIntervalMs);
+}
+
+function isNonRetryablePollingError(error: unknown): boolean {
+  return error instanceof AtlasApiError && !error.isRetryable;
+}
+
 /**
  * Calculate exponential backoff delay
  */
@@ -128,156 +188,327 @@ function createTimeoutController(timeoutMs: number): { controller: AbortControll
 }
 
 /**
- * Generic fetch wrapper with error handling, retries, and timeout
+ * Endpoint-level configuration for fetchApi.
+ */
+interface FetchApiConfig {
+  timeoutMs?: number;
+  retries?: number;
+  skipRetry?: boolean;
+  dedupe?: boolean;
+  dedupeWindowMs?: number;
+}
+
+const IDEMPOTENT_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const STATUS_ENDPOINT_PATTERNS = [/\/status(\/|$)/, /\/health(\/|$)/];
+const DEFAULT_STATUS_DEDUPE_WINDOW_MS = 250;
+
+// In-flight + short-window read caches to collapse duplicate reads under load.
+const inFlightReadRequests = new Map<string, Promise<unknown>>();
+const recentReadResponses = new Map<string, { expiresAt: number; value: unknown }>();
+
+function getNormalizedMethod(options: RequestInit): string {
+  return (options.method || "GET").toUpperCase();
+}
+
+function isReadMethod(method: string): boolean {
+  return IDEMPOTENT_HTTP_METHODS.has(method);
+}
+
+function isStatusEndpoint(endpoint: string): boolean {
+  return STATUS_ENDPOINT_PATTERNS.some((pattern) => pattern.test(endpoint));
+}
+
+function shouldDedupeRequest(method: string, config: FetchApiConfig): boolean {
+  if (config.dedupe === false) {
+    return false;
+  }
+  return isReadMethod(method);
+}
+
+function getDedupeWindowMs(endpoint: string, config: FetchApiConfig): number {
+  if (typeof config.dedupeWindowMs === "number") {
+    return Math.max(0, Math.round(config.dedupeWindowMs));
+  }
+  if (isStatusEndpoint(endpoint)) {
+    return DEFAULT_STATUS_DEDUPE_WINDOW_MS;
+  }
+  return 0;
+}
+
+function resolveMaxRetries(method: string, endpoint: string, config: FetchApiConfig): number {
+  if (config.skipRetry) {
+    return 0;
+  }
+
+  if (typeof config.retries === "number") {
+    return Math.max(0, Math.floor(config.retries));
+  }
+
+  // Avoid over-retrying non-idempotent writes by default.
+  if (!isReadMethod(method)) {
+    return 0;
+  }
+
+  // Status endpoints are high-frequency; keep retries shallow.
+  if (isStatusEndpoint(endpoint)) {
+    return Math.min(RETRY_CONFIG.maxRetries, 1);
+  }
+
+  return RETRY_CONFIG.maxRetries;
+}
+
+function buildReadRequestKey(method: string, url: string): string {
+  return `${method}:${url}`;
+}
+
+function maybeGetCachedRead<T>(requestKey: string, dedupeWindowMs: number): T | undefined {
+  if (dedupeWindowMs <= 0) {
+    return undefined;
+  }
+
+  const cached = recentReadResponses.get(requestKey);
+  if (!cached) {
+    return undefined;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    recentReadResponses.delete(requestKey);
+    return undefined;
+  }
+
+  return cached.value as T;
+}
+
+function cacheReadResponse<T>(requestKey: string, dedupeWindowMs: number, value: T): void {
+  if (dedupeWindowMs <= 0) {
+    return;
+  }
+
+  recentReadResponses.set(requestKey, {
+    expiresAt: Date.now() + dedupeWindowMs,
+    value,
+  });
+}
+
+function invalidateReadCaches(): void {
+  recentReadResponses.clear();
+  inFlightReadRequests.clear();
+}
+
+// Exported for focused unit tests on retry/dedupe/polling strategy.
+export const __apiClientTestUtils = {
+  getAdaptivePollDelay,
+  resolveMaxRetries,
+  clearRequestCaches: invalidateReadCaches,
+};
+
+function isLikelyNetworkError(error: unknown): error is TypeError {
+  if (!(error instanceof TypeError)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("fetch") ||
+    message.includes("network") ||
+    message.includes("load failed") ||
+    message.includes("failed to fetch")
+  );
+}
+
+/**
+ * Generic fetch wrapper with error handling, retries, timeout, and read dedupe.
  */
 async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {},
-  config: { 
-    timeoutMs?: number; 
-    retries?: number;
-    skipRetry?: boolean;
-  } = {}
+  config: FetchApiConfig = {}
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
+  const method = getNormalizedMethod(options);
   const timeoutMs = config.timeoutMs || DEFAULT_TIMEOUT_MS;
-  const maxRetries = config.skipRetry ? 0 : (config.retries ?? RETRY_CONFIG.maxRetries);
+  const maxRetries = resolveMaxRetries(method, endpoint, config);
+  const dedupeWindowMs = getDedupeWindowMs(endpoint, config);
+  const shouldDedupe = shouldDedupeRequest(method, config);
 
   const defaultHeaders: HeadersInit = {
     "Content-Type": "application/json",
   };
 
-  let lastError: AtlasApiError | null = null;
+  if (!isReadMethod(method)) {
+    // Writes can invalidate previously cached read snapshots.
+    invalidateReadCaches();
+  }
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const { controller, timeoutId } = createTimeoutController(timeoutMs);
+  const requestKey = shouldDedupe ? buildReadRequestKey(method, url) : null;
 
-    try {
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          ...defaultHeaders,
-          ...options.headers,
-        },
-        signal: controller.signal,
-      });
+  if (requestKey) {
+    const cached = maybeGetCachedRead<T>(requestKey, dedupeWindowMs);
+    if (cached !== undefined) {
+      return cached;
+    }
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        let errorData: ApiError;
-        try {
-          const rawError = await response.json() as Record<string, unknown>;
-          const detail = rawError?.detail;
-
-          // FastAPI commonly returns { detail: "..." } or { detail: { error, message, ... } }
-          if (detail && typeof detail === "object") {
-            const detailObj = detail as Record<string, unknown>;
-            errorData = {
-              code: String(rawError?.code ?? detailObj.error ?? detailObj.code ?? `HTTP_${response.status}`),
-              message:
-                (typeof detailObj.message === "string" && detailObj.message) ||
-                (typeof detailObj.error === "string" && detailObj.error) ||
-                `HTTP ${response.status}: ${response.statusText}`,
-              details: detailObj,
-            };
-          } else if (typeof detail === "string") {
-            errorData = {
-              code: String(rawError?.code ?? `HTTP_${response.status}`),
-              message: detail,
-            };
-          } else {
-            errorData = {
-              code: String(rawError?.code ?? `HTTP_${response.status}`),
-              message:
-                (typeof rawError?.message === "string" && rawError.message) ||
-                `HTTP ${response.status}: ${response.statusText}`,
-              details: (rawError?.details as Record<string, unknown> | undefined),
-            };
-          }
-        } catch (err) {
-          errorData = {
-            code: `HTTP_${response.status}`,
-            message: `HTTP ${response.status}: ${response.statusText}`,
-          };
-        }
-
-        const apiError = new AtlasApiError({
-          ...errorData,
-          statusCode: response.status,
-        });
-
-        // Only retry if error is retryable and we have retries left
-        if (apiError.isRetryable && attempt < maxRetries) {
-          lastError = apiError;
-          const delay = getRetryDelay(attempt);
-          console.warn(`[API] Retryable error on ${endpoint}, attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delay}ms...`);
-          await sleep(delay);
-          continue;
-        }
-
-        throw apiError;
-      }
-
-      return response.json();
-    } catch (error) {
-      clearTimeout(timeoutId);
-
-      // Handle AbortController timeout
-      if (error instanceof DOMException && error.name === "AbortError") {
-        const timeoutError = new AtlasApiError({
-          code: "TIMEOUT",
-          message: `Request to ${endpoint} timed out after ${timeoutMs}ms`,
-          isTimeout: true,
-        });
-
-        if (attempt < maxRetries) {
-          lastError = timeoutError;
-          const delay = getRetryDelay(attempt);
-          console.warn(`[API] Timeout on ${endpoint}, attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delay}ms...`);
-          await sleep(delay);
-          continue;
-        }
-
-        throw timeoutError;
-      }
-
-      // Handle network errors
-      if (error instanceof TypeError && error.message.includes("fetch")) {
-        const networkError = new AtlasApiError({
-          code: "NETWORK_ERROR",
-          message: "Failed to connect to the server. Please check your network connection.",
-          isNetworkError: true,
-        });
-
-        if (attempt < maxRetries) {
-          lastError = networkError;
-          const delay = getRetryDelay(attempt);
-          console.warn(`[API] Network error on ${endpoint}, attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delay}ms...`);
-          await sleep(delay);
-          continue;
-        }
-
-        throw networkError;
-      }
-
-      // Re-throw AtlasApiError as-is
-      if (error instanceof AtlasApiError) {
-        throw error;
-      }
-
-      // Wrap unknown errors
-      throw new AtlasApiError({
-        code: "UNKNOWN_ERROR",
-        message: error instanceof Error ? error.message : "An unknown error occurred",
-      });
+    const existingRequest = inFlightReadRequests.get(requestKey);
+    if (existingRequest) {
+      return existingRequest as Promise<T>;
     }
   }
 
-  // Should not reach here, but just in case
-  throw lastError || new AtlasApiError({
-    code: "UNKNOWN_ERROR",
-    message: "Request failed after all retries",
+  const requestPromise = (async () => {
+    let lastError: AtlasApiError | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const { controller, timeoutId } = createTimeoutController(timeoutMs);
+
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            ...defaultHeaders,
+            ...options.headers,
+          },
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          let errorData: ApiError;
+          try {
+            const rawError = (await response.json()) as Record<string, unknown>;
+            const detail = rawError?.detail;
+
+            // FastAPI commonly returns { detail: "..." } or { detail: { error, message, ... } }
+            if (detail && typeof detail === "object") {
+              const detailObj = detail as Record<string, unknown>;
+              errorData = {
+                code: String(rawError?.code ?? detailObj.error ?? detailObj.code ?? `HTTP_${response.status}`),
+                message:
+                  (typeof detailObj.message === "string" && detailObj.message) ||
+                  (typeof detailObj.error === "string" && detailObj.error) ||
+                  `HTTP ${response.status}: ${response.statusText}`,
+                details: detailObj,
+              };
+            } else if (typeof detail === "string") {
+              errorData = {
+                code: String(rawError?.code ?? `HTTP_${response.status}`),
+                message: detail,
+              };
+            } else {
+              errorData = {
+                code: String(rawError?.code ?? `HTTP_${response.status}`),
+                message:
+                  (typeof rawError?.message === "string" && rawError.message) ||
+                  `HTTP ${response.status}: ${response.statusText}`,
+                details: rawError?.details as Record<string, unknown> | undefined,
+              };
+            }
+          } catch (_err) {
+            errorData = {
+              code: `HTTP_${response.status}`,
+              message: `HTTP ${response.status}: ${response.statusText}`,
+            };
+          }
+
+          const apiError = new AtlasApiError({
+            ...errorData,
+            statusCode: response.status,
+          });
+
+          // Only retry if error is retryable and we have retries left.
+          if (apiError.isRetryable && attempt < maxRetries) {
+            lastError = apiError;
+            const delay = getRetryDelay(attempt);
+            console.warn(
+              `[API] Retryable error on ${endpoint}, attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delay}ms...`
+            );
+            await sleep(delay);
+            continue;
+          }
+
+          throw apiError;
+        }
+
+        const payload = (await response.json()) as T;
+        if (requestKey) {
+          cacheReadResponse(requestKey, dedupeWindowMs, payload);
+        }
+        return payload;
+      } catch (error) {
+        clearTimeout(timeoutId);
+
+        // Handle AbortController timeout
+        if (error instanceof DOMException && error.name === "AbortError") {
+          const timeoutError = new AtlasApiError({
+            code: "TIMEOUT",
+            message: `Request to ${endpoint} timed out after ${timeoutMs}ms`,
+            isTimeout: true,
+          });
+
+          if (attempt < maxRetries) {
+            lastError = timeoutError;
+            const delay = getRetryDelay(attempt);
+            console.warn(
+              `[API] Timeout on ${endpoint}, attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delay}ms...`
+            );
+            await sleep(delay);
+            continue;
+          }
+
+          throw timeoutError;
+        }
+
+        // Handle network errors
+        if (isLikelyNetworkError(error)) {
+          const networkError = new AtlasApiError({
+            code: "NETWORK_ERROR",
+            message: "Failed to connect to the server. Please check your network connection.",
+            isNetworkError: true,
+          });
+
+          if (attempt < maxRetries) {
+            lastError = networkError;
+            const delay = getRetryDelay(attempt);
+            console.warn(
+              `[API] Network error on ${endpoint}, attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delay}ms...`
+            );
+            await sleep(delay);
+            continue;
+          }
+
+          throw networkError;
+        }
+
+        // Re-throw AtlasApiError as-is
+        if (error instanceof AtlasApiError) {
+          throw error;
+        }
+
+        // Wrap unknown errors
+        throw new AtlasApiError({
+          code: "UNKNOWN_ERROR",
+          message: error instanceof Error ? error.message : "An unknown error occurred",
+        });
+      }
+    }
+
+    // Should not reach here, but just in case
+    throw (
+      lastError ||
+      new AtlasApiError({
+        code: "UNKNOWN_ERROR",
+        message: "Request failed after all retries",
+      })
+    );
+  })();
+
+  if (!requestKey) {
+    return requestPromise;
+  }
+
+  inFlightReadRequests.set(requestKey, requestPromise as Promise<unknown>);
+
+  return requestPromise.finally(() => {
+    inFlightReadRequests.delete(requestKey);
   });
 }
 
@@ -2166,28 +2397,57 @@ export async function pollEmbeddingTask(
   maxWaitMs: number = 1800000  // 30 minutes max
 ): Promise<EmbeddingTaskStatus> {
   const startTime = Date.now();
-  
+  let previousProgress: number | null = null;
+  let stablePollCount = 0;
+  let consecutiveErrors = 0;
+
   while (Date.now() - startTime < maxWaitMs) {
     try {
       const status = await getEmbeddingTaskStatus(taskId);
-      
-      if (onProgress) {
-        onProgress(status);
-      }
-      
+      onProgress?.(status);
+
       if (status.status === 'completed' || status.status === 'failed') {
         return status;
       }
-      
-      // Wait before next poll
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+
+      const previous = previousProgress;
+      const progressed =
+        previous === null || status.progress > previous;
+      stablePollCount = progressed ? 0 : stablePollCount + 1;
+      previousProgress = status.progress;
+      consecutiveErrors = 0;
+
+      const nextDelayMs = getAdaptivePollDelay({
+        baseIntervalMs: pollIntervalMs,
+        minIntervalMs: 750,
+        maxIntervalMs: 10000,
+        status: status.status,
+        progress: status.progress,
+        previousProgress: previous,
+        stablePollCount,
+      });
+
+      await sleep(nextDelayMs);
     } catch (error) {
-      // On network error, wait and retry
+      if (isNonRetryablePollingError(error)) {
+        throw error;
+      }
+
+      consecutiveErrors += 1;
       console.warn('Polling error, retrying...', error);
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs * 2));
+      const errorDelayMs = getAdaptivePollDelay({
+        baseIntervalMs: pollIntervalMs,
+        minIntervalMs: pollIntervalMs,
+        maxIntervalMs: 15000,
+        progress: previousProgress ?? undefined,
+        previousProgress,
+        stablePollCount,
+        consecutiveErrors,
+      });
+      await sleep(errorDelayMs);
     }
   }
-  
+
   throw new AtlasApiError({
     code: 'TIMEOUT',
     message: `Embedding task ${taskId} did not complete within ${maxWaitMs / 60000} minutes`,
@@ -2339,7 +2599,7 @@ export async function getReportStatus(taskId: string): Promise<ReportTaskStatus>
   return fetchApi<ReportTaskStatus>(
     `/api/report/status/${encodeURIComponent(taskId)}`,
     { method: 'GET' },
-    { timeoutMs: 10000 }
+    { timeoutMs: 10000, skipRetry: true }
   );
 }
 
@@ -2354,55 +2614,79 @@ export async function generateReportWithProgress(
   // Start async generation
   const asyncResponse = await startReportGeneration(request);
   const taskId = asyncResponse.task_id;
-  
+
   // Poll for completion
   const maxWaitMs = 420000; // Keep polling long enough for slow CPU MedGemma runs
-  const pollIntervalMs = 2000; // Poll every 2 seconds
+  const pollIntervalMs = 2000;
   const startTime = Date.now();
-  let lastProgress = 0;
-  let progressStalledSince = 0;
-  
+  let previousProgress: number | null = null;
+  let stablePollCount = 0;
+  let consecutiveErrors = 0;
+
   while (Date.now() - startTime < maxWaitMs) {
     let status: ReportTaskStatus;
     try {
       status = await getReportStatus(taskId);
+      consecutiveErrors = 0;
     } catch (pollError) {
-      // Transient poll failure — wait and retry
+      if (isNonRetryablePollingError(pollError)) {
+        throw pollError;
+      }
+
+      // Transient poll failure — wait and retry with adaptive backoff
       console.warn('[API] Report status poll failed:', pollError);
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      consecutiveErrors += 1;
+      const retryDelayMs = getAdaptivePollDelay({
+        baseIntervalMs: pollIntervalMs,
+        minIntervalMs: pollIntervalMs,
+        maxIntervalMs: 15000,
+        progress: previousProgress ?? undefined,
+        previousProgress,
+        stablePollCount,
+        consecutiveErrors,
+      });
+      await sleep(retryDelayMs);
       continue;
     }
-    
+
     // Report progress
-    if (onProgress) {
-      onProgress(status.progress, status.message);
-    }
-    
+    onProgress?.(status.progress, status.message);
+
     if (status.status === 'completed' && status.result) {
       // Transform backend response to frontend format
       return transformBackendReport(status.result);
     }
-    
+
     if (status.status === 'failed') {
       throw new AtlasApiError({
         code: 'REPORT_GENERATION_FAILED',
         message: status.error || 'Report generation failed',
       });
     }
-    
-    // Detect stalled progress (same value for >60s = likely stuck)
-    if (status.progress !== lastProgress) {
-      lastProgress = status.progress;
-      progressStalledSince = Date.now();
-    } else if (progressStalledSince > 0 && Date.now() - progressStalledSince > 60000) {
-      console.warn(`[API] Report progress stalled at ${status.progress}% for >60s`);
-      // Don't throw yet — backend auto-expiry should handle it
+
+    const previous = previousProgress;
+    const progressed =
+      previous === null || status.progress > previous;
+    stablePollCount = progressed ? 0 : stablePollCount + 1;
+    previousProgress = status.progress;
+
+    if (stablePollCount >= 6) {
+      console.warn(`[API] Report progress stalled at ${status.progress}% for multiple polls`);
     }
-    
-    // Wait before next poll
-    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+
+    const nextDelayMs = getAdaptivePollDelay({
+      baseIntervalMs: pollIntervalMs,
+      minIntervalMs: 800,
+      maxIntervalMs: 10000,
+      status: status.status,
+      progress: status.progress,
+      previousProgress: previous,
+      stablePollCount,
+    });
+
+    await sleep(nextDelayMs);
   }
-  
+
   throw new AtlasApiError({
     code: 'REPORT_TIMEOUT',
     message: 'Report generation timed out. The backend may still be processing — please retry.',
@@ -2594,7 +2878,9 @@ export async function getBatchAnalysisStatus(
   taskId: string
 ): Promise<AsyncBatchTaskStatus> {
   return fetchApi<AsyncBatchTaskStatus>(
-    `/api/analyze-batch/status/${taskId}`
+    `/api/analyze-batch/status/${taskId}`,
+    {},
+    { timeoutMs: 10000, skipRetry: true }
   );
 }
 
@@ -2626,24 +2912,72 @@ export async function listBatchTasks(
  * Poll batch analysis until completion or cancellation
  * @param taskId - Task ID to poll
  * @param onProgress - Callback for progress updates
- * @param pollIntervalMs - Poll interval in milliseconds (default 1000)
+ * @param pollIntervalMs - Base poll interval in milliseconds
+ * @param maxWaitMs - Maximum time to wait before timing out
  * @returns Final task status with results
  */
 export async function pollBatchAnalysis(
   taskId: string,
   onProgress?: (status: AsyncBatchTaskStatus) => void,
-  pollIntervalMs: number = 1000
+  pollIntervalMs: number = 1200,
+  maxWaitMs: number = 21600000 // 6 hours max
 ): Promise<AsyncBatchTaskStatus> {
-  let status = await getBatchAnalysisStatus(taskId);
-  
-  while (status.status === "pending" || status.status === "running") {
-    onProgress?.(status);
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-    status = await getBatchAnalysisStatus(taskId);
+  const startTime = Date.now();
+  let previousProgress: number | null = null;
+  let stablePollCount = 0;
+  let consecutiveErrors = 0;
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const status = await getBatchAnalysisStatus(taskId);
+      onProgress?.(status);
+
+      if (status.status !== "pending" && status.status !== "running") {
+        return status;
+      }
+
+      const previous = previousProgress;
+      const progressed =
+        previous === null || status.progress > previous;
+      stablePollCount = progressed ? 0 : stablePollCount + 1;
+      previousProgress = status.progress;
+      consecutiveErrors = 0;
+
+      const nextDelayMs = getAdaptivePollDelay({
+        baseIntervalMs: pollIntervalMs,
+        minIntervalMs: 700,
+        maxIntervalMs: 8000,
+        status: status.status,
+        progress: status.progress,
+        previousProgress: previous,
+        stablePollCount,
+      });
+      await sleep(nextDelayMs);
+    } catch (error) {
+      if (isNonRetryablePollingError(error)) {
+        throw error;
+      }
+
+      consecutiveErrors += 1;
+      console.warn("Batch analysis polling error, retrying...", error);
+      const errorDelayMs = getAdaptivePollDelay({
+        baseIntervalMs: pollIntervalMs,
+        minIntervalMs: pollIntervalMs,
+        maxIntervalMs: 15000,
+        progress: previousProgress ?? undefined,
+        previousProgress,
+        stablePollCount,
+        consecutiveErrors,
+      });
+      await sleep(errorDelayMs);
+    }
   }
-  
-  onProgress?.(status);
-  return status;
+
+  throw new AtlasApiError({
+    code: "TIMEOUT",
+    message: `Batch analysis did not complete within ${Math.round(maxWaitMs / 60000)} minutes`,
+    isTimeout: true,
+  });
 }
 
 /**
@@ -2893,11 +3227,14 @@ export async function pollBatchEmbed(
   maxWaitMs: number = 86400000 // 24 hours for overnight runs
 ): Promise<BatchEmbedProgress> {
   const startTime = Date.now();
+  let previousProgress: number | null = null;
+  let stablePollCount = 0;
+  let consecutiveErrors = 0;
 
   while (Date.now() - startTime < maxWaitMs) {
     try {
       const status = await getBatchEmbedStatus(batchTaskId);
-      if (onProgress) onProgress(status);
+      onProgress?.(status);
 
       if (
         status.status === "completed" ||
@@ -2907,10 +3244,40 @@ export async function pollBatchEmbed(
         return status;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      const previous = previousProgress;
+      const progressed =
+        previous === null || status.progress > previous;
+      stablePollCount = progressed ? 0 : stablePollCount + 1;
+      previousProgress = status.progress;
+      consecutiveErrors = 0;
+
+      const nextDelayMs = getAdaptivePollDelay({
+        baseIntervalMs: pollIntervalMs,
+        minIntervalMs: 1500,
+        maxIntervalMs: 12000,
+        status: status.status,
+        progress: status.progress,
+        previousProgress: previous,
+        stablePollCount,
+      });
+      await sleep(nextDelayMs);
     } catch (error) {
+      if (isNonRetryablePollingError(error)) {
+        throw error;
+      }
+
+      consecutiveErrors += 1;
       console.warn("Batch embed polling error, retrying...", error);
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs * 2));
+      const errorDelayMs = getAdaptivePollDelay({
+        baseIntervalMs: pollIntervalMs,
+        minIntervalMs: pollIntervalMs,
+        maxIntervalMs: 20000,
+        progress: previousProgress ?? undefined,
+        previousProgress,
+        stablePollCount,
+        consecutiveErrors,
+      });
+      await sleep(errorDelayMs);
     }
   }
 

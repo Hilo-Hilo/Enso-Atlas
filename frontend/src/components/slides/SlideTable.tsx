@@ -2,11 +2,10 @@
 
 import React from "react";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, truncateText, formatDate } from "@/lib/utils";
 import { useProject } from "@/contexts/ProjectContext";
-import type { SlideInfo, ExtendedSlideInfo, SlideFilters } from "@/types";
+import type { SlideInfo, ExtendedSlideInfo } from "@/types";
 import {
   Star,
   MoreVertical,
@@ -21,6 +20,7 @@ import {
   Circle,
   Minus,
 } from "lucide-react";
+import { getVirtualWindow } from "./virtualization";
 
 interface SlideTableProps {
   slides: (SlideInfo & Partial<ExtendedSlideInfo>)[];
@@ -37,6 +37,9 @@ interface SlideTableProps {
   onSort?: (field: string) => void;
   isLoading?: boolean;
 }
+
+const ROW_HEIGHT = 72;
+const VIRTUALIZE_THRESHOLD = 60;
 
 // Tag colors
 const TAG_COLORS: Record<string, string> = {
@@ -90,7 +93,7 @@ function SortableHeader({
 
 function TableRowSkeleton() {
   return (
-    <tr className="border-b border-gray-100">
+    <tr className="border-b border-gray-100 h-[72px]">
       <td className="py-3 px-4">
         <Skeleton className="h-5 w-5 rounded" />
       </td>
@@ -146,12 +149,12 @@ function SlideRow({
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   // Get display labels from project context
-  const positiveLabel = currentProject.positive_class 
+  const positiveLabel = currentProject.positive_class
     ? currentProject.positive_class.charAt(0).toUpperCase() + currentProject.positive_class.slice(1)
     : "Positive";
-  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class)
-    ? (currentProject.classes.find(c => c !== currentProject.positive_class) as string).charAt(0).toUpperCase() + 
-      (currentProject.classes.find(c => c !== currentProject.positive_class) as string).slice(1)
+  const negativeLabel = currentProject.classes?.find((c) => c !== currentProject.positive_class)
+    ? (currentProject.classes.find((c) => c !== currentProject.positive_class) as string).charAt(0).toUpperCase() +
+      (currentProject.classes.find((c) => c !== currentProject.positive_class) as string).slice(1)
     : "Negative";
 
   React.useEffect(() => {
@@ -167,12 +170,12 @@ function SlideRow({
   return (
     <tr
       className={cn(
-        "border-b border-gray-100 dark:border-navy-700 hover:bg-gray-50 dark:hover:bg-navy-800/50 transition-colors",
+        "h-[72px] border-b border-gray-100 dark:border-navy-700 hover:bg-gray-50 dark:hover:bg-navy-800/50 transition-colors",
         isSelected && "bg-clinical-50 dark:bg-clinical-900/20"
       )}
     >
       {/* Selection checkbox */}
-      <td className="py-3 px-4">
+      <td className="py-3 px-4 align-middle">
         <button
           onClick={() => onSelect(!isSelected)}
           className="flex items-center justify-center"
@@ -186,7 +189,7 @@ function SlideRow({
       </td>
 
       {/* Name */}
-      <td className="py-3 px-4">
+      <td className="py-3 px-4 align-middle">
         <button
           onClick={onView}
           className="flex items-center gap-2 hover:text-clinical-600 transition-colors"
@@ -201,7 +204,7 @@ function SlideRow({
       </td>
 
       {/* Label */}
-      <td className="py-3 px-4">
+      <td className="py-3 px-4 align-middle">
         {slide.label ? (
           <Badge
             variant={slide.label === "1" ? "success" : "danger"}
@@ -215,14 +218,14 @@ function SlideRow({
       </td>
 
       {/* Tags */}
-      <td className="py-3 px-4">
+      <td className="py-3 px-4 align-middle">
         {slide.tags && slide.tags.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex items-center gap-1 overflow-hidden">
             {slide.tags.slice(0, 2).map((tag, idx) => (
               <span
                 key={tag}
                 className={cn(
-                  "px-1.5 py-0.5 text-xs rounded-full",
+                  "px-1.5 py-0.5 text-xs rounded-full whitespace-nowrap",
                   TAG_COLORS[Object.keys(TAG_COLORS)[idx % Object.keys(TAG_COLORS).length]]
                 )}
               >
@@ -230,7 +233,7 @@ function SlideRow({
               </span>
             ))}
             {slide.tags.length > 2 && (
-              <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-500 rounded-full">
+              <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-500 rounded-full whitespace-nowrap">
                 +{slide.tags.length - 2}
               </span>
             )}
@@ -241,21 +244,21 @@ function SlideRow({
       </td>
 
       {/* Patches */}
-      <td className="py-3 px-4">
+      <td className="py-3 px-4 align-middle">
         <span className="text-sm text-gray-600 dark:text-gray-300">
           {slide.numPatches !== undefined ? slide.numPatches.toLocaleString() : "—"}
         </span>
       </td>
 
       {/* Date */}
-      <td className="py-3 px-4">
+      <td className="py-3 px-4 align-middle">
         <span className="text-sm text-gray-500 dark:text-gray-400">
           {formatDate(slide.createdAt)}
         </span>
       </td>
 
       {/* Starred */}
-      <td className="py-3 px-4">
+      <td className="py-3 px-4 align-middle">
         <button
           onClick={onStar}
           className={cn(
@@ -270,7 +273,7 @@ function SlideRow({
       </td>
 
       {/* Actions */}
-      <td className="py-3 px-4">
+      <td className="py-3 px-4 align-middle">
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setShowMenu(!showMenu)}
@@ -348,9 +351,53 @@ export function SlideTable({
   const allSelected = slides.length > 0 && slides.every((s) => selectedIds.has(s.id));
   const someSelected = slides.some((s) => selectedIds.has(s.id));
 
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = React.useState(0);
+  const [viewportHeight, setViewportHeight] = React.useState(640);
+  const shouldVirtualize = slides.length >= VIRTUALIZE_THRESHOLD;
+
+  React.useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateViewport = () => {
+      setScrollTop(el.scrollTop);
+      setViewportHeight(Math.max(320, el.clientHeight || 0));
+    };
+
+    updateViewport();
+    el.addEventListener("scroll", updateViewport, { passive: true });
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateViewport) : null;
+    resizeObserver?.observe(el);
+
+    return () => {
+      el.removeEventListener("scroll", updateViewport);
+      resizeObserver?.disconnect();
+    };
+  }, []);
+
+  const windowRange = shouldVirtualize
+    ? getVirtualWindow({
+        itemCount: slides.length,
+        itemHeight: ROW_HEIGHT,
+        viewportHeight,
+        scrollTop,
+        overscan: 8,
+      })
+    : {
+        startIndex: 0,
+        endIndex: slides.length,
+        topSpacerHeight: 0,
+        bottomSpacerHeight: 0,
+      };
+
+  const visibleSlides = slides.slice(windowRange.startIndex, windowRange.endIndex);
+
   if (isLoading && slides.length === 0) {
     return (
-      <div className="overflow-x-auto">
+      <div className="h-full overflow-auto">
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
@@ -390,7 +437,7 @@ export function SlideTable({
 
   if (slides.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div className="h-full flex flex-col items-center justify-center py-16 text-center">
         <Microscope className="h-16 w-16 text-gray-300 dark:text-gray-600 mb-4" />
         <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No slides found</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm">
@@ -401,9 +448,9 @@ export function SlideTable({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div ref={containerRef} className="h-full overflow-auto" data-testid="slide-table-scroll-container">
       <table className="w-full">
-        <thead>
+        <thead className="sticky top-0 z-10">
           <tr className="border-b border-gray-200 dark:border-navy-700 bg-gray-50 dark:bg-navy-900">
             {/* Select all */}
             <th className="py-3 px-4 text-left w-12">
@@ -474,7 +521,13 @@ export function SlideTable({
           </tr>
         </thead>
         <tbody>
-          {slides.map((slide) => (
+          {windowRange.topSpacerHeight > 0 && (
+            <tr aria-hidden="true">
+              <td colSpan={8} style={{ height: windowRange.topSpacerHeight, padding: 0 }} />
+            </tr>
+          )}
+
+          {visibleSlides.map((slide) => (
             <SlideRow
               key={slide.id}
               slide={slide}
@@ -487,6 +540,12 @@ export function SlideTable({
               onDelete={() => onDeleteSlide(slide.id)}
             />
           ))}
+
+          {windowRange.bottomSpacerHeight > 0 && (
+            <tr aria-hidden="true">
+              <td colSpan={8} style={{ height: windowRange.bottomSpacerHeight, padding: 0 }} />
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
