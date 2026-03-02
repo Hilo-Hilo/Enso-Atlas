@@ -29,6 +29,7 @@ import type { UserViewMode } from "@/components/layout/Header";
 import { PatchZoomModal, KeyboardShortcutsModal } from "@/components/modals";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
+import { usePanelSwitchPerf } from "@/hooks/usePerfInstrumentation";
 import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords, getProjectAvailableModels, type AvailableModelDetail } from "@/lib/api";
 import { getClientApiBaseUrl } from "@/lib/clientApiBase";
 import { deduplicateSlides } from "@/lib/slideUtils";
@@ -277,6 +278,9 @@ function HomePage() {
   // Desktop sidebar collapse state (left only; right panel is always visible)
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
+
+  usePanelSwitchPerf("right-sidebar", activeRightPanel);
+  usePanelSwitchPerf("mobile-panel", mobilePanelTab);
 
   // Check if this is a first visit (show welcome modal)
   useEffect(() => {

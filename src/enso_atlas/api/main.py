@@ -16,6 +16,7 @@ import base64
 import io
 import time
 import hashlib
+import uuid
 from datetime import datetime
 from .embedding_tasks import task_manager, TaskStatus, EmbeddingTask
 from .report_tasks import report_task_manager, ReportTaskStatus, ReportTask
@@ -31,6 +32,7 @@ from .model_scope import (
 )
 from .heatmap_grid import compute_heatmap_grid_coverage
 from collections import deque
+from .perf_observability import InMemoryLatencyTracker, RequestLatencyRecord, normalize_perf_path, should_track_path
 
 import numpy as np
 from PIL import Image
@@ -924,6 +926,95 @@ def create_app(
     _data_root: Path = Path("data")
     slides_dir: Path = _data_root / "slides"
 
+    def _env_flag(name: str, default: bool) -> bool:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _env_int(name: str, default: int, minimum: int = 1) -> int:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        try:
+            return max(minimum, int(raw))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid integer for %s=%r; using default=%d",
+                name,
+                raw,
+                default,
+            )
+            return default
+
+    perf_enabled = _env_flag("ENSO_PERF_ENABLED", default=True)
+    perf_summary_enabled = _env_flag("ENSO_PERF_SUMMARY_ENABLED", default=perf_enabled)
+    perf_max_samples = _env_int("ENSO_PERF_MAX_SAMPLES", default=2000, minimum=100)
+    perf_route_limit = _env_int("ENSO_PERF_ROUTE_LIMIT", default=25, minimum=1)
+    perf_tracker = InMemoryLatencyTracker(max_samples=perf_max_samples)
+    perf_logger = logging.getLogger("enso_atlas.perf")
+
+    if perf_enabled:
+
+        @app.middleware("http")
+        async def request_timing_middleware(request: Request, call_next):
+            request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+            request.state.request_id = request_id
+            started_at = time.perf_counter()
+
+            response = None
+            status_code = 500
+
+            try:
+                response = await call_next(request)
+                status_code = response.status_code
+            except Exception:
+                status_code = 500
+                raise
+            finally:
+                route_obj = request.scope.get("route")
+                route_path = getattr(route_obj, "path", None) or request.url.path
+                normalized_path = normalize_perf_path(route_path)
+                duration_ms = (time.perf_counter() - started_at) * 1000.0
+
+                if should_track_path(normalized_path):
+                    perf_tracker.add(
+                        RequestLatencyRecord(
+                            method=request.method.upper(),
+                            path=normalized_path,
+                            status=status_code,
+                            duration_ms=duration_ms,
+                            request_id=request_id,
+                            ts_unix=time.time(),
+                        )
+                    )
+                    perf_logger.info(
+                        "request_timing %s",
+                        json.dumps(
+                            {
+                                "method": request.method.upper(),
+                                "path": normalized_path,
+                                "status": status_code,
+                                "duration_ms": round(duration_ms, 3),
+                                "request_id": request_id,
+                            },
+                            separators=(",", ":"),
+                        ),
+                    )
+
+            if response is not None:
+                response.headers.setdefault("X-Request-ID", request_id)
+                return response
+
+            raise RuntimeError("request_timing_middleware reached unexpected state")
+
+    logger.info(
+        "Perf observability enabled=%s summary_enabled=%s max_samples=%d",
+        perf_enabled,
+        perf_summary_enabled,
+        perf_max_samples,
+    )
+
     def _classifier_threshold(default: float = 0.5) -> float:
         """Return a safe numeric decision threshold for binary predictions."""
         raw_threshold = getattr(classifier, "threshold", None)
@@ -1725,6 +1816,30 @@ def create_app(
     async def api_health_check():
         """Health check endpoint (aliased for frontend compatibility)."""
         return await health_check()
+
+    @app.get("/api/perf/latency-summary")
+    async def perf_latency_summary():
+        """Return rolling p50/p95 latency stats from in-memory request timings."""
+        if not perf_enabled:
+            return {
+                "enabled": False,
+                "summary_enabled": False,
+                "reason": "Set ENSO_PERF_ENABLED=1 to collect request timings.",
+            }
+
+        if not perf_summary_enabled:
+            raise HTTPException(
+                status_code=404,
+                detail="Perf latency summary endpoint disabled. Set ENSO_PERF_SUMMARY_ENABLED=1.",
+            )
+
+        return {
+            "enabled": True,
+            "summary_enabled": True,
+            "max_samples": perf_max_samples,
+            "route_limit": perf_route_limit,
+            "summary": perf_tracker.summary(limit_routes=perf_route_limit),
+        }
 
     @app.get("/")
     async def root():
