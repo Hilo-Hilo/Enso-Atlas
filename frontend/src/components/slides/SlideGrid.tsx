@@ -3,7 +3,6 @@
 import React from "react";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, truncateText } from "@/lib/utils";
 import { getThumbnailUrl } from "@/lib/api";
@@ -20,6 +19,7 @@ import {
   CheckCircle2,
   Circle,
 } from "lucide-react";
+import { getGridColumnCount, getVirtualWindow } from "./virtualization";
 
 interface SlideGridProps {
   slides: (SlideInfo & Partial<ExtendedSlideInfo>)[];
@@ -33,6 +33,11 @@ interface SlideGridProps {
   onDeleteSlide: (id: string) => void;
   isLoading?: boolean;
 }
+
+const CARD_HEIGHT = 320;
+const GRID_GAP = 16;
+const ROW_HEIGHT = CARD_HEIGHT + GRID_GAP;
+const VIRTUALIZE_THRESHOLD = 40;
 
 // Tag colors
 const TAG_COLORS: Record<string, string> = {
@@ -50,7 +55,7 @@ const TAG_COLORS: Record<string, string> = {
 
 function SlideCardSkeleton() {
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden h-full">
       <div className="aspect-[4/3] bg-gray-100">
         <Skeleton className="w-full h-full" />
       </div>
@@ -93,14 +98,14 @@ function SlideCard({
   const [imageError, setImageError] = React.useState(false);
   const [isImageLoaded, setIsImageLoaded] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
-  
+
   // Get display labels from project context
-  const positiveLabel = currentProject.positive_class 
+  const positiveLabel = currentProject.positive_class
     ? currentProject.positive_class.charAt(0).toUpperCase() + currentProject.positive_class.slice(1)
     : "Positive";
-  const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class)
-    ? (currentProject.classes.find(c => c !== currentProject.positive_class) as string).charAt(0).toUpperCase() + 
-      (currentProject.classes.find(c => c !== currentProject.positive_class) as string).slice(1)
+  const negativeLabel = currentProject.classes?.find((c) => c !== currentProject.positive_class)
+    ? (currentProject.classes.find((c) => c !== currentProject.positive_class) as string).charAt(0).toUpperCase() +
+      (currentProject.classes.find((c) => c !== currentProject.positive_class) as string).slice(1)
     : "Negative";
 
   // Close menu when clicking outside
@@ -124,7 +129,7 @@ function SlideCard({
   return (
     <Card
       className={cn(
-        "overflow-hidden transition-all duration-200 group cursor-pointer",
+        "overflow-hidden transition-all duration-200 group cursor-pointer h-full flex flex-col",
         isSelected && "ring-2 ring-clinical-500 shadow-lg"
       )}
     >
@@ -145,7 +150,9 @@ function SlideCard({
               const retried = img.dataset.retried;
               if (!retried) {
                 img.dataset.retried = "1";
-                setTimeout(() => { img.src = thumbnailUrl + "?retry=1"; }, 3000);
+                setTimeout(() => {
+                  img.src = thumbnailUrl + "?retry=1";
+                }, 3000);
               } else {
                 setImageError(true);
                 setIsImageLoaded(true);
@@ -225,7 +232,7 @@ function SlideCard({
       </div>
 
       {/* Content */}
-      <CardContent className="p-3" onClick={onView}>
+      <CardContent className="p-3 flex-1 flex flex-col" onClick={onView}>
         {/* Slide name */}
         <h3 className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate mb-1.5" title={slide.filename}>
           {truncateText(slide.id, 30)}
@@ -233,7 +240,7 @@ function SlideCard({
 
         {/* Tags */}
         {slide.tags && slide.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-2">
+          <div className="flex flex-wrap gap-1 mb-2 min-h-[22px]">
             {slide.tags.slice(0, 3).map((tag, idx) => (
               <span
                 key={tag}
@@ -254,7 +261,7 @@ function SlideCard({
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mt-auto">
           <div className="flex items-center gap-2 text-xs text-gray-500">
             {slide.numPatches !== undefined && (
               <span className="flex items-center gap-1">
@@ -336,7 +343,7 @@ export function SlideGrid({
   slides,
   selectedIds,
   onSelectSlide,
-  onSelectAll,
+  onSelectAll: _onSelectAll,
   onStarSlide,
   onViewSlide,
   onAnalyzeSlide,
@@ -344,19 +351,76 @@ export function SlideGrid({
   onDeleteSlide,
   isLoading,
 }: SlideGridProps) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = React.useState(0);
+  const [viewportHeight, setViewportHeight] = React.useState(640);
+  const [containerWidth, setContainerWidth] = React.useState(0);
+  const shouldVirtualize = slides.length >= VIRTUALIZE_THRESHOLD;
+
+  void _onSelectAll;
+
+  React.useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateViewport = () => {
+      setScrollTop(el.scrollTop);
+      setViewportHeight(Math.max(320, el.clientHeight || 0));
+      setContainerWidth(el.clientWidth || 0);
+    };
+
+    updateViewport();
+    el.addEventListener("scroll", updateViewport, { passive: true });
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateViewport) : null;
+    resizeObserver?.observe(el);
+
+    return () => {
+      el.removeEventListener("scroll", updateViewport);
+      resizeObserver?.disconnect();
+    };
+  }, []);
+
+  const columns = getGridColumnCount(containerWidth);
+  const totalRows = Math.ceil(slides.length / columns);
+
+  const rowWindow = shouldVirtualize
+    ? getVirtualWindow({
+        itemCount: totalRows,
+        itemHeight: ROW_HEIGHT,
+        viewportHeight,
+        scrollTop,
+        overscan: 4,
+      })
+    : {
+        startIndex: 0,
+        endIndex: totalRows,
+        topSpacerHeight: 0,
+        bottomSpacerHeight: 0,
+      };
+
+  const visibleStartIndex = rowWindow.startIndex * columns;
+  const visibleEndIndex = Math.min(slides.length, rowWindow.endIndex * columns);
+  const visibleSlides = slides.slice(visibleStartIndex, visibleEndIndex);
+
   if (isLoading && slides.length === 0) {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-        {Array.from({ length: 12 }).map((_, i) => (
-          <SlideCardSkeleton key={i} />
-        ))}
+      <div className="h-full overflow-y-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className="h-[320px]">
+              <SlideCardSkeleton />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   if (slides.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div className="h-full flex flex-col items-center justify-center py-16 text-center">
         <Microscope className="h-16 w-16 text-gray-300 dark:text-gray-600 mb-4" />
         <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No slides found</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm">
@@ -367,20 +431,31 @@ export function SlideGrid({
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-      {slides.map((slide) => (
-        <SlideCard
-          key={slide.id}
-          slide={slide}
-          isSelected={selectedIds.has(slide.id)}
-          onSelect={(selected) => onSelectSlide(slide.id, selected)}
-          onStar={() => onStarSlide(slide.id)}
-          onView={() => onViewSlide(slide.id)}
-          onAnalyze={() => onAnalyzeSlide(slide.id)}
-          onAddToGroup={() => onAddToGroup(slide.id)}
-          onDelete={() => onDeleteSlide(slide.id)}
-        />
-      ))}
+    <div ref={containerRef} className="h-full overflow-y-auto" data-testid="slide-grid-scroll-container">
+      {rowWindow.topSpacerHeight > 0 && (
+        <div aria-hidden="true" style={{ height: rowWindow.topSpacerHeight }} />
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+        {visibleSlides.map((slide) => (
+          <div key={slide.id} className="h-[320px]">
+            <SlideCard
+              slide={slide}
+              isSelected={selectedIds.has(slide.id)}
+              onSelect={(selected) => onSelectSlide(slide.id, selected)}
+              onStar={() => onStarSlide(slide.id)}
+              onView={() => onViewSlide(slide.id)}
+              onAnalyze={() => onAnalyzeSlide(slide.id)}
+              onAddToGroup={() => onAddToGroup(slide.id)}
+              onDelete={() => onDeleteSlide(slide.id)}
+            />
+          </div>
+        ))}
+      </div>
+
+      {rowWindow.bottomSpacerHeight > 0 && (
+        <div aria-hidden="true" style={{ height: rowWindow.bottomSpacerHeight }} />
+      )}
     </div>
   );
 }
