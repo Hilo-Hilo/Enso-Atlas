@@ -2436,8 +2436,6 @@ function HomePage() {
   const analysisStepForControls =
     isCachedResult && !!multiModelResult ? -1 : analysisStep;
 
-  const isAnyAnalysisRunning = isAnalyzing || isAnalyzingMultiModel;
-
   // Determine if we have results to show (cached multi-model counts too)
   const hasResults = useMemo(
     () => !!analysisResult || !!multiModelResult || isAnyAnalysisRunning,
