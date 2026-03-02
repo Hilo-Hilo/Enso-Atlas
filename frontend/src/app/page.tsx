@@ -1743,8 +1743,9 @@ function HomePage() {
 
     // Only run multi-model analysis when this project actually has multiple scoped models.
     if (scopedProjectModels.length > 1) {
-      // force=true to bypass cache when user explicitly clicks
-      handleMultiModelAnalyze(true);
+      // Hotfix: default Analyze should reuse cached multi-model results when available.
+      // Keep forced recompute only for explicit Retry/Re-analyze actions.
+      handleMultiModelAnalyze(false);
     } else {
       setMultiModelResult(null);
       setMultiModelError(null);
