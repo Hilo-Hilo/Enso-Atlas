@@ -313,6 +313,49 @@ def _normalize_coords_to_level0(
     return arr, 1
 
 
+def _resolve_semantic_siglip_plan(
+    *,
+    has_cached_siglip: bool,
+    allow_on_the_fly: bool,
+    patch_count: Optional[int],
+    max_patches: int,
+) -> tuple[str, str]:
+    """Return the semantic-search strategy for SigLIP retrieval.
+
+    The API should prioritize responsiveness and never surprise users by
+    launching very large on-the-fly embedding jobs unless explicitly enabled
+    and within safe bounds.
+
+    Returns:
+      (mode, reason)
+      - mode: "cache", "on-the-fly", or "fallback"
+      - reason: structured explanation for logs/observability
+    """
+    if has_cached_siglip:
+        return "cache", "cache-hit"
+
+    if not allow_on_the_fly:
+        return "fallback", "on-the-fly-disabled"
+
+    safe_limit = max(1, int(max_patches))
+
+    if patch_count is None:
+        return "fallback", "missing-coordinates"
+
+    try:
+        patch_count_int = int(patch_count)
+    except (TypeError, ValueError):
+        return "fallback", "invalid-patch-count"
+
+    if patch_count_int <= 0:
+        return "fallback", "empty-coordinates"
+
+    if patch_count_int > safe_limit:
+        return "fallback", "too-many-patches"
+
+    return "on-the-fly", "eligible"
+
+
 # PDF Export (optional) - second import block kept for compatibility
 if not PDF_EXPORT_AVAILABLE:
     try:
@@ -934,20 +977,46 @@ def create_app(
             return default
         return raw.strip().lower() in {"1", "true", "yes", "on"}
 
-    def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    def _env_int(
+        name: str,
+        default: int,
+        minimum: int = 1,
+        maximum: Optional[int] = None,
+    ) -> int:
         raw = os.environ.get(name)
         if raw is None:
-            return default
-        try:
-            return max(minimum, int(raw))
-        except (TypeError, ValueError):
+            value = int(default)
+        else:
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid integer for %s=%r; using default=%d",
+                    name,
+                    raw,
+                    default,
+                )
+                value = int(default)
+
+        if value < minimum:
             logger.warning(
-                "Invalid integer for %s=%r; using default=%d",
+                "Value for %s=%r below minimum=%d; clamping.",
                 name,
-                raw,
-                default,
+                raw if raw is not None else value,
+                minimum,
             )
-            return default
+            value = minimum
+
+        if maximum is not None and value > maximum:
+            logger.warning(
+                "Value for %s=%r above maximum=%d; clamping.",
+                name,
+                raw if raw is not None else value,
+                maximum,
+            )
+            value = maximum
+
+        return value
 
     perf_enabled = _env_flag("ENSO_PERF_ENABLED", default=True)
     perf_summary_enabled = _env_flag("ENSO_PERF_SUMMARY_ENABLED", default=perf_enabled)
@@ -965,8 +1034,9 @@ def create_app(
     )
     semantic_on_the_fly_max_patches = _env_int(
         "ENSO_SEMANTIC_ON_THE_FLY_MAX_PATCHES",
-        default=2000,
+        default=1024,
         minimum=256,
+        maximum=4096,
     )
 
     if perf_enabled:
@@ -4988,109 +5058,161 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
         if not emb_path.exists():
             raise HTTPException(status_code=404, detail=f"Slide {slide_id} not found")
 
-        # Try to use precomputed MedSigLIP patch embeddings if present
+        # Load Path Foundation coordinates once up front. They power both
+        # fallback ranking and on-the-fly SigLIP eligibility checks.
+        coords = None
+        if coord_path.exists():
+            try:
+                coords = np.load(coord_path, allow_pickle=False)
+            except Exception as e:
+                logger.warning("Failed to load patch coordinates for %s: %s", slide_id, e)
+                coords = None
+
+        # Try to use precomputed MedSigLIP patch embeddings if present.
         siglip_cache_key = f"{slide_id}_siglip"
+        siglip_cache_path = _search_embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip.npy"
+        siglip_coords_path = _search_embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip_coords.npy"
         siglip_coords = None  # Separate coords for level-1 SigLIP patches
-        use_siglip_search = True
+        siglip_embeddings = None
+        use_siglip_search = False
+        cache_source = None
 
         if siglip_cache_key in slide_siglip_embeddings:
-            siglip_embeddings = slide_siglip_embeddings[siglip_cache_key]
-            # Load SigLIP-specific coords if available
-            siglip_coords_path = _search_embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip_coords.npy"
-            if siglip_coords_path.exists():
-                siglip_coords = np.load(siglip_coords_path)
-            logger.info(f"Using cached MedSigLIP embeddings for {slide_id}")
-        else:
-            siglip_cache_path = _search_embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip.npy"
-            if siglip_cache_path.exists():
-                siglip_embeddings = np.load(siglip_cache_path)
-                slide_siglip_embeddings[siglip_cache_key] = siglip_embeddings
-                # Load SigLIP-specific coords if available
-                siglip_coords_path = _search_embeddings_dir / "medsiglip_cache" / f"{slide_id}_siglip_coords.npy"
-                if siglip_coords_path.exists():
-                    siglip_coords = np.load(siglip_coords_path)
-                logger.info(f"Loaded MedSigLIP embeddings from cache for {slide_id}")
+            cached = slide_siglip_embeddings.get(siglip_cache_key)
+            if isinstance(cached, np.ndarray) and cached.size > 0:
+                siglip_embeddings = cached
+                cache_source = "memory"
             else:
+                logger.warning("Ignoring invalid in-memory MedSigLIP cache for %s", slide_id)
+                slide_siglip_embeddings.pop(siglip_cache_key, None)
+
+        if siglip_embeddings is None and siglip_cache_path.exists():
+            try:
+                siglip_embeddings = np.load(siglip_cache_path, allow_pickle=False)
+                slide_siglip_embeddings[siglip_cache_key] = siglip_embeddings
+                cache_source = "disk"
+            except Exception as e:
+                logger.warning(
+                    "Failed to load MedSigLIP cache for %s (%s); using fallback.",
+                    slide_id,
+                    e,
+                )
                 siglip_embeddings = None
 
-                if not semantic_allow_on_the_fly_siglip:
-                    logger.info(
-                        "No MedSigLIP cache for %s; on-the-fly embedding disabled "
-                        "(set ENSO_SEMANTIC_ALLOW_ON_THE_FLY_SIGLIP=1 to enable). "
-                        "Using fallback.",
+        if siglip_embeddings is not None:
+            use_siglip_search = True
+            if siglip_coords_path.exists():
+                try:
+                    siglip_coords = np.load(siglip_coords_path, allow_pickle=False)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to load MedSigLIP coords for %s (%s); using PF coords.",
+                        slide_id,
+                        e,
+                    )
+                    siglip_coords = None
+            logger.info("Using %s MedSigLIP cache for %s", cache_source, slide_id)
+        else:
+            patch_count = int(len(coords)) if coords is not None else None
+            plan_mode, plan_reason = _resolve_semantic_siglip_plan(
+                has_cached_siglip=False,
+                allow_on_the_fly=semantic_allow_on_the_fly_siglip,
+                patch_count=patch_count,
+                max_patches=semantic_on_the_fly_max_patches,
+            )
+
+            if plan_mode == "on-the-fly":
+                # On-the-fly MedSigLIP embedding: extract patches from WSI and embed.
+                # Guardrails above ensure this path is explicit and bounded.
+                wsi_result = get_slide_and_dz(slide_id, project_id=request.project_id)
+
+                if wsi_result is None:
+                    plan_reason = "wsi-unavailable"
+                    logger.warning(
+                        "Skipping on-the-fly MedSigLIP for %s: WSI unavailable. Using fallback.",
                         slide_id,
                     )
                 else:
-                    # On-the-fly MedSigLIP embedding: extract patches from WSI and embed
-                    wsi_result = get_slide_and_dz(slide_id, project_id=request.project_id)
-                    coord_path_check = _search_embeddings_dir / f"{slide_id}_coords.npy"
+                    try:
+                        slide_obj, _ = wsi_result
+                        patch_coords = np.asarray(coords)
+                        if patch_coords.ndim != 2 or patch_coords.shape[1] < 2:
+                            raise ValueError(f"Invalid coord array shape: {patch_coords.shape}")
+                        patch_coords = patch_coords[:, :2]
+                        patch_size = 224
 
-                    if wsi_result is not None and coord_path_check.exists():
-                        try:
-                            slide_obj, _ = wsi_result
-                            patch_coords = np.load(coord_path_check)
-                            patch_count = int(len(patch_coords))
-                            patch_size = 224
+                        logger.info(
+                            "Computing MedSigLIP embeddings on-the-fly for %s (%d patches)",
+                            slide_id,
+                            int(len(patch_coords)),
+                        )
 
-                            if patch_count > semantic_on_the_fly_max_patches:
-                                logger.warning(
-                                    "Skipping on-the-fly MedSigLIP for %s: %d patches exceeds limit %d "
-                                    "(set ENSO_SEMANTIC_ON_THE_FLY_MAX_PATCHES to override).",
-                                    slide_id,
-                                    patch_count,
-                                    semantic_on_the_fly_max_patches,
-                                )
-                            else:
-                                logger.info(
-                                    "Computing MedSigLIP embeddings on-the-fly for %s (%d patches)",
-                                    slide_id,
-                                    patch_count,
-                                )
+                        # Extract patches from WSI
+                        patches = []
+                        for i, (x, y) in enumerate(patch_coords):
+                            try:
+                                region = slide_obj.read_region((int(x), int(y)), 0, (patch_size, patch_size))
+                                # Convert RGBA to RGB
+                                if region.mode == "RGBA":
+                                    background = Image.new("RGB", region.size, (255, 255, 255))
+                                    background.paste(region, mask=region.split()[3])
+                                    region = background
+                                elif region.mode != "RGB":
+                                    region = region.convert("RGB")
+                                patches.append(np.array(region))
+                            except Exception as e:
+                                logger.warning(f"Failed to extract patch {i}: {e}")
+                                # Add a blank patch to maintain indexing
+                                patches.append(np.ones((patch_size, patch_size, 3), dtype=np.uint8) * 255)
 
-                                # Extract patches from WSI
-                                patches = []
-                                for i, (x, y) in enumerate(patch_coords):
-                                    try:
-                                        region = slide_obj.read_region((int(x), int(y)), 0, (patch_size, patch_size))
-                                        # Convert RGBA to RGB
-                                        if region.mode == 'RGBA':
-                                            background = Image.new('RGB', region.size, (255, 255, 255))
-                                            background.paste(region, mask=region.split()[3])
-                                            region = background
-                                        elif region.mode != 'RGB':
-                                            region = region.convert('RGB')
-                                        patches.append(np.array(region))
-                                    except Exception as e:
-                                        logger.warning(f"Failed to extract patch {i}: {e}")
-                                        # Add a blank patch to maintain indexing
-                                        patches.append(np.ones((patch_size, patch_size, 3), dtype=np.uint8) * 255)
+                        if patches:
+                            # Embed patches with MedSigLIP (with caching)
+                            siglip_embeddings = medsiglip_embedder.embed_patches(
+                                patches=patches,
+                                cache_key=slide_id,
+                                show_progress=True,
+                            )
+                            # Store in memory cache
+                            slide_siglip_embeddings[siglip_cache_key] = siglip_embeddings
+                            use_siglip_search = siglip_embeddings is not None
+                            logger.info(
+                                "Computed and cached MedSigLIP embeddings for %s: %s",
+                                slide_id,
+                                siglip_embeddings.shape,
+                            )
+                    except Exception as e:
+                        logger.warning(f"On-the-fly MedSigLIP embedding failed for {slide_id}: {e}")
+                        siglip_embeddings = None
+                        plan_reason = "on-the-fly-error"
+            elif plan_reason == "on-the-fly-disabled":
+                logger.info(
+                    "No MedSigLIP cache for %s; on-the-fly embedding disabled "
+                    "(set ENSO_SEMANTIC_ALLOW_ON_THE_FLY_SIGLIP=1 to enable). "
+                    "Using fallback.",
+                    slide_id,
+                )
+            elif plan_reason == "too-many-patches":
+                logger.warning(
+                    "Skipping on-the-fly MedSigLIP for %s: %d patches exceeds limit %d "
+                    "(set ENSO_SEMANTIC_ON_THE_FLY_MAX_PATCHES to override).",
+                    slide_id,
+                    patch_count,
+                    semantic_on_the_fly_max_patches,
+                )
+            elif plan_reason in {"missing-coordinates", "empty-coordinates", "invalid-patch-count"}:
+                logger.warning(
+                    "Skipping on-the-fly MedSigLIP for %s: patch coordinates unavailable (%s). Using fallback.",
+                    slide_id,
+                    plan_reason,
+                )
 
-                                if patches:
-                                    # Embed patches with MedSigLIP (with caching)
-                                    siglip_embeddings = medsiglip_embedder.embed_patches(
-                                        patches=patches,
-                                        cache_key=slide_id,
-                                        show_progress=True,
-                                    )
-                                    # Store in memory cache
-                                    slide_siglip_embeddings[siglip_cache_key] = siglip_embeddings
-                                    logger.info(
-                                        "Computed and cached MedSigLIP embeddings for %s: %s",
-                                        slide_id,
-                                        siglip_embeddings.shape,
-                                    )
-                        except Exception as e:
-                            logger.warning(f"On-the-fly MedSigLIP embedding failed for {slide_id}: {e}")
-                            siglip_embeddings = None
-
-                if siglip_embeddings is None:
-                    use_siglip_search = False
-                    logger.info(f"No MedSigLIP embeddings available for {slide_id}, using fallback")
-
-        # Load coordinates if available
-        coords = None
-        if coord_path.exists():
-            coords = np.load(coord_path)
+            if siglip_embeddings is None:
+                use_siglip_search = False
+                logger.info(
+                    "No MedSigLIP embeddings available for %s (reason=%s), using fallback",
+                    slide_id,
+                    plan_reason,
+                )
 
         # Load PF embeddings (for attention computation and metadata sizing)
         pf_embeddings = np.load(emb_path)
