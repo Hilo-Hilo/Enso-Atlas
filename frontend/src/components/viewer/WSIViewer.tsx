@@ -1488,15 +1488,15 @@ export function WSIViewer({
 
   // Model selector component
   const ModelSelector = () => (
-    <div className="mb-3">
-      <label className="text-xs text-gray-600 dark:text-gray-200 mb-1.5 block">Model</label>
+    <div className="space-y-1">
+      <label className="text-2xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300 block">Model</label>
       <select
         value={modelSelectValue}
         onChange={(e) => {
           onHeatmapModelChange?.(e.target.value || null);
         }}
         disabled={modelOptions.length === 0}
-        className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded-md text-gray-700 focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
+        className="w-full px-2.5 py-1.5 text-sm bg-white border border-gray-200 rounded-md text-gray-700 focus:outline-none focus:ring-2 focus:ring-clinical-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
       >
         {modelOptions.length === 0 ? (
           <option value="">No project models available</option>
@@ -1862,69 +1862,75 @@ export function WSIViewer({
                     </div>
 
                     {showHeatmap && (
-                      <div className="space-y-2 animate-fade-in">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-600 dark:text-gray-200">Heatmap only (J)</span>
-                          <Toggle
-                            checked={heatmapOnly}
-                            onChange={(checked) => {
-                              setHeatmapOnly(checked);
-                              if (checked) setShowHeatmap(true);
-                            }}
-                            size="sm"
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between">
-                          <div className="flex flex-col">
-                            <span className="text-xs text-gray-600 dark:text-gray-200">Interpolated view</span>
-                            <span className="text-2xs text-gray-500 dark:text-gray-200">Backend Gaussian interpolation</span>
-                          </div>
-                          <Toggle
-                            checked={heatmapSmooth}
-                            onChange={(checked) => onHeatmapSmoothChange?.(checked)}
-                            size="sm"
-                          />
-                        </div>
-
-                        <ModelSelector />
-                        <Slider
-                          label="Opacity"
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={heatmapOpacity}
-                          onChange={(e) => setHeatmapOpacity(Number(e.target.value))}
-                          formatValue={(v) => `${Math.round(v * 100)}%`}
-                        />
-                        <div className="flex items-center justify-between gap-2 mt-1">
-                          <span className="text-2xs text-gray-500 dark:text-gray-200 shrink-0">Sensitivity</span>
-                          <div className="flex items-center gap-1.5 flex-1">
-                            <input
-                              type="range"
-                              min={0.1}
-                              max={1.5}
-                              step={0.1}
-                              value={heatmapAlphaPower}
-                              onChange={(e) => onHeatmapAlphaPowerChange?.(Number(e.target.value))}
-                              className="flex-1 h-1 accent-blue-400"
-                            />
-                            <span className="text-2xs text-gray-500 dark:text-gray-200 w-6 text-right">{heatmapAlphaPower.toFixed(1)}</span>
-                          </div>
-                        </div>
-                        <div className="flex justify-between text-2xs text-gray-500 dark:text-gray-200 mt-0.5 px-0.5">
-                          <span>More visible</span>
-                          <span>More focused</span>
-                        </div>
-                        <div className="mt-1">
-                          <div className="heatmap-legend h-2.5 rounded" />
-                          <div className="flex justify-between text-2xs text-gray-500 dark:text-gray-200 mt-1">
-                            <span>Low attention</span>
-                            <span>High attention</span>
-                          </div>
-                          <p className="text-2xs text-gray-500 dark:text-gray-200 mt-1.5 leading-snug">
-                            Heatmap density reflects extracted patch coverage.
+                      <div className="space-y-2.5 animate-fade-in">
+                        <div className="rounded-md border border-gray-200/80 dark:border-navy-600/80 bg-white/40 dark:bg-navy-800/30 px-2.5 py-2.5 space-y-2.5">
+                          <p className="text-2xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
+                            Attention settings
                           </p>
+
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-gray-600 dark:text-gray-200">Heatmap only (J)</span>
+                            <Toggle
+                              checked={heatmapOnly}
+                              onChange={(checked) => {
+                                setHeatmapOnly(checked);
+                                if (checked) setShowHeatmap(true);
+                              }}
+                              size="sm"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <div className="flex flex-col">
+                              <span className="text-xs text-gray-600 dark:text-gray-200">Interpolated view</span>
+                              <span className="text-2xs text-gray-500 dark:text-gray-200">Backend Gaussian interpolation</span>
+                            </div>
+                            <Toggle
+                              checked={heatmapSmooth}
+                              onChange={(checked) => onHeatmapSmoothChange?.(checked)}
+                              size="sm"
+                            />
+                          </div>
+
+                          <ModelSelector />
+                          <Slider
+                            label="Heatmap opacity"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={heatmapOpacity}
+                            onChange={(e) => setHeatmapOpacity(Number(e.target.value))}
+                            formatValue={(v) => `${Math.round(v * 100)}%`}
+                          />
+                          <div className="flex items-center justify-between gap-2 mt-1">
+                            <span className="text-2xs text-gray-500 dark:text-gray-200 shrink-0">Sensitivity</span>
+                            <div className="flex items-center gap-1.5 flex-1">
+                              <input
+                                type="range"
+                                min={0.1}
+                                max={1.5}
+                                step={0.1}
+                                value={heatmapAlphaPower}
+                                onChange={(e) => onHeatmapAlphaPowerChange?.(Number(e.target.value))}
+                                className="flex-1 h-1 accent-blue-400"
+                              />
+                              <span className="text-2xs text-gray-500 dark:text-gray-200 w-6 text-right">{heatmapAlphaPower.toFixed(1)}</span>
+                            </div>
+                          </div>
+                          <div className="flex justify-between text-2xs text-gray-500 dark:text-gray-200 mt-0.5 px-0.5">
+                            <span>More visible</span>
+                            <span>More focused</span>
+                          </div>
+                          <div className="mt-1">
+                            <div className="heatmap-legend h-2.5 rounded" />
+                            <div className="flex justify-between text-2xs text-gray-500 dark:text-gray-200 mt-1">
+                              <span>Low attention</span>
+                              <span>High attention</span>
+                            </div>
+                            <p className="text-2xs text-gray-500 dark:text-gray-200 mt-1.5 leading-snug">
+                              Heatmap density reflects extracted patch coverage.
+                            </p>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1934,22 +1940,24 @@ export function WSIViewer({
                     )}
 
                     {/* Patch Grid controls merged inline with heatmap controls */}
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="flex items-center gap-2">
-                        <Grid3X3 className="h-4 w-4 text-gray-700 dark:text-gray-200" />
-                        <span className="text-xs text-gray-600 dark:text-gray-200">Patch grid</span>
+                    <div className="mt-1 pt-2 border-t border-gray-200/80 dark:border-navy-600/80">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Grid3X3 className="h-4 w-4 text-gray-700 dark:text-gray-200" />
+                          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Patch grid overlay</span>
+                        </div>
+                        <Toggle
+                          checked={showGrid}
+                          onChange={setShowGrid}
+                          size="sm"
+                        />
                       </div>
-                      <Toggle
-                        checked={showGrid}
-                        onChange={setShowGrid}
-                        size="sm"
-                      />
                     </div>
 
                     {showGrid && (
-                      <div className="space-y-1.5 animate-fade-in">
+                      <div className="space-y-2 animate-fade-in pl-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-2xs text-gray-500 dark:text-gray-200">Grid opacity</span>
+                          <span className="text-2xs text-gray-500 dark:text-gray-200">Patch opacity</span>
                           <div className="flex items-center gap-1.5 flex-1">
                             <input
                               type="range"
@@ -1964,7 +1972,7 @@ export function WSIViewer({
                           </div>
                         </div>
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-2xs text-gray-500 dark:text-gray-200">Grid color</span>
+                          <span className="text-2xs text-gray-500 dark:text-gray-200">Patch color</span>
                           <div className="flex items-center gap-1.5">
                             {["#00ffff", "#ffffff", "#ff0000", "#00ff00", "#ffff00"].map((c) => (
                               <button
