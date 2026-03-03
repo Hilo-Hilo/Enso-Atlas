@@ -1838,9 +1838,9 @@ export function WSIViewer({
 
             {showOverlayMenu && (
               <div id="wsi-overlay-controls-menu" className="flex flex-col gap-2 animate-fade-in">
-                {/* Attention Heatmap Section */}
-                {heatmap && (
+                {heatmap ? (
                   <div className="viewer-toolbar flex-col items-stretch gap-2 p-3 w-full">
+                    {/* Attention Heatmap Section */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Layers className="h-4 w-4 text-gray-700 dark:text-gray-200" />
@@ -1932,58 +1932,108 @@ export function WSIViewer({
                     {heatmapError && heatmapErrorMessage && (
                       <p className="text-2xs text-red-600 leading-snug mt-1">{heatmapErrorMessage}</p>
                     )}
+
+                    {/* Patch Grid Section (merged into heatmap controls card) */}
+                    <div className="mt-1 pt-2 border-t border-gray-200/80 dark:border-navy-600/80 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Grid3X3 className="h-4 w-4 text-gray-700 dark:text-gray-200" />
+                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                            Patch Grid
+                          </span>
+                        </div>
+                        <Toggle
+                          checked={showGrid}
+                          onChange={setShowGrid}
+                          size="sm"
+                        />
+                      </div>
+
+                      {showGrid && (
+                        <div className="space-y-1.5 animate-fade-in">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-2xs text-gray-500 dark:text-gray-200">Opacity</span>
+                            <div className="flex items-center gap-1.5 flex-1">
+                              <input
+                                type="range"
+                                min={0.05}
+                                max={1}
+                                step={0.05}
+                                value={gridOpacity}
+                                onChange={(e) => setGridOpacity(Number(e.target.value))}
+                                className="flex-1 h-1 accent-cyan-400"
+                              />
+                              <span className="text-2xs text-gray-500 dark:text-gray-200 w-7 text-right">{Math.round(gridOpacity * 100)}%</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-2xs text-gray-500 dark:text-gray-200">Color</span>
+                            <div className="flex items-center gap-1.5">
+                              {["#00ffff", "#ffffff", "#ff0000", "#00ff00", "#ffff00"].map((c) => (
+                                <button
+                                  key={c}
+                                  onClick={() => setGridColor(c)}
+                                  className={`w-4 h-4 rounded-full border-2 transition-all ${gridColor === c ? "border-white scale-110" : "border-gray-500 hover:border-gray-300"}`}
+                                  style={{ backgroundColor: c }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="viewer-toolbar flex-col items-stretch gap-2 p-3 w-full">
+                    {/* Fallback when heatmap controls are unavailable */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Grid3X3 className="h-4 w-4 text-gray-700 dark:text-gray-200" />
+                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          Patch Grid
+                        </span>
+                      </div>
+                      <Toggle
+                        checked={showGrid}
+                        onChange={setShowGrid}
+                        size="sm"
+                      />
+                    </div>
+
+                    {showGrid && (
+                      <div className="space-y-1.5 animate-fade-in">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-2xs text-gray-500 dark:text-gray-200">Opacity</span>
+                          <div className="flex items-center gap-1.5 flex-1">
+                            <input
+                              type="range"
+                              min={0.05}
+                              max={1}
+                              step={0.05}
+                              value={gridOpacity}
+                              onChange={(e) => setGridOpacity(Number(e.target.value))}
+                              className="flex-1 h-1 accent-cyan-400"
+                            />
+                            <span className="text-2xs text-gray-500 dark:text-gray-200 w-7 text-right">{Math.round(gridOpacity * 100)}%</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-2xs text-gray-500 dark:text-gray-200">Color</span>
+                          <div className="flex items-center gap-1.5">
+                            {["#00ffff", "#ffffff", "#ff0000", "#00ff00", "#ffff00"].map((c) => (
+                              <button
+                                key={c}
+                                onClick={() => setGridColor(c)}
+                                className={`w-4 h-4 rounded-full border-2 transition-all ${gridColor === c ? "border-white scale-110" : "border-gray-500 hover:border-gray-300"}`}
+                                style={{ backgroundColor: c }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
-
-                {/* Patch Grid Section */}
-                <div className="viewer-toolbar flex-col items-stretch gap-2 p-3 w-full">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Grid3X3 className="h-4 w-4 text-gray-700 dark:text-gray-200" />
-                      <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                        Patch Grid
-                      </span>
-                    </div>
-                    <Toggle
-                      checked={showGrid}
-                      onChange={setShowGrid}
-                      size="sm"
-                    />
-                  </div>
-
-                  {showGrid && (
-                    <div className="space-y-1.5 animate-fade-in">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-2xs text-gray-500 dark:text-gray-200">Opacity</span>
-                        <div className="flex items-center gap-1.5 flex-1">
-                          <input
-                            type="range"
-                            min={0.05}
-                            max={1}
-                            step={0.05}
-                            value={gridOpacity}
-                            onChange={(e) => setGridOpacity(Number(e.target.value))}
-                            className="flex-1 h-1 accent-cyan-400"
-                          />
-                          <span className="text-2xs text-gray-500 dark:text-gray-200 w-7 text-right">{Math.round(gridOpacity * 100)}%</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-2xs text-gray-500 dark:text-gray-200">Color</span>
-                        <div className="flex items-center gap-1.5">
-                          {["#00ffff", "#ffffff", "#ff0000", "#00ff00", "#ffff00"].map((c) => (
-                            <button
-                              key={c}
-                              onClick={() => setGridColor(c)}
-                              className={`w-4 h-4 rounded-full border-2 transition-all ${gridColor === c ? "border-white scale-110" : "border-gray-500 hover:border-gray-300"}`}
-                              style={{ backgroundColor: c }}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
               </div>
             )}
           </div>
