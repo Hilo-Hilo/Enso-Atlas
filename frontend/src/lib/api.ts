@@ -316,6 +316,47 @@ function isLikelyNetworkError(error: unknown): error is TypeError {
 }
 
 /**
+ * Determine whether an error means the frontend truly lost connectivity.
+ *
+ * Timeouts and backend 5xx responses are treated as transient backend issues,
+ * not hard disconnects.
+ */
+export function isNetworkDisconnectionError(error: unknown): boolean {
+  if (error instanceof AtlasApiError) {
+    return error.isNetworkError;
+  }
+
+  return isLikelyNetworkError(error);
+}
+
+/**
+ * User-facing semantic-search error message that keeps failures local to the panel.
+ */
+export function formatSemanticSearchError(error: unknown): string {
+  if (error instanceof AtlasApiError) {
+    if (error.isTimeout) {
+      return "Semantic search timed out. The backend may be busy warming up — please retry in a moment.";
+    }
+
+    if (error.isNetworkError) {
+      return "Semantic search couldn’t reach the backend. This only affects search right now — please retry shortly.";
+    }
+
+    if (typeof error.statusCode === "number" && error.statusCode >= 500) {
+      return "Semantic search is temporarily unavailable due to a backend issue. Please retry in a moment.";
+    }
+
+    return error.getUserMessage();
+  }
+
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return "Search failed. Please try again.";
+}
+
+/**
  * Generic fetch wrapper with error handling, retries, timeout, and read dedupe.
  */
 async function fetchApi<T>(

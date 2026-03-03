@@ -24,7 +24,26 @@ import {
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useKeyboardShortcuts, type KeyboardShortcut } from "@/hooks/useKeyboardShortcuts";
 import { usePanelSwitchPerf } from "@/hooks/usePerfInstrumentation";
-import { getDziUrl, getHeatmapUrl, healthCheck, semanticSearch, getSlideQC, getAnnotations, saveAnnotation, deleteAnnotation, getSlides, analyzeSlideMultiModel, embedSlideWithPolling, visualSearch, getSlideCachedResults, getPatchCoords, getProjectAvailableModels, type AvailableModelDetail } from "@/lib/api";
+import {
+  getDziUrl,
+  getHeatmapUrl,
+  healthCheck,
+  semanticSearch,
+  getSlideQC,
+  getAnnotations,
+  saveAnnotation,
+  deleteAnnotation,
+  getSlides,
+  analyzeSlideMultiModel,
+  embedSlideWithPolling,
+  visualSearch,
+  getSlideCachedResults,
+  getPatchCoords,
+  getProjectAvailableModels,
+  formatSemanticSearchError,
+  isNetworkDisconnectionError,
+  type AvailableModelDetail,
+} from "@/lib/api";
 import { fetchHeatmapWithDedupe } from "@/components/viewer/heatmapFetch";
 import { getClientApiBaseUrl } from "@/lib/clientApiBase";
 import { deduplicateSlides } from "@/lib/slideUtils";
@@ -275,7 +294,9 @@ function HomePage() {
 
   // State
   const [selectedSlide, setSelectedSlide] = useState<SlideInfo | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
+  // Optimistically assume connected until health checks prove otherwise to avoid
+  // a false disconnected banner during initial probe.
+  const [isConnected, setIsConnected] = useState(true);
   const [selectedPatchId, setSelectedPatchId] = useState<string | undefined>();
   const [targetCoordinates, setTargetCoordinates] = useState<PatchCoordinates | null>(null);
 
@@ -1057,19 +1078,33 @@ function HomePage() {
   // Check backend connection and recover quickly after tab idle/backgrounding.
   useEffect(() => {
     let cancelled = false;
-    let failureStreak = 0;
+    let connectivityFailureStreak = 0;
+    let inFlight = false;
+    const DISCONNECT_FAILURE_THRESHOLD = 2;
 
     const checkConnection = async () => {
+      if (inFlight) return;
+      inFlight = true;
+
       try {
         await healthCheck();
-        failureStreak = 0;
+        connectivityFailureStreak = 0;
         if (!cancelled) setIsConnected(true);
       } catch (err) {
         console.warn("Health check failed:", err);
-        failureStreak += 1;
-        if (!cancelled && failureStreak >= 2) {
-          setIsConnected(false);
+
+        if (isNetworkDisconnectionError(err)) {
+          connectivityFailureStreak += 1;
+          if (!cancelled && connectivityFailureStreak >= DISCONNECT_FAILURE_THRESHOLD) {
+            setIsConnected(false);
+          }
+        } else {
+          // Timeouts/5xx can happen during heavy inference and should remain local.
+          // Keep the global disconnected banner unchanged for these transient hiccups.
+          connectivityFailureStreak = 0;
         }
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -1083,11 +1118,19 @@ function HomePage() {
       void checkConnection();
     };
 
-    checkConnection();
-    const interval = setInterval(checkConnection, 30000);
+    const handleOffline = () => {
+      connectivityFailureStreak = DISCONNECT_FAILURE_THRESHOLD;
+      if (!cancelled) setIsConnected(false);
+    };
+
+    void checkConnection();
+    const interval = setInterval(() => {
+      void checkConnection();
+    }, 30000);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("focus", handleWindowFocus);
     window.addEventListener("online", handleWindowFocus);
+    window.addEventListener("offline", handleOffline);
 
     return () => {
       cancelled = true;
@@ -1095,6 +1138,7 @@ function HomePage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener("online", handleWindowFocus);
+      window.removeEventListener("offline", handleOffline);
     };
   }, []);
 
@@ -1105,7 +1149,9 @@ function HomePage() {
       setIsConnected(true);
     } catch (err) {
       console.warn("Reconnect attempt failed:", err);
-      setIsConnected(false);
+      if (isNetworkDisconnectionError(err)) {
+        setIsConnected(false);
+      }
     }
   }, []);
 
@@ -1328,9 +1374,7 @@ function HomePage() {
           return;
         }
         console.error("Semantic search failed:", err);
-        setSearchError(
-          err instanceof Error ? err.message : "Search failed. Please try again."
-        );
+        setSearchError(formatSemanticSearchError(err));
         setSemanticResults([]);
       } finally {
         if (semanticSearchRequestRef.current === requestId) {

@@ -4,8 +4,10 @@ import {
   AtlasApiError,
   __apiClientTestUtils,
   addTagsToSlide,
+  formatSemanticSearchError,
   getEmbeddingTaskStatus,
   getSlides,
+  isNetworkDisconnectionError,
 } from "../api";
 
 function jsonResponse(payload: unknown, status: number = 200): Response {
@@ -91,6 +93,54 @@ describe("api client network optimizations", () => {
       .toBeInstanceOf(AtlasApiError);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats only network failures as hard disconnections", () => {
+    const timeoutError = new AtlasApiError({
+      code: "TIMEOUT",
+      message: "Request timed out",
+      isTimeout: true,
+    });
+    const backendError = new AtlasApiError({
+      code: "HTTP_503",
+      message: "Service unavailable",
+      statusCode: 503,
+    });
+    const networkError = new AtlasApiError({
+      code: "NETWORK_ERROR",
+      message: "Failed to fetch",
+      isNetworkError: true,
+    });
+
+    expect(isNetworkDisconnectionError(timeoutError)).toBe(false);
+    expect(isNetworkDisconnectionError(backendError)).toBe(false);
+    expect(isNetworkDisconnectionError(networkError)).toBe(true);
+    expect(isNetworkDisconnectionError(new TypeError("Failed to fetch"))).toBe(true);
+  });
+
+  it("formats semantic-search errors with local, non-fatal messaging", () => {
+    const timeoutError = new AtlasApiError({
+      code: "TIMEOUT",
+      message: "Request timed out",
+      isTimeout: true,
+    });
+    const networkError = new AtlasApiError({
+      code: "NETWORK_ERROR",
+      message: "Failed to fetch",
+      isNetworkError: true,
+    });
+    const backendError = new AtlasApiError({
+      code: "HTTP_503",
+      message: "Service unavailable",
+      statusCode: 503,
+    });
+
+    expect(formatSemanticSearchError(timeoutError)).toContain("timed out");
+    expect(formatSemanticSearchError(networkError)).toContain("only affects search");
+    expect(formatSemanticSearchError(backendError)).toContain("temporarily unavailable");
+    expect(formatSemanticSearchError(new Error("custom semantic failure"))).toBe(
+      "custom semantic failure"
+    );
   });
 
   it("uses adaptive polling cadence helpers", () => {
