@@ -956,6 +956,19 @@ def create_app(
     perf_tracker = InMemoryLatencyTracker(max_samples=perf_max_samples)
     perf_logger = logging.getLogger("enso_atlas.perf")
 
+    # Semantic-search safety guardrails:
+    # on-the-fly SigLIP embedding can take many minutes on large slides and
+    # block single-worker API responsiveness. Keep disabled by default.
+    semantic_allow_on_the_fly_siglip = _env_flag(
+        "ENSO_SEMANTIC_ALLOW_ON_THE_FLY_SIGLIP",
+        default=False,
+    )
+    semantic_on_the_fly_max_patches = _env_int(
+        "ENSO_SEMANTIC_ON_THE_FLY_MAX_PATCHES",
+        default=2000,
+        minimum=256,
+    )
+
     if perf_enabled:
 
         @app.middleware("http")
@@ -4998,51 +5011,78 @@ DISCLAIMER: This is a research tool. All findings must be validated by qualified
                     siglip_coords = np.load(siglip_coords_path)
                 logger.info(f"Loaded MedSigLIP embeddings from cache for {slide_id}")
             else:
-                # On-the-fly MedSigLIP embedding: extract patches from WSI and embed
                 siglip_embeddings = None
-                wsi_result = get_slide_and_dz(slide_id, project_id=request.project_id)
-                coord_path_check = _search_embeddings_dir / f"{slide_id}_coords.npy"
-                
-                if wsi_result is not None and coord_path_check.exists():
-                    try:
-                        slide_obj, _ = wsi_result
-                        patch_coords = np.load(coord_path_check)
-                        patch_size = 224
-                        
-                        logger.info(f"Computing MedSigLIP embeddings on-the-fly for {slide_id} ({len(patch_coords)} patches)")
-                        
-                        # Extract patches from WSI
-                        patches = []
-                        for i, (x, y) in enumerate(patch_coords):
-                            try:
-                                region = slide_obj.read_region((int(x), int(y)), 0, (patch_size, patch_size))
-                                # Convert RGBA to RGB
-                                if region.mode == 'RGBA':
-                                    background = Image.new('RGB', region.size, (255, 255, 255))
-                                    background.paste(region, mask=region.split()[3])
-                                    region = background
-                                elif region.mode != 'RGB':
-                                    region = region.convert('RGB')
-                                patches.append(np.array(region))
-                            except Exception as e:
-                                logger.warning(f"Failed to extract patch {i}: {e}")
-                                # Add a blank patch to maintain indexing
-                                patches.append(np.ones((patch_size, patch_size, 3), dtype=np.uint8) * 255)
-                        
-                        if patches:
-                            # Embed patches with MedSigLIP (with caching)
-                            siglip_embeddings = medsiglip_embedder.embed_patches(
-                                patches=patches,
-                                cache_key=slide_id,
-                                show_progress=True
-                            )
-                            # Store in memory cache
-                            slide_siglip_embeddings[siglip_cache_key] = siglip_embeddings
-                            logger.info(f"Computed and cached MedSigLIP embeddings for {slide_id}: {siglip_embeddings.shape}")
-                    except Exception as e:
-                        logger.warning(f"On-the-fly MedSigLIP embedding failed for {slide_id}: {e}")
-                        siglip_embeddings = None
-                
+
+                if not semantic_allow_on_the_fly_siglip:
+                    logger.info(
+                        "No MedSigLIP cache for %s; on-the-fly embedding disabled "
+                        "(set ENSO_SEMANTIC_ALLOW_ON_THE_FLY_SIGLIP=1 to enable). "
+                        "Using fallback.",
+                        slide_id,
+                    )
+                else:
+                    # On-the-fly MedSigLIP embedding: extract patches from WSI and embed
+                    wsi_result = get_slide_and_dz(slide_id, project_id=request.project_id)
+                    coord_path_check = _search_embeddings_dir / f"{slide_id}_coords.npy"
+
+                    if wsi_result is not None and coord_path_check.exists():
+                        try:
+                            slide_obj, _ = wsi_result
+                            patch_coords = np.load(coord_path_check)
+                            patch_count = int(len(patch_coords))
+                            patch_size = 224
+
+                            if patch_count > semantic_on_the_fly_max_patches:
+                                logger.warning(
+                                    "Skipping on-the-fly MedSigLIP for %s: %d patches exceeds limit %d "
+                                    "(set ENSO_SEMANTIC_ON_THE_FLY_MAX_PATCHES to override).",
+                                    slide_id,
+                                    patch_count,
+                                    semantic_on_the_fly_max_patches,
+                                )
+                            else:
+                                logger.info(
+                                    "Computing MedSigLIP embeddings on-the-fly for %s (%d patches)",
+                                    slide_id,
+                                    patch_count,
+                                )
+
+                                # Extract patches from WSI
+                                patches = []
+                                for i, (x, y) in enumerate(patch_coords):
+                                    try:
+                                        region = slide_obj.read_region((int(x), int(y)), 0, (patch_size, patch_size))
+                                        # Convert RGBA to RGB
+                                        if region.mode == 'RGBA':
+                                            background = Image.new('RGB', region.size, (255, 255, 255))
+                                            background.paste(region, mask=region.split()[3])
+                                            region = background
+                                        elif region.mode != 'RGB':
+                                            region = region.convert('RGB')
+                                        patches.append(np.array(region))
+                                    except Exception as e:
+                                        logger.warning(f"Failed to extract patch {i}: {e}")
+                                        # Add a blank patch to maintain indexing
+                                        patches.append(np.ones((patch_size, patch_size, 3), dtype=np.uint8) * 255)
+
+                                if patches:
+                                    # Embed patches with MedSigLIP (with caching)
+                                    siglip_embeddings = medsiglip_embedder.embed_patches(
+                                        patches=patches,
+                                        cache_key=slide_id,
+                                        show_progress=True,
+                                    )
+                                    # Store in memory cache
+                                    slide_siglip_embeddings[siglip_cache_key] = siglip_embeddings
+                                    logger.info(
+                                        "Computed and cached MedSigLIP embeddings for %s: %s",
+                                        slide_id,
+                                        siglip_embeddings.shape,
+                                    )
+                        except Exception as e:
+                            logger.warning(f"On-the-fly MedSigLIP embedding failed for {slide_id}: {e}")
+                            siglip_embeddings = None
+
                 if siglip_embeddings is None:
                     use_siglip_search = False
                     logger.info(f"No MedSigLIP embeddings available for {slide_id}, using fallback")
