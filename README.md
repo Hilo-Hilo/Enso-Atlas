@@ -62,6 +62,16 @@ _Recent model and pipeline updates._
 
 All screenshots below were refreshed from the live deployment at `https://atlas.ensohealth.ai` on Feb 24, 2026.
 
+### YC AIxBio Hackathon Deployment
+
+![YC Hackathon - Patient View](docs/screenshots/cd34a065-deb4-46e2-ad2f-a7ff7cac185e.png)
+
+*Full patient case view with multi-model predictions, survival analysis, and evidence retrieval.*
+
+![YC Hackathon - Project View](docs/screenshots/1039ee58-7673-44db-b2ed-bbf79da197f4.png)
+
+*Project workspace with LUAD Dense Embeddings project, model selection, and clinical trial matching.*
+
 ### Dashboard (Oncologist View)
 
 ![Dashboard - Oncologist](docs/screenshots/dashboard-lung-oncologist.png)
