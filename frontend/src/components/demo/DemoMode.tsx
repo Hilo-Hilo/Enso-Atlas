@@ -713,7 +713,7 @@ export function DemoToggle({ isActive, onToggle, disabled = false }: DemoToggleP
           ? "cursor-not-allowed bg-gray-300 text-gray-500 opacity-60 shadow-none"
           : isActive
             ? "bg-clinical-500 text-white shadow-lg shadow-clinical-500/30"
-            : "border border-sky-200 bg-white/90 text-sky-900 shadow-sm hover:border-sky-300 hover:bg-white dark:border-clinical-500/30 dark:bg-gradient-to-r dark:from-clinical-500 dark:to-clinical-600 dark:text-white dark:shadow-md dark:hover:from-clinical-600 dark:hover:to-clinical-700"
+            : "border border-sky-200 bg-white/90 text-sky-900 shadow-sm hover:border-sky-300 hover:bg-white dark:border-navy-600 dark:bg-navy-800/90 dark:text-gray-100 dark:shadow-md dark:hover:border-navy-500 dark:hover:bg-navy-700"
       )}
       title={disabled ? "Demo mode unavailable while settings is open" : isActive ? "Exit demo mode" : "Start guided tour"}
     >
