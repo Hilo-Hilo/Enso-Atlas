@@ -194,13 +194,13 @@ function ProjectSwitcher() {
     <div ref={dropdownRef} className="relative hidden md:block">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-clinical-500 to-clinical-600 hover:from-clinical-600 hover:to-clinical-700 rounded-lg shadow-md transition-all"
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-sky-200 bg-white/90 text-sky-900 shadow-sm transition-all hover:border-sky-300 hover:bg-white dark:border-clinical-500/30 dark:bg-gradient-to-r dark:from-clinical-500 dark:to-clinical-600 dark:text-white dark:shadow-md dark:hover:from-clinical-600 dark:hover:to-clinical-700"
       >
-        <Layers className="h-4 w-4 text-white" />
-        <span className="text-sm text-white font-medium truncate max-w-[200px] lg:max-w-[280px]">
+        <Layers className="h-4 w-4 text-sky-700 dark:text-white" />
+        <span className="text-sm font-medium truncate max-w-[200px] text-slate-800 dark:text-white lg:max-w-[280px]">
           {currentProject.name}
         </span>
-        <ChevronDown className={cn("h-3.5 w-3.5 text-white/90 transition-transform", isOpen && "rotate-180")} />
+        <ChevronDown className={cn("h-3.5 w-3.5 text-sky-700 transition-transform dark:text-white/90", isOpen && "rotate-180")} />
       </button>
 
       {isOpen && (
@@ -273,7 +273,7 @@ function UtilityOverflowMenu({
     <div ref={menuRef} className="relative hidden lg:block">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-2 text-white bg-gradient-to-r from-clinical-500 to-clinical-600 hover:from-clinical-600 hover:to-clinical-700 rounded-lg shadow-md transition-all duration-150"
+        className="rounded-lg border border-sky-200 bg-white/90 p-2 text-sky-800 shadow-sm transition-all duration-150 hover:border-sky-300 hover:bg-white dark:border-clinical-500/30 dark:bg-gradient-to-r dark:from-clinical-500 dark:to-clinical-600 dark:text-white dark:shadow-md dark:hover:from-clinical-600 dark:hover:to-clinical-700"
         title="More options"
       >
         <MoreHorizontal className="h-4 w-4" />
@@ -500,21 +500,21 @@ export function Header({
           {/* Slide Manager Link */}
           <Link
             href="/slides"
-            className="hidden lg:flex items-center gap-2 px-2 xl:px-3 py-1.5 bg-gradient-to-r from-clinical-500 to-clinical-600 hover:from-clinical-600 hover:to-clinical-700 rounded-lg shadow-md transition-all"
+            className="hidden lg:flex items-center gap-2 rounded-lg border border-sky-200 bg-white/90 px-2 py-1.5 text-sky-900 shadow-sm transition-all hover:border-sky-300 hover:bg-white dark:border-clinical-500/30 dark:bg-gradient-to-r dark:from-clinical-500 dark:to-clinical-600 dark:text-white dark:shadow-md dark:hover:from-clinical-600 dark:hover:to-clinical-700 xl:px-3"
             title="Slides"
           >
-            <Layers className="h-4 w-4 text-white" />
-            <span className="text-sm text-white font-medium hidden xl:inline">Slides</span>
+            <Layers className="h-4 w-4 text-sky-700 dark:text-white" />
+            <span className="hidden text-sm font-medium text-slate-800 dark:text-white xl:inline">Slides</span>
           </Link>
 
           {/* Project Management Link */}
           <Link
             href="/projects"
-            className="hidden lg:flex items-center gap-2 px-2 xl:px-3 py-1.5 bg-gradient-to-r from-clinical-500 to-clinical-600 hover:from-clinical-600 hover:to-clinical-700 rounded-lg shadow-md transition-all"
+            className="hidden lg:flex items-center gap-2 rounded-lg border border-sky-200 bg-white/90 px-2 py-1.5 text-sky-900 shadow-sm transition-all hover:border-sky-300 hover:bg-white dark:border-clinical-500/30 dark:bg-gradient-to-r dark:from-clinical-500 dark:to-clinical-600 dark:text-white dark:shadow-md dark:hover:from-clinical-600 dark:hover:to-clinical-700 xl:px-3"
             title="Projects"
           >
-            <FolderOpen className="h-4 w-4 text-white" />
-            <span className="text-sm text-white font-medium hidden xl:inline">Projects</span>
+            <FolderOpen className="h-4 w-4 text-sky-700 dark:text-white" />
+            <span className="hidden text-sm font-medium text-slate-800 dark:text-white xl:inline">Projects</span>
           </Link>
 
           {/* Divider */}
