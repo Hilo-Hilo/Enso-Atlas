@@ -2,20 +2,18 @@
 Core orchestration module for Enso Atlas.
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List
-import logging
 
 import numpy as np
 
 from .config import AtlasConfig
-from .wsi.processor import WSIProcessor
 from .embedding.embedder import PathFoundationEmbedder
-from .mil.clam import CLAMClassifier, TransMILClassifier, create_classifier
 from .evidence.generator import EvidenceGenerator
+from .mil.clam import create_classifier
 from .reporting.medgemma import MedGemmaReporter
-
+from .wsi.processor import WSIProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -23,24 +21,27 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AnalysisResult:
     """Result of a single slide analysis."""
+
     slide_path: str
     score: float
     label: str
     confidence: float
     heatmap: np.ndarray
-    evidence_patches: List[dict]
-    similar_cases: List[dict]
+    evidence_patches: list[dict]
+    similar_cases: list[dict]
     report: dict
 
     def save_heatmap(self, path: str) -> None:
         """Save heatmap overlay to file."""
         from PIL import Image
+
         img = Image.fromarray((self.heatmap * 255).astype(np.uint8))
         img.save(path)
 
     def save_report(self, path: str, format: str = "json") -> None:
         """Save report to file."""
         import json
+
         with open(path, "w") as f:
             json.dump(self.report, f, indent=2)
 
@@ -60,20 +61,19 @@ class EnsoAtlas:
         self._setup_logging()
 
         # Initialize components (lazy loading)
-        self._wsi_processor: Optional[WSIProcessor] = None
-        self._embedder: Optional[PathFoundationEmbedder] = None
+        self._wsi_processor: WSIProcessor | None = None
+        self._embedder: PathFoundationEmbedder | None = None
         self._classifier = None  # CLAMClassifier or TransMILClassifier
-        self._evidence_generator: Optional[EvidenceGenerator] = None
-        self._reporter: Optional[MedGemmaReporter] = None
+        self._evidence_generator: EvidenceGenerator | None = None
+        self._reporter: MedGemmaReporter | None = None
 
-        logger.info(f"EnsoAtlas initialized with config")
+        logger.info("EnsoAtlas initialized with config")
 
     def _setup_logging(self) -> None:
         """Setup logging configuration."""
         level = getattr(logging, self.config.deployment.log_level.upper())
         logging.basicConfig(
-            level=level,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            level=level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
 
     @classmethod
@@ -170,7 +170,9 @@ class EnsoAtlas:
         confidence = max(confidence, 0.0)
         logger.info(
             "Prediction: %s (score=%.3f, threshold=%.3f)",
-            label, score, threshold,
+            label,
+            score,
+            threshold,
         )
 
         # Step 4: Generate evidence
@@ -212,7 +214,7 @@ class EnsoAtlas:
         slide_dir: str | Path,
         output_dir: str | Path,
         pattern: str = "*.svs",
-    ) -> List[AnalysisResult]:
+    ) -> list[AnalysisResult]:
         """
         Analyze all slides in a directory.
 

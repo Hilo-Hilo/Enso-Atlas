@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import NextImage from "next/image";
 import OpenSeadragon from "openseadragon";
 
 // Patch Canvas2D context creation to suppress "willReadFrequently" warnings.
@@ -660,14 +661,16 @@ export function WSIViewer({
       localObjectUrl = URL.createObjectURL(blob);
 
       const widthScale = bounds.width / contentSize.x;
+      const heightScale = bounds.height / contentSize.y;
       const heatmapWorldWidth = coverageW * widthScale;
+      const heatmapWorldHeight = coverageH * heightScale;
 
       viewer.addSimpleImage({
         url: localObjectUrl,
         x: bounds.x,
         y: bounds.y,
-        // OpenSeadragon tiled images accept one explicit dimension.
         width: heatmapWorldWidth,
+        height: heatmapWorldHeight,
         index: viewer.world.getItemCount(),
         opacity: 0, // Start hidden, update via showHeatmap effect
         success: (event: any) => {
@@ -1533,11 +1536,14 @@ export function WSIViewer({
             
             {/* Heatmap Image */}
             <div className="relative bg-navy-700 rounded-lg overflow-hidden shadow-xl">
-              <img
+              <NextImage
                 src={heatmap.imageUrl}
                 alt="Attention heatmap"
+                width={1024}
+                height={768}
+                unoptimized
                 className="w-full h-auto max-h-[60vh] object-contain"
-                style={{ 
+                style={{
                   opacity: showHeatmap ? heatmapOpacity : 0,
                   transition: "opacity 0.3s ease"
                 }}

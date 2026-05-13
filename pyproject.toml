@@ -23,25 +23,43 @@ dependencies = [
     "pillow>=10.0.0",
     "opencv-python>=4.8.0",
     "h5py>=3.9.0",
-    
+
     # WSI Processing
     "openslide-python>=1.3.0",
-    
+
     # Deep Learning
     "torch>=2.1.0",
     "torchvision>=0.16.0",
-    "transformers>=4.36.0",
-    "huggingface-hub>=0.19.0",
-    
+    "transformers>=5.0.0rc3,<6.0.0",
+    "huggingface-hub>=1.5.0,<2.0.0",
+    "sentencepiece>=0.1.99",
+
     # MIL & Pathology
     "slideflow>=2.3.0",
-    
+
     # Vector Search
     "faiss-cpu>=1.7.4",
-    
+
+    # LLM
+    "accelerate>=0.25.0",
+    "bitsandbytes>=0.41.0",
+
     # UI
     "gradio>=4.0.0",
-    
+
+    # API
+    "fastapi>=0.109.0",
+    "python-multipart>=0.0.6",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.12.0,<3.0.0",
+
+    # Database
+    "asyncpg>=0.29.0",
+
+    # PDF Generation
+    "reportlab>=4.4.0,<5.0.0",
+    "fpdf2>=2.7.0",
+
     # Utilities
     "tqdm>=4.66.0",
     "pyyaml>=6.0.0",
@@ -78,7 +96,19 @@ target-version = ["py310", "py311", "py312"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = [
+    # Black-compatible style: long strings/comments are not always safely reflowable.
+    "E501",
+    # Scientific/ML code conventionally uses uppercase tensor and matrix names.
+    "N806",
+    # Several modules intentionally initialize paths/backends before late imports.
+    "E402",
+    # PyTorch convention: import torch.nn.functional as F.
+    "N812",
+]
 
 [tool.mypy]
 python_version = "3.10"

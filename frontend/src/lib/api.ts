@@ -2895,8 +2895,10 @@ export async function startBatchAnalysisAsync(
     modelIds?: string[];
     level?: number;
     forceReembed?: boolean;
+    projectId?: string;
   }
 ): Promise<{ task_id: string; status: string; total_slides: number; message: string }> {
+  const scopedProjectId = normalizeProjectId(options?.projectId);
   return fetchApi<{ task_id: string; status: string; total_slides: number; message: string }>(
     "/api/analyze-batch/async",
     {
@@ -2907,6 +2909,7 @@ export async function startBatchAnalysisAsync(
         model_ids: options?.modelIds ?? null,
         level: options?.level ?? 0,
         force_reembed: options?.forceReembed ?? false,
+        project_id: scopedProjectId,
       }),
     }
   );

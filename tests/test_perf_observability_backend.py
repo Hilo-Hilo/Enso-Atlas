@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PERF_PATH = REPO_ROOT / "src" / "enso_atlas" / "api" / "perf_observability.py"
@@ -71,7 +70,9 @@ def test_latency_tracker_summary_contains_overall_and_route_stats():
 
 def test_path_normalization_and_exclusions_for_perf_tracking():
     assert normalize_perf_path("/api/slides/12345") == "/api/slides/:id"
-    assert normalize_perf_path("/api/slides/abcdefff-aaaa-bbbb-cccc-ddddeeeeffff") == "/api/slides/:id"
+    assert (
+        normalize_perf_path("/api/slides/abcdefff-aaaa-bbbb-cccc-ddddeeeeffff") == "/api/slides/:id"
+    )
 
     assert should_track_path("/api/slides/12345")
     assert not should_track_path("/api/health")
@@ -80,7 +81,10 @@ def test_path_normalization_and_exclusions_for_perf_tracking():
 
 def test_main_api_wires_perf_middleware_and_summary_endpoint():
     main_src = (REPO_ROOT / "src" / "enso_atlas" / "api" / "main.py").read_text(encoding="utf-8")
-    assert "@app.middleware(\"http\")" in main_src
+    core_src = (REPO_ROOT / "src" / "enso_atlas" / "api" / "core_routes.py").read_text(
+        encoding="utf-8"
+    )
+    assert '@app.middleware("http")' in main_src
     assert "request_timing_middleware" in main_src
-    assert "/api/perf/latency-summary" in main_src
+    assert "/api/perf/latency-summary" in core_src
     assert "X-Request-ID" in main_src

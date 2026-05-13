@@ -309,9 +309,11 @@ class MultiModelInference:
     @staticmethod
     def _uniform_subsample_indices(total: int, target: int) -> np.ndarray:
         if target >= total:
-            return np.arange(total, dtype=np.int64)
-        idx = np.linspace(0, total - 1, num=target, dtype=np.int64)
-        return np.unique(idx)
+            all_indices: np.ndarray = np.arange(total, dtype=np.int64)
+            return all_indices
+        idx: np.ndarray = np.linspace(0, total - 1, num=target, dtype=np.int64)
+        unique_indices: np.ndarray = np.unique(idx)
+        return unique_indices
 
     @staticmethod
     def _release_cuda_cache() -> None:
@@ -351,7 +353,7 @@ class MultiModelInference:
             return None
         
         config = MODEL_CONFIGS[model_id]
-        model_dir = self.models_dir / config["model_dir"]
+        model_dir = self.models_dir / str(config["model_dir"])
         model_path = model_dir / "best_model.pt"
         config_path = model_dir / "config.json"
         
@@ -440,7 +442,7 @@ class MultiModelInference:
         """Get list of available models with metadata."""
         available = []
         for model_id, config in MODEL_CONFIGS.items():
-            model_dir = self.models_dir / config["model_dir"]
+            model_dir = self.models_dir / str(config["model_dir"])
             model_path = model_dir / "best_model.pt"
             
             available.append({
@@ -503,7 +505,7 @@ class MultiModelInference:
                     sampled_attention = None
                 score = score_t.detach().cpu().item()
                 break
-            except torch.cuda.OutOfMemoryError as e:
+            except torch.cuda.OutOfMemoryError:
                 if self.device != "cuda":
                     raise
 

@@ -5,8 +5,8 @@ https://github.com/Hilo-Hilo/Enso-Atlas/issues/settings-banner-modal
 When the Settings modal is open, the demo toggle in the header should appear
 disabled/greyed with a visual strike treatment and proper accessibility semantics.
 """
-from pathlib import Path
 
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,7 +41,9 @@ def test_demo_toggle_disabled_has_visual_treatment():
     assert "cursor-not-allowed" in src, "Disabled state should show not-allowed cursor"
     assert "opacity-60" in src or "opacity-50" in src, "Disabled state should reduce opacity"
     # Check for strike-through visual element
-    assert "-rotate-12" in src or "line-through" in src, "Disabled state should have strike visual treatment"
+    assert "-rotate-12" in src or "line-through" in src, (
+        "Disabled state should have strike visual treatment"
+    )
 
 
 def test_demo_toggle_disabled_prevents_interaction():
@@ -60,4 +62,6 @@ def test_header_passes_settings_open_to_demo_toggle():
     assert "disabled={settingsOpen}" in src, "Header should pass settingsOpen to DemoToggle"
     # Should appear in both desktop and mobile menu contexts
     occurrences = src.count("disabled={settingsOpen}")
-    assert occurrences >= 2, f"settingsOpen should be passed to both desktop and mobile DemoToggle (found {occurrences})"
+    assert occurrences >= 2, (
+        f"settingsOpen should be passed to both desktop and mobile DemoToggle (found {occurrences})"
+    )

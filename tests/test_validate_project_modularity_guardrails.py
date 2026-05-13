@@ -1,8 +1,7 @@
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
 import sys
 import textwrap
-
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_PATH = REPO_ROOT / "scripts" / "validate_project_modularity.py"
@@ -18,9 +17,7 @@ def _load_module(name: str, path: Path):
     return module
 
 
-validator_module = _load_module(
-    "validate_project_modularity_guardrails_under_test", VALIDATOR_PATH
-)
+validator_module = _load_module("validate_project_modularity_guardrails_under_test", VALIDATOR_PATH)
 
 
 def _write_projects_config(tmp_path: Path, projects: dict[str, dict[str, str]]) -> Path:
@@ -34,9 +31,9 @@ def _write_projects_config(tmp_path: Path, projects: dict[str, dict[str, str]]) 
                   cancer_type: Demo Cancer
                   prediction_target: demo_target
                   dataset:
-                    slides_dir: {ds['slides_dir']}
-                    embeddings_dir: {ds['embeddings_dir']}
-                    labels_file: {ds['labels_file']}
+                    slides_dir: {ds["slides_dir"]}
+                    embeddings_dir: {ds["embeddings_dir"]}
+                    labels_file: {ds["labels_file"]}
                 """
             ).rstrip()
         )
@@ -96,8 +93,7 @@ def test_validate_project_paths_flags_symlinked_project_data_leakage(tmp_path: P
     errors = validator_module.validate_project_paths(cfg)
 
     assert any(
-        "dataset.embeddings_dir resolves outside expected project root" in err
-        for err in errors
+        "dataset.embeddings_dir resolves outside expected project root" in err for err in errors
     )
     assert any("symlink components=" in err for err in errors)
 

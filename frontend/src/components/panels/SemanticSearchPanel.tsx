@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useEffect } from "react";
+import NextImage from "next/image";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -362,10 +363,13 @@ function SearchResultItem({
     >
       {/* Thumbnail */}
       <div className="relative w-12 h-12 rounded-lg overflow-hidden shrink-0 border border-gray-200 group-hover:border-clinical-300 dark:border-navy-600 dark:group-hover:border-clinical-500">
-        <img
+        <NextImage
           src={patchUrl}
           alt={`Patch ${result.patch_index}`}
-          className="w-full h-full object-cover"
+          fill
+          sizes="48px"
+          unoptimized
+          className="object-cover"
           onError={(e) => {
             // Fallback if image fails to load
             (e.target as HTMLImageElement).style.display = "none";

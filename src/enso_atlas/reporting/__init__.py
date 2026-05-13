@@ -1,14 +1,14 @@
 """MedGemma reporting module."""
 
-from .medgemma import MedGemmaReporter
 from .decision_support import (
     ClinicalDecisionSupport,
-    DecisionSupportOutput,
     ConfidenceLevel,
-    RiskLevel,
+    DecisionSupportOutput,
     QualityFactors,
+    RiskLevel,
     SimilarCaseOutcomes,
 )
+from .medgemma import MedGemmaReporter
 
 __all__ = [
     "MedGemmaReporter",

@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import NextImage from "next/image";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -136,11 +137,14 @@ function SlideCard({
       {/* Thumbnail */}
       <div className="relative aspect-[4/3] bg-gray-100 overflow-hidden">
         {!imageError && (
-          <img
+          <NextImage
             src={thumbnailUrl}
             alt={slide.filename}
+            fill
+            sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
+            unoptimized
             className={cn(
-              "w-full h-full object-cover group-hover:scale-105 transition-all duration-300",
+              "object-cover group-hover:scale-105 transition-all duration-300",
               isImageLoaded ? "opacity-100" : "opacity-0"
             )}
             onLoad={() => setIsImageLoaded(true)}

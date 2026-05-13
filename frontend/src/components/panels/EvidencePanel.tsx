@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import NextImage from "next/image";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -545,11 +546,14 @@ function PatchThumbnail({
               <Layers className="h-6 w-6 text-gray-400 dark:text-gray-500" />
             </div>
           )}
-          <img
+          <NextImage
             src={patch.thumbnailUrl}
             alt={`Evidence patch ${rank}`}
+            fill
+            sizes="96px"
+            unoptimized
             className={cn(
-              "w-full h-full object-cover transition-opacity",
+              "object-cover transition-opacity",
               thumbnailLoading ? "opacity-0" : "opacity-100"
             )}
             onLoad={() => setThumbnailLoading(false)}
@@ -707,10 +711,13 @@ function PatchListItem({
     >
       {/* Thumbnail */}
       <div className="relative w-16 h-16 rounded-lg overflow-hidden shrink-0 border border-gray-200 dark:border-navy-600 group-hover:border-clinical-300 dark:group-hover:border-clinical-500">
-        <img
+        <NextImage
           src={patch.thumbnailUrl}
           alt={`Evidence patch ${rank}`}
-          className="w-full h-full object-cover"
+          fill
+          sizes="64px"
+          unoptimized
+          className="object-cover"
         />
         <div className="absolute top-0.5 left-0.5 bg-navy-900/80 text-white text-2xs font-bold px-1 py-0.5 rounded shadow">
           #{rank}

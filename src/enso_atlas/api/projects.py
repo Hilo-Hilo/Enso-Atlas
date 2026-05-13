@@ -12,12 +12,11 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 PROJECTS_DATA_ROOT = Path("data/projects")
 
 
-def default_dataset_paths(project_id: str) -> Dict[str, str]:
+def default_dataset_paths(project_id: str) -> dict[str, str]:
     """Default per-project dataset layout under data/projects/<project_id>."""
     root = PROJECTS_DATA_ROOT / project_id
     return {
@@ -44,13 +43,14 @@ def default_dataset_paths(project_id: str) -> Dict[str, str]:
 @dataclass
 class DatasetConfig:
     """Dataset paths and labels configuration for a project."""
+
     slides_dir: str = "data/projects/default/slides"
     embeddings_dir: str = "data/projects/default/embeddings"
     labels_file: str = "data/projects/default/labels.csv"
     label_column: str = "platinum_sensitivity"
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DatasetConfig":
+    def from_dict(cls, d: dict[str, Any]) -> DatasetConfig:
         return cls(
             slides_dir=d.get("slides_dir", cls.slides_dir),
             embeddings_dir=d.get("embeddings_dir", cls.embeddings_dir),
@@ -62,6 +62,7 @@ class DatasetConfig:
 @dataclass
 class ModelsConfig:
     """Model configuration for a project."""
+
     embedder: str = "path-foundation"
     mil_architecture: str = "transmil"
     mil_checkpoint: str = "models/transmil_best.pt"
@@ -69,7 +70,7 @@ class ModelsConfig:
     semantic_search: str = "medsiglip"
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ModelsConfig":
+    def from_dict(cls, d: dict[str, Any]) -> ModelsConfig:
         return cls(
             embedder=d.get("embedder", cls.embedder),
             mil_architecture=d.get("mil_architecture", cls.mil_architecture),
@@ -82,12 +83,13 @@ class ModelsConfig:
 @dataclass
 class FeaturesConfig:
     """Feature toggles for a project."""
+
     medgemma_reports: bool = True
     medsiglip_search: bool = True
     semantic_search: bool = True
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "FeaturesConfig":
+    def from_dict(cls, d: dict[str, Any]) -> FeaturesConfig:
         return cls(
             medgemma_reports=d.get("medgemma_reports", True),
             medsiglip_search=d.get("medsiglip_search", True),
@@ -98,13 +100,14 @@ class FeaturesConfig:
 @dataclass
 class FoundationModelConfig:
     """Definition of a foundation model."""
+
     id: str
     name: str
     embedding_dim: int
     description: str = ""
 
     @classmethod
-    def from_dict(cls, model_id: str, d: Dict[str, Any]) -> "FoundationModelConfig":
+    def from_dict(cls, model_id: str, d: dict[str, Any]) -> FoundationModelConfig:
         return cls(
             id=model_id,
             name=d.get("name", model_id),
@@ -116,6 +119,7 @@ class FoundationModelConfig:
 @dataclass
 class ClassificationModelConfig:
     """Definition of a classification model from config."""
+
     id: str
     model_dir: str
     display_name: str
@@ -128,7 +132,7 @@ class ClassificationModelConfig:
     compatible_foundation: str = "path_foundation"
 
     @classmethod
-    def from_dict(cls, model_id: str, d: Dict[str, Any]) -> "ClassificationModelConfig":
+    def from_dict(cls, model_id: str, d: dict[str, Any]) -> ClassificationModelConfig:
         return cls(
             id=model_id,
             model_dir=d.get("model_dir", model_id),
@@ -146,11 +150,12 @@ class ClassificationModelConfig:
 @dataclass
 class ProjectConfig:
     """Full configuration for a single project (cancer type / prediction target)."""
+
     id: str
     name: str
     cancer_type: str
     prediction_target: str
-    classes: List[str] = field(default_factory=lambda: ["resistant", "sensitive"])
+    classes: list[str] = field(default_factory=lambda: ["resistant", "sensitive"])
     positive_class: str = "sensitive"
     description: str = ""
     dataset_source: str = ""
@@ -159,12 +164,12 @@ class ProjectConfig:
     models: ModelsConfig = field(default_factory=ModelsConfig)
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     foundation_model: str = "path_foundation"
-    classification_models: List[str] = field(default_factory=list)
+    classification_models: list[str] = field(default_factory=list)
     threshold: float = 0.5
-    threshold_config: Optional[str] = None
+    threshold_config: str | None = None
 
     @classmethod
-    def from_dict(cls, project_id: str, d: Dict[str, Any]) -> "ProjectConfig":
+    def from_dict(cls, project_id: str, d: dict[str, Any]) -> ProjectConfig:
         dataset_raw = {
             **default_dataset_paths(project_id),
             **(d.get("dataset", {}) or {}),
@@ -190,7 +195,7 @@ class ProjectConfig:
             threshold_config=d.get("threshold_config"),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize project config to a JSON-safe dictionary."""
         return {
             "id": self.id,
@@ -226,9 +231,9 @@ class ProjectConfig:
             "threshold_config": self.threshold_config,
         }
 
-    def validate_dataset_modularity(self) -> List[str]:
+    def validate_dataset_modularity(self) -> list[str]:
         """Return path-modularity violations for this project, if any."""
-        errors: List[str] = []
+        errors: list[str] = []
         expected_root = PROJECTS_DATA_ROOT / self.id
 
         def _check_under_expected(path_str: str, field_name: str) -> None:
@@ -265,10 +270,10 @@ class ProjectRegistry:
 
     def __init__(self, config_path: str | Path = "config/projects.yaml"):
         self._config_path = Path(config_path)
-        self._projects: Dict[str, ProjectConfig] = {}
-        self._foundation_models: Dict[str, FoundationModelConfig] = {}
-        self._classification_models: Dict[str, ClassificationModelConfig] = {}
-        self._default_project_id: Optional[str] = None
+        self._projects: dict[str, ProjectConfig] = {}
+        self._foundation_models: dict[str, FoundationModelConfig] = {}
+        self._classification_models: dict[str, ClassificationModelConfig] = {}
+        self._default_project_id: str | None = None
         self._load()
 
     def _load(self):
@@ -277,7 +282,7 @@ class ProjectRegistry:
             logger.warning(f"Projects config not found: {self._config_path}")
             return
 
-        with open(self._config_path, "r") as f:
+        with open(self._config_path) as f:
             raw = yaml.safe_load(f) or {}
 
         # Load global foundation model definitions
@@ -290,7 +295,9 @@ class ProjectRegistry:
         # Load global classification model definitions
         for cm_id, cm_data in raw.get("classification_models", {}).items():
             try:
-                self._classification_models[cm_id] = ClassificationModelConfig.from_dict(cm_id, cm_data)
+                self._classification_models[cm_id] = ClassificationModelConfig.from_dict(
+                    cm_id, cm_data
+                )
             except Exception as e:
                 logger.error(f"Failed to load classification model '{cm_id}': {e}")
 
@@ -325,20 +332,20 @@ class ProjectRegistry:
         )
 
     @property
-    def foundation_models(self) -> Dict[str, FoundationModelConfig]:
+    def foundation_models(self) -> dict[str, FoundationModelConfig]:
         return dict(self._foundation_models)
 
     @property
-    def classification_models(self) -> Dict[str, ClassificationModelConfig]:
+    def classification_models(self) -> dict[str, ClassificationModelConfig]:
         return dict(self._classification_models)
 
-    def get_foundation_model(self, model_id: str) -> Optional[FoundationModelConfig]:
+    def get_foundation_model(self, model_id: str) -> FoundationModelConfig | None:
         return self._foundation_models.get(model_id)
 
-    def get_classification_model(self, model_id: str) -> Optional[ClassificationModelConfig]:
+    def get_classification_model(self, model_id: str) -> ClassificationModelConfig | None:
         return self._classification_models.get(model_id)
 
-    def get_project_classification_models(self, project_id: str) -> List[ClassificationModelConfig]:
+    def get_project_classification_models(self, project_id: str) -> list[ClassificationModelConfig]:
         """Get classification models configured for a project, filtered to those
         compatible with the project's foundation model."""
         project = self._projects.get(project_id)
@@ -351,22 +358,22 @@ class ProjectRegistry:
                 result.append(cm)
         return result
 
-    def get_project(self, project_id: str) -> Optional[ProjectConfig]:
+    def get_project(self, project_id: str) -> ProjectConfig | None:
         """Get a project by ID. Returns None if not found."""
         return self._projects.get(project_id)
 
-    def list_projects(self) -> Dict[str, ProjectConfig]:
+    def list_projects(self) -> dict[str, ProjectConfig]:
         """Return all projects as {id: ProjectConfig}."""
         return dict(self._projects)
 
-    def get_default_project(self) -> Optional[ProjectConfig]:
+    def get_default_project(self) -> ProjectConfig | None:
         """Return the default project config."""
         if self._default_project_id:
             return self._projects.get(self._default_project_id)
         return None
 
     @property
-    def default_project_id(self) -> Optional[str]:
+    def default_project_id(self) -> str | None:
         return self._default_project_id
 
     def save(self):
@@ -384,7 +391,7 @@ class ProjectRegistry:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
         logger.info(f"Saved {len(self._projects)} project(s) to {self._config_path}")
 
-    def add_project(self, project_id: str, config: Dict[str, Any]) -> ProjectConfig:
+    def add_project(self, project_id: str, config: dict[str, Any]) -> ProjectConfig:
         """Add a new project to the registry and persist to YAML.
 
         Args:
@@ -410,7 +417,7 @@ class ProjectRegistry:
         self.save()
         return project
 
-    def update_project(self, project_id: str, updates: Dict[str, Any]) -> ProjectConfig:
+    def update_project(self, project_id: str, updates: dict[str, Any]) -> ProjectConfig:
         """Update an existing project with partial data and persist to YAML.
 
         Args:

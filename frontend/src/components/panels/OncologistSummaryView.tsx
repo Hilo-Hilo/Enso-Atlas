@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import NextImage from "next/image";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -206,10 +207,13 @@ export function OncologistSummaryView({
                 >
                   {/* Large thumbnail */}
                   <div className="aspect-square rounded-lg overflow-hidden border-2 border-gray-200 group-hover:border-clinical-500 transition-colors">
-                    <img
+                    <NextImage
                       src={patch.thumbnailUrl || "/placeholder-patch.png"}
                       alt={`Key region ${index + 1}`}
-                      className="w-full h-full object-cover"
+                      fill
+                      sizes="160px"
+                      unoptimized
+                      className="object-cover"
                     />
                     {/* Hover overlay */}
                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

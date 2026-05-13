@@ -20,20 +20,19 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from pydantic import BaseModel, ConfigDict, Field
 
-from .projects import ProjectConfig, ProjectRegistry, default_dataset_paths
+from .projects import ProjectRegistry
 
 logger = logging.getLogger(__name__)
 
 # The registry is injected at startup via `set_registry()`
-_registry: Optional[ProjectRegistry] = None
+_registry: ProjectRegistry | None = None
 
 
 def set_registry(registry: ProjectRegistry):
@@ -61,9 +60,9 @@ MAX_UPLOAD_SIZE_BYTES = int(os.environ.get("ENSO_MAX_UPLOAD_SIZE_BYTES", 10 * 10
 SAFE_UPLOAD_FILENAME_RE = re.compile(r"^[A-Za-z0-9._\- ]+$")
 
 
-def _dedupe_non_empty_ids(values: List[str]) -> List[str]:
+def _dedupe_non_empty_ids(values: list[str]) -> list[str]:
     """Trim, de-duplicate, and preserve order for ID payloads."""
-    deduped: List[str] = []
+    deduped: list[str] = []
     seen: set[str] = set()
     for raw in values:
         value = (raw or "").strip()
@@ -74,11 +73,15 @@ def _dedupe_non_empty_ids(values: List[str]) -> List[str]:
     return deduped
 
 
-def _validate_project_model_ids(*, project_id: str, model_ids: List[str], reg: ProjectRegistry) -> List[str]:
+def _validate_project_model_ids(
+    *, project_id: str, model_ids: list[str], reg: ProjectRegistry
+) -> list[str]:
     """Ensure payload model IDs are known and compatible with the project."""
     cleaned = _dedupe_non_empty_ids(model_ids)
     if not cleaned:
-        raise HTTPException(status_code=400, detail="model_ids must include at least one non-empty model id")
+        raise HTTPException(
+            status_code=400, detail="model_ids must include at least one non-empty model id"
+        )
 
     allowed = {m.id for m in reg.get_project_classification_models(project_id)}
     if not allowed:
@@ -126,15 +129,18 @@ def _safe_upload_filename(filename: str) -> str:
 
 class CreateProjectRequest(BaseModel):
     """Body for POST /api/projects."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
     id: str = Field(..., min_length=1, max_length=128)
     name: str = Field(..., min_length=1, max_length=256)
     cancer_type: str = Field(..., min_length=1)
     prediction_target: str = Field(..., min_length=1)
-    classes: List[str] = Field(default_factory=lambda: ["resistant", "sensitive"])
+    classes: list[str] = Field(default_factory=lambda: ["resistant", "sensitive"])
     positive_class: str = "sensitive"
     description: str = ""
-    slide_ids: Optional[List[str]] = None
-    model_ids: Optional[List[str]] = None
+    slide_ids: list[str] | None = None
+    model_ids: list[str] | None = None
 
 
 class UpdateProjectRequest(BaseModel):
@@ -142,15 +148,16 @@ class UpdateProjectRequest(BaseModel):
 
     All fields are optional -- only provided fields are updated.
     """
-    name: Optional[str] = None
-    cancer_type: Optional[str] = None
-    prediction_target: Optional[str] = None
-    classes: Optional[List[str]] = None
-    positive_class: Optional[str] = None
-    description: Optional[str] = None
-    dataset: Optional[Dict[str, Any]] = None
-    models: Optional[Dict[str, Any]] = None
-    threshold: Optional[float] = None
+
+    name: str | None = None
+    cancer_type: str | None = None
+    prediction_target: str | None = None
+    classes: list[str] | None = None
+    positive_class: str | None = None
+    description: str | None = None
+    dataset: dict[str, Any] | None = None
+    models: dict[str, Any] | None = None
+    threshold: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -171,16 +178,18 @@ async def list_projects():
     projects = reg.list_projects()
     result = []
     for pid, proj in projects.items():
-        result.append({
-            "id": proj.id,
-            "name": proj.name,
-            "cancer_type": proj.cancer_type,
-            "prediction_target": proj.prediction_target,
-            "classes": proj.classes,
-            "positive_class": proj.positive_class,
-            "description": proj.description,
-            "is_default": pid == reg.default_project_id,
-        })
+        result.append(
+            {
+                "id": proj.id,
+                "name": proj.name,
+                "cancer_type": proj.cancer_type,
+                "prediction_target": proj.prediction_target,
+                "classes": proj.classes,
+                "positive_class": proj.positive_class,
+                "description": proj.description,
+                "is_default": pid == reg.default_project_id,
+            }
+        )
     return {
         "projects": result,
         "default_project": reg.default_project_id,
@@ -235,16 +244,18 @@ async def get_project(project_id: str):
     cls_models = reg.get_project_classification_models(project_id)
     classification_model_details = []
     for cm in cls_models:
-        classification_model_details.append({
-            "id": cm.id,
-            "display_name": cm.display_name,
-            "description": cm.description,
-            "auc": cm.auc,
-            "n_slides": cm.n_slides,
-            "category": cm.category,
-            "positive_label": cm.positive_label,
-            "negative_label": cm.negative_label,
-        })
+        classification_model_details.append(
+            {
+                "id": cm.id,
+                "display_name": cm.display_name,
+                "description": cm.description,
+                "auc": cm.auc,
+                "n_slides": cm.n_slides,
+                "category": cm.category,
+                "positive_label": cm.positive_label,
+                "negative_label": cm.negative_label,
+            }
+        )
 
     return {
         "project": proj.to_dict(),
@@ -439,12 +450,7 @@ async def upload_slide(project_id: str, file: UploadFile = File(...)):
 
 @router.get("/{project_id}/slides")
 async def get_project_slides(project_id: str):
-    """
-    Get slides associated with a project.
-
-    Uses the project_slides junction table. Falls back to the legacy
-    project_id column on slides if the junction table has no rows yet.
-    """
+    """Get slides associated with a project from explicit assignments."""
     reg = get_registry()
     proj = reg.get_project(project_id)
     if proj is None:
@@ -453,12 +459,11 @@ async def get_project_slides(project_id: str):
     try:
         from . import database as db
 
-        # First try the junction table
         slide_ids = await db.get_project_slides(project_id)
 
-        if slide_ids:
-            pool = await db.get_pool()
-            async with pool.acquire() as conn:
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            if slide_ids:
                 rows = await conn.fetch(
                     """
                     SELECT s.slide_id, s.patient_id, s.filename, s.width, s.height,
@@ -469,47 +474,14 @@ async def get_project_slides(project_id: str):
                     """,
                     slide_ids,
                 )
-            return {
-                "project_id": project_id,
-                "slides": [dict(r) for r in rows],
-                "count": len(rows),
-            }
-
-        # Fallback: legacy project_id column on slides table
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            col_check = await conn.fetchval(
-                """
-                SELECT COUNT(*) FROM information_schema.columns
-                WHERE table_name = 'slides' AND column_name = 'project_id'
-                """
-            )
-            if col_check > 0:
-                rows = await conn.fetch(
-                    """
-                    SELECT s.slide_id, s.patient_id, s.filename, s.width, s.height,
-                           s.label, s.has_embeddings, s.has_level0_embeddings, s.num_patches
-                    FROM slides s
-                    WHERE s.project_id = $1
-                    ORDER BY s.slide_id
-                    """,
-                    project_id,
-                )
             else:
-                rows = await conn.fetch(
-                    """
-                    SELECT s.slide_id, s.patient_id, s.filename, s.width, s.height,
-                           s.label, s.has_embeddings, s.has_level0_embeddings, s.num_patches
-                    FROM slides s
-                    ORDER BY s.slide_id
-                    """
-                )
+                rows = []
 
-            return {
-                "project_id": project_id,
-                "slides": [dict(r) for r in rows],
-                "count": len(rows),
-            }
+        return {
+            "project_id": project_id,
+            "slides": [dict(r) for r in rows],
+            "count": len(rows),
+        }
     except Exception as e:
         logger.warning(f"Database query failed for project slides: {e}")
         return {
@@ -522,12 +494,16 @@ async def get_project_slides(project_id: str):
 
 class SlideIdsRequest(BaseModel):
     """Body for assigning/unassigning slides."""
-    slide_ids: List[str] = Field(..., min_length=1)
+
+    slide_ids: list[str] = Field(..., min_length=1)
 
 
 class ModelIdsRequest(BaseModel):
     """Body for assigning/unassigning models."""
-    model_ids: List[str] = Field(..., min_length=1)
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_ids: list[str] = Field(..., min_length=1)
 
 
 @router.post("/{project_id}/slides", status_code=200)
@@ -539,9 +515,12 @@ async def assign_project_slides(project_id: str, body: SlideIdsRequest):
 
     slide_ids = _dedupe_non_empty_ids(body.slide_ids)
     if not slide_ids:
-        raise HTTPException(status_code=400, detail="slide_ids must include at least one non-empty slide id")
+        raise HTTPException(
+            status_code=400, detail="slide_ids must include at least one non-empty slide id"
+        )
 
     from . import database as db
+
     count = await db.assign_slides_to_project(project_id, slide_ids)
     return {
         "project_id": project_id,
@@ -559,9 +538,12 @@ async def unassign_project_slides(project_id: str, body: SlideIdsRequest):
 
     slide_ids = _dedupe_non_empty_ids(body.slide_ids)
     if not slide_ids:
-        raise HTTPException(status_code=400, detail="slide_ids must include at least one non-empty slide id")
+        raise HTTPException(
+            status_code=400, detail="slide_ids must include at least one non-empty slide id"
+        )
 
     from . import database as db
+
     count = await db.unassign_slides_from_project(project_id, slide_ids)
     return {
         "project_id": project_id,
@@ -578,6 +560,7 @@ async def get_project_models_endpoint(project_id: str):
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
 
     from . import database as db
+
     model_ids = await db.get_project_models(project_id)
     return {
         "project_id": project_id,
@@ -600,6 +583,7 @@ async def assign_project_models(project_id: str, body: ModelIdsRequest):
     )
 
     from . import database as db
+
     count = await db.assign_models_to_project(project_id, validated_model_ids)
     return {
         "project_id": project_id,
@@ -622,6 +606,7 @@ async def unassign_project_models(project_id: str, body: ModelIdsRequest):
     )
 
     from . import database as db
+
     count = await db.unassign_models_from_project(project_id, validated_model_ids)
     return {
         "project_id": project_id,
@@ -646,15 +631,17 @@ async def get_project_available_models(project_id: str):
     cls_models = reg.get_project_classification_models(project_id)
     models = []
     for cm in cls_models:
-        models.append({
-            "id": cm.id,
-            "displayName": cm.display_name,
-            "description": cm.description,
-            "auc": cm.auc,
-            "category": cm.category,
-            "positiveLabel": cm.positive_label,
-            "negativeLabel": cm.negative_label,
-        })
+        models.append(
+            {
+                "id": cm.id,
+                "displayName": cm.display_name,
+                "description": cm.description,
+                "auc": cm.auc,
+                "category": cm.category,
+                "positiveLabel": cm.positive_label,
+                "negativeLabel": cm.negative_label,
+            }
+        )
 
     return {
         "project_id": project_id,

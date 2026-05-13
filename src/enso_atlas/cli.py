@@ -8,15 +8,14 @@ Commands:
 - serve: Start the Gradio UI
 """
 
-import typer
 from pathlib import Path
-from typing import Optional
+
+import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 app = typer.Typer(
-    name="enso-atlas",
-    help="On-Prem Pathology Evidence Engine for Treatment-Response Insight"
+    name="enso-atlas", help="On-Prem Pathology Evidence Engine for Treatment-Response Insight"
 )
 console = Console()
 
@@ -53,7 +52,7 @@ def analyze(
         result.save_heatmap(output / f"{slide_name}_heatmap.png")
         result.save_report(output / f"{slide_name}_report.json")
 
-    console.print(f"\n[bold green]Analysis complete![/]")
+    console.print("\n[bold green]Analysis complete![/]")
     console.print(f"  Prediction: [bold]{result.label}[/] (score: {result.score:.3f})")
     console.print(f"  Confidence: {result.confidence:.1%}")
     console.print(f"\n  Results saved to: {output}/")
@@ -74,7 +73,7 @@ def batch(
     atlas = EnsoAtlas.from_config(str(config))
     results = atlas.batch_analyze(str(input_dir), str(output_dir), pattern)
 
-    console.print(f"\n[bold green]Batch analysis complete![/]")
+    console.print("\n[bold green]Batch analysis complete![/]")
     console.print(f"  Processed {len(results)} slides")
     console.print(f"  Results saved to: {output_dir}/")
 
@@ -89,10 +88,11 @@ def train(
     """Train the CLAM MIL head."""
     import numpy as np
     from sklearn.model_selection import train_test_split
+
     from .config import AtlasConfig
     from .mil.clam import CLAMClassifier
 
-    console.print(f"[bold blue]Training MIL head[/]")
+    console.print("[bold blue]Training MIL head[/]")
 
     # Load config
     config = AtlasConfig.from_yaml(str(config))
@@ -112,6 +112,7 @@ def train(
 
     # Load labels
     import pandas as pd
+
     labels_df = pd.read_csv(labels_file)
 
     # Load embeddings
@@ -122,7 +123,7 @@ def train(
         emb_path = embeddings_dir / f"{row['slide_id']}.npy"
         if emb_path.exists():
             embeddings_list.append(np.load(emb_path))
-            labels.append(row['label'])
+            labels.append(row["label"])
 
     console.print(f"Loaded {len(embeddings_list)} slides")
 
@@ -139,7 +140,7 @@ def train(
     output.parent.mkdir(parents=True, exist_ok=True)
     classifier.save(output)
 
-    console.print(f"\n[bold green]Training complete![/]")
+    console.print("\n[bold green]Training complete![/]")
     console.print(f"  Final val AUC: {history['val_auc'][-1]:.3f}")
     console.print(f"  Model saved to: {output}")
 
@@ -153,7 +154,7 @@ def serve(
     """Start the Gradio web interface."""
     from .ui.app import create_app
 
-    console.print(f"[bold blue]Starting Enso Atlas UI[/]")
+    console.print("[bold blue]Starting Enso Atlas UI[/]")
     console.print(f"  Port: {port}")
     console.print(f"  Config: {config}")
 
@@ -174,6 +175,7 @@ def info():
 
     # Python info
     import sys
+
     console.print(f"Python: {sys.version}")
 
     # PyTorch info
@@ -183,7 +185,9 @@ def info():
     if torch.cuda.is_available():
         console.print(f"CUDA: {torch.version.cuda}")
         console.print(f"GPU: {torch.cuda.get_device_name(0)}")
-        console.print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        console.print(
+            f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB"
+        )
     else:
         console.print("CUDA: Not available")
 
@@ -194,6 +198,7 @@ def info():
     # OpenSlide info
     try:
         import openslide
+
         console.print(f"OpenSlide: {openslide.__version__}")
     except ImportError:
         console.print("OpenSlide: Not installed")

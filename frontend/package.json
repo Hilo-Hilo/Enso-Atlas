@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "check:model-scope": "node ./scripts/check-project-model-scoping.mjs",
     "check:heatmap-alignment": "node ./scripts/check-heatmap-grid-alignment.mjs"
   },
@@ -14,7 +14,7 @@
     "clsx": "^2.1.1",
     "jspdf": "^4.0.0",
     "lucide-react": "^0.469.0",
-    "next": "^14.2.22",
+    "next": "^16.2.6",
     "openseadragon": "^5.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -30,12 +30,15 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "autoprefixer": "^10.4.20",
-    "eslint": "^8.57.0",
-    "eslint-config-next": "^14.2.35",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
     "jsdom": "^28.1.0",
-    "postcss": "^8.5.1",
+    "postcss": "^8.5.14",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "postcss": "^8.5.14"
   }
 }

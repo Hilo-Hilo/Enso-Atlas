@@ -10,10 +10,9 @@ with interpretable attention weights for evidence generation.
 """
 
 import gc
+import logging
 import os
 from pathlib import Path
-from typing import Tuple, Optional, List, Dict
-import logging
 
 import numpy as np
 
@@ -45,7 +44,6 @@ def _release_torch_cuda_cache() -> None:
         pass
 
 
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -53,53 +51,49 @@ import torch.nn.functional as F
 
 class LegacyCLAMModel(nn.Module):
     """Simpler CLAM model compatible with older checkpoints.
-    
+
     Architecture matches the trained model:
     - encoder: Linear(384, 256) + ReLU + Dropout
     - attention: Gated attention (attention_a, attention_b, attention_c)
     - classifier: Linear(256, 2)
     """
-    
+
     def __init__(self, input_dim: int = 384, hidden_dim: int = 256, attention_dim: int = 128):
         super().__init__()
-        
+
         # Feature encoder
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.25)
-        )
-        
+        self.encoder = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.ReLU(), nn.Dropout(0.25))
+
         # Gated attention mechanism
-        self.attention = nn.ModuleDict({
-            "attention_a": nn.Sequential(nn.Linear(hidden_dim, attention_dim), nn.Tanh()),
-            "attention_b": nn.Sequential(nn.Linear(hidden_dim, attention_dim), nn.Sigmoid()),
-            "attention_c": nn.Linear(attention_dim, 1)
-        })
-        
-        # Bag classifier
-        self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim, 2)
+        self.attention = nn.ModuleDict(
+            {
+                "attention_a": nn.Sequential(nn.Linear(hidden_dim, attention_dim), nn.Tanh()),
+                "attention_b": nn.Sequential(nn.Linear(hidden_dim, attention_dim), nn.Sigmoid()),
+                "attention_c": nn.Linear(attention_dim, 1),
+            }
         )
-        
+
+        # Bag classifier
+        self.classifier = nn.Sequential(nn.Linear(hidden_dim, 2))
+
     def forward(self, x, return_attention: bool = True):
         """Forward pass."""
         # Encode features
         h = self.encoder(x)  # (n_patches, hidden_dim)
-        
+
         # Compute gated attention
         a = self.attention["attention_a"](h)
         b = self.attention["attention_b"](h)
         A = self.attention["attention_c"](a * b)
         A = F.softmax(A, dim=0)
-        
+
         # Aggregate with attention
         M = torch.mm(A.T, h)  # (1, hidden_dim)
-        
+
         # Classify
         logits = self.classifier(M)
         score = F.softmax(logits, dim=1)[0, 1]
-        
+
         if return_attention:
             return score, A.squeeze(-1)
         return score
@@ -133,7 +127,7 @@ class AttentionMIL:
                     nn.Linear(input_dim, hidden_dim),
                     nn.Tanh(),
                     nn.Dropout(dropout),
-                    nn.Linear(hidden_dim, 1)
+                    nn.Linear(hidden_dim, 1),
                 )
 
                 self.classifier = nn.Sequential(
@@ -141,7 +135,7 @@ class AttentionMIL:
                     nn.ReLU(),
                     nn.Dropout(dropout),
                     nn.Linear(hidden_dim, 1),
-                    nn.Sigmoid()
+                    nn.Sigmoid(),
                 )
 
             def forward(self, x):
@@ -159,9 +153,7 @@ class AttentionMIL:
 
                 return logit, attn_weights.squeeze()
 
-        self._model = AttentionMILModel(
-            input_dim, hidden_dim, self.config.dropout
-        )
+        self._model = AttentionMILModel(input_dim, hidden_dim, self.config.dropout)
 
         return self._model
 
@@ -192,6 +184,7 @@ class CLAMClassifier:
             return float(config.threshold)
         if getattr(config, "threshold_config_path", None):
             import json
+
             try:
                 with open(config.threshold_config_path) as fh:
                     data = json.load(fh)
@@ -221,7 +214,6 @@ class CLAMClassifier:
         hidden_dim = self.config.hidden_dim
         n_heads = self.config.attention_heads
 
-
         class GatedAttention(nn.Module):
             """Gated attention mechanism for CLAM."""
 
@@ -229,15 +221,9 @@ class CLAMClassifier:
                 super().__init__()
                 self.n_heads = n_heads
 
-                self.attention_V = nn.Sequential(
-                    nn.Linear(input_dim, hidden_dim),
-                    nn.Tanh()
-                )
+                self.attention_V = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.Tanh())
 
-                self.attention_U = nn.Sequential(
-                    nn.Linear(input_dim, hidden_dim),
-                    nn.Sigmoid()
-                )
+                self.attention_U = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.Sigmoid())
 
                 self.attention_weights = nn.Linear(hidden_dim, n_heads)
                 self.dropout = nn.Dropout(dropout)
@@ -262,18 +248,16 @@ class CLAMClassifier:
 
                 # Feature transformation
                 self.feature_extractor = nn.Sequential(
-                    nn.Linear(input_dim, hidden_dim),
-                    nn.ReLU(),
-                    nn.Dropout(dropout)
+                    nn.Linear(input_dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout)
                 )
 
                 # Gated attention
                 self.attention = GatedAttention(hidden_dim, hidden_dim // 2, n_heads, dropout)
 
                 # Instance-level classifier (for pseudo-labels)
-                self.instance_classifier = nn.ModuleList([
-                    nn.Linear(hidden_dim, 2) for _ in range(n_classes)
-                ])
+                self.instance_classifier = nn.ModuleList(
+                    [nn.Linear(hidden_dim, 2) for _ in range(n_classes)]
+                )
 
                 # Bag-level classifier
                 self.bag_classifier = nn.Sequential(
@@ -281,7 +265,7 @@ class CLAMClassifier:
                     nn.ReLU(),
                     nn.Dropout(dropout),
                     nn.Linear(hidden_dim, 1),
-                    nn.Sigmoid()
+                    nn.Sigmoid(),
                 )
 
             def forward(self, x, return_attention=True):
@@ -307,9 +291,7 @@ class CLAMClassifier:
 
                 return logit
 
-        self._model = CLAMModel(
-            input_dim, hidden_dim, n_heads, self.config.dropout
-        )
+        self._model = CLAMModel(input_dim, hidden_dim, n_heads, self.config.dropout)
 
         return self._model
 
@@ -343,18 +325,17 @@ class CLAMClassifier:
             state_dict = checkpoint["model_state_dict"]
         else:
             state_dict = checkpoint
-            
+
         # Detect legacy checkpoint format by checking for "encoder" key
         is_legacy = any(k.startswith("encoder.") for k in state_dict.keys())
-        
+
         if is_legacy:
             # Use legacy model architecture
             logger.info("Detected legacy checkpoint format, using LegacyCLAMModel")
             self._model = LegacyCLAMModel(
-                input_dim=self.config.input_dim,
-                hidden_dim=self.config.hidden_dim
+                input_dim=self.config.input_dim, hidden_dim=self.config.hidden_dim
             ).to(self._device)
-            
+
         self._model.load_state_dict(state_dict)
         self._model.to(self._device)
         self._model.eval()
@@ -377,11 +358,11 @@ class CLAMClassifier:
 
     def fit(
         self,
-        embeddings_list: List[np.ndarray],
-        labels: List[int],
-        val_embeddings: Optional[List[np.ndarray]] = None,
-        val_labels: Optional[List[int]] = None,
-    ) -> Dict[str, List[float]]:
+        embeddings_list: list[np.ndarray],
+        labels: list[int],
+        val_embeddings: list[np.ndarray] | None = None,
+        val_labels: list[int] | None = None,
+    ) -> dict[str, list[float]]:
         """
         Train the CLAM model.
 
@@ -407,7 +388,7 @@ class CLAMClassifier:
         optimizer = optim.Adam(
             self._model.parameters(),
             lr=self.config.learning_rate,
-            weight_decay=self.config.weight_decay
+            weight_decay=self.config.weight_decay,
         )
         criterion = nn.BCELoss()
 
@@ -424,7 +405,7 @@ class CLAMClassifier:
             # Shuffle training data
             indices = np.random.permutation(len(embeddings_list))
 
-            for idx in tqdm(indices, desc=f"Epoch {epoch+1}/{self.config.epochs}"):
+            for idx in tqdm(indices, desc=f"Epoch {epoch + 1}/{self.config.epochs}"):
                 embeddings = embeddings_list[idx]
                 label = labels[idx]
 
@@ -455,7 +436,7 @@ class CLAMClassifier:
                 history["val_auc"].append(val_auc)
 
                 logger.info(
-                    f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, "
+                    f"Epoch {epoch + 1}: train_loss={avg_train_loss:.4f}, "
                     f"val_loss={val_loss:.4f}, val_auc={val_auc:.4f}"
                 )
 
@@ -466,20 +447,20 @@ class CLAMClassifier:
                 else:
                     patience_counter += 1
                     if patience_counter >= self.config.patience:
-                        logger.info(f"Early stopping at epoch {epoch+1}")
+                        logger.info(f"Early stopping at epoch {epoch + 1}")
                         break
             else:
-                logger.info(f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}")
+                logger.info(f"Epoch {epoch + 1}: train_loss={avg_train_loss:.4f}")
 
         self._is_trained = True
         return history
 
     def _validate(
         self,
-        embeddings_list: List[np.ndarray],
-        labels: List[int],
+        embeddings_list: list[np.ndarray],
+        labels: list[int],
         criterion,
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """Run validation and compute metrics."""
         import torch
         from sklearn.metrics import roc_auc_score
@@ -505,7 +486,7 @@ class CLAMClassifier:
 
         return avg_loss, auc
 
-    def predict(self, embeddings: np.ndarray) -> Tuple[float, np.ndarray]:
+    def predict(self, embeddings: np.ndarray) -> tuple[float, np.ndarray]:
         """
         Predict for a single slide.
 
@@ -538,7 +519,7 @@ class CLAMClassifier:
             del x
             _release_torch_cuda_cache()
 
-    def classify(self, embeddings: np.ndarray) -> Tuple[str, float, np.ndarray]:
+    def classify(self, embeddings: np.ndarray) -> tuple[str, float, np.ndarray]:
         """
         Predict and return a label string using the configured threshold.
 
@@ -552,8 +533,8 @@ class CLAMClassifier:
 
     def predict_batch(
         self,
-        embeddings_list: List[np.ndarray],
-    ) -> List[Tuple[float, np.ndarray]]:
+        embeddings_list: list[np.ndarray],
+    ) -> list[tuple[float, np.ndarray]]:
         """
         Predict for multiple slides.
 
@@ -573,7 +554,7 @@ class CLAMClassifier:
         self,
         embeddings: np.ndarray,
         n_samples: int = 20,
-    ) -> Dict[str, float | np.ndarray]:
+    ) -> dict[str, float | np.ndarray]:
         """
         Predict with MC Dropout uncertainty quantification.
 
@@ -659,6 +640,7 @@ class CLAMClassifier:
 # TransMIL Classifier -- drop-in alternative to CLAMClassifier
 # ---------------------------------------------------------------------------
 
+
 class TransMILClassifier:
     """
     TransMIL (Transformer-based MIL) classifier.
@@ -704,7 +686,7 @@ class TransMILClassifier:
 
         return self._device
 
-    def _build_model(self, cfg_override: Optional[Dict] = None):
+    def _build_model(self, cfg_override: dict | None = None):
         """
         Instantiate the TransMIL network.
 
@@ -715,7 +697,6 @@ class TransMILClassifier:
         """
         # Lazy import so the rest of the module does not require the models
         # package to be on sys.path at import time.
-        import importlib
         import sys
         from pathlib import Path as _Path
 
@@ -838,7 +819,7 @@ class TransMILClassifier:
         torch.save(self._model.state_dict(), path)
         logger.info("Saved TransMIL model to %s", path)
 
-    def predict(self, embeddings: np.ndarray) -> Tuple[float, np.ndarray]:
+    def predict(self, embeddings: np.ndarray) -> tuple[float, np.ndarray]:
         """
         Predict for a single slide.
 
@@ -871,7 +852,7 @@ class TransMILClassifier:
 
         sampled_indices = np.arange(n_patches, dtype=np.int64)
 
-        def _forward(idx: np.ndarray) -> Tuple[float, np.ndarray]:
+        def _forward(idx: np.ndarray) -> tuple[float, np.ndarray]:
             x = None
             try:
                 x = torch.from_numpy(emb[idx]).float().to(self._device)
@@ -931,7 +912,7 @@ class TransMILClassifier:
         finally:
             _release_torch_cuda_cache()
 
-    def classify(self, embeddings: np.ndarray) -> Tuple[str, float, np.ndarray]:
+    def classify(self, embeddings: np.ndarray) -> tuple[str, float, np.ndarray]:
         """
         Predict and return a label string using the configured threshold.
 
@@ -945,8 +926,8 @@ class TransMILClassifier:
 
     def predict_batch(
         self,
-        embeddings_list: List[np.ndarray],
-    ) -> List[Tuple[float, np.ndarray]]:
+        embeddings_list: list[np.ndarray],
+    ) -> list[tuple[float, np.ndarray]]:
         """
         Predict for multiple slides.
 
@@ -962,7 +943,7 @@ class TransMILClassifier:
         self,
         embeddings: np.ndarray,
         n_samples: int = 20,
-    ) -> Dict[str, float | np.ndarray]:
+    ) -> dict[str, float | np.ndarray]:
         """
         MC-Dropout uncertainty estimation (same semantics as CLAMClassifier).
 
@@ -1023,6 +1004,7 @@ class TransMILClassifier:
 # ---------------------------------------------------------------------------
 # Factory helper
 # ---------------------------------------------------------------------------
+
 
 def create_classifier(config: MILConfig) -> CLAMClassifier | TransMILClassifier:
     """

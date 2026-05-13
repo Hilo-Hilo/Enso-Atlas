@@ -17,7 +17,6 @@ These tests verify:
 """
 
 from pathlib import Path
-import re
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SRC = REPO_ROOT / "frontend" / "src"
@@ -31,6 +30,7 @@ def _read(rel: str) -> str:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _modal_src() -> str:
     return _read("frontend/src/components/modals/SystemStatusModal.tsx")
 
@@ -39,15 +39,14 @@ def _modal_src() -> str:
 # 1. Basic dark-mode presence
 # ---------------------------------------------------------------------------
 
+
 class TestSystemStatusModalDarkModePresence:
     """SystemStatusModal must contain dark: variant classes."""
 
     def test_has_dark_variants(self):
         src = _modal_src()
         count = src.count("dark:")
-        assert count >= 15, (
-            f"SystemStatusModal should have ≥15 dark: variants (found {count})"
-        )
+        assert count >= 15, f"SystemStatusModal should have ≥15 dark: variants (found {count})"
 
     def test_no_light_only_modal_shell(self):
         """Modal shell bg should not be light-only."""
@@ -61,20 +60,17 @@ class TestSystemStatusModalDarkModePresence:
 # 2. Modal shell / header / footer
 # ---------------------------------------------------------------------------
 
+
 class TestModalStructureDarkMode:
     """Header, footer, and modal container have proper dark styles."""
 
     def test_header_dark_background(self):
         src = _modal_src()
-        assert "dark:bg-navy-900" in src, (
-            "Header should have dark:bg-navy-900 background"
-        )
+        assert "dark:bg-navy-900" in src, "Header should have dark:bg-navy-900 background"
 
     def test_header_dark_border(self):
         src = _modal_src()
-        assert "dark:border-navy-600" in src, (
-            "Header border should be dark:border-navy-600"
-        )
+        assert "dark:border-navy-600" in src, "Header border should be dark:border-navy-600"
 
     def test_footer_dark_background(self):
         src = _modal_src()
@@ -97,6 +93,7 @@ class TestModalStructureDarkMode:
 # ---------------------------------------------------------------------------
 # 3. Status color semantics preserved in both themes
 # ---------------------------------------------------------------------------
+
 
 class TestStatusColorsDarkMode:
     """getStatusColor must return dark-aware classes while keeping light ones."""
@@ -130,23 +127,22 @@ class TestStatusColorsDarkMode:
         """The overall status subtitle (All Systems Operational, etc.) should have dark variants."""
         src = _modal_src()
         # These appear in the header subtitle
-        assert 'text-green-600 dark:text-green-400' in src
-        assert 'text-amber-600 dark:text-amber-400' in src
-        assert 'text-red-600 dark:text-red-400' in src
+        assert "text-green-600 dark:text-green-400" in src
+        assert "text-amber-600 dark:text-amber-400" in src
+        assert "text-red-600 dark:text-red-400" in src
 
 
 # ---------------------------------------------------------------------------
 # 4. Stat tiles (Uptime / Version)
 # ---------------------------------------------------------------------------
 
+
 class TestStatTilesDarkMode:
     """Quick stat tiles should have dark backgrounds and text."""
 
     def test_stat_tile_dark_background(self):
         src = _modal_src()
-        assert "dark:bg-navy-700/50" in src, (
-            "Stat tiles should have dark:bg-navy-700/50 background"
-        )
+        assert "dark:bg-navy-700/50" in src, "Stat tiles should have dark:bg-navy-700/50 background"
 
     def test_stat_tile_label_dark_text(self):
         src = _modal_src()
@@ -172,18 +168,19 @@ class TestStatTilesDarkMode:
 # 5. Services heading, timestamp, close button
 # ---------------------------------------------------------------------------
 
+
 class TestMiscDarkElements:
     """Various text and interactive elements have dark styles."""
 
     def test_services_heading_dark_text(self):
         src = _modal_src()
-        assert 'text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3' in src, (
+        assert "text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3" in src, (
             "Services heading should have dark:text-gray-100"
         )
 
     def test_last_checked_dark_text(self):
         src = _modal_src()
-        assert 'text-xs text-gray-500 dark:text-gray-400 text-center' in src, (
+        assert "text-xs text-gray-500 dark:text-gray-400 text-center" in src, (
             "Last-checked timestamp should have dark:text-gray-400"
         )
 
@@ -194,7 +191,7 @@ class TestMiscDarkElements:
 
     def test_title_dark_text(self):
         src = _modal_src()
-        assert 'text-lg font-semibold text-gray-900 dark:text-gray-100' in src, (
+        assert "text-lg font-semibold text-gray-900 dark:text-gray-100" in src, (
             "Modal title 'System Status' should have dark:text-gray-100"
         )
 
@@ -203,25 +200,27 @@ class TestMiscDarkElements:
 # 6. Status icons unchanged (shared between themes)
 # ---------------------------------------------------------------------------
 
+
 class TestStatusIconsUnchanged:
     """Status icons use the same colors in both themes (green-500, red-500, amber-500)."""
 
     def test_online_icon_color(self):
         src = _modal_src()
-        assert 'text-green-500' in src, "Online icon should remain text-green-500"
+        assert "text-green-500" in src, "Online icon should remain text-green-500"
 
     def test_offline_icon_color(self):
         src = _modal_src()
-        assert 'text-red-500' in src, "Offline icon should remain text-red-500"
+        assert "text-red-500" in src, "Offline icon should remain text-red-500"
 
     def test_degraded_icon_color(self):
         src = _modal_src()
-        assert 'text-amber-500' in src, "Degraded icon should remain text-amber-500"
+        assert "text-amber-500" in src, "Degraded icon should remain text-amber-500"
 
 
 # ---------------------------------------------------------------------------
 # 7. Light-mode regression guard
 # ---------------------------------------------------------------------------
+
 
 class TestLightModePreserved:
     """All original light-mode classes must still be present."""
@@ -262,6 +261,7 @@ class TestLightModePreserved:
 # ---------------------------------------------------------------------------
 # 8. Header status trigger in Header.tsx
 # ---------------------------------------------------------------------------
+
 
 class TestHeaderStatusTriggerDarkMode:
     """Header.tsx status dot button should have dark hover styles."""

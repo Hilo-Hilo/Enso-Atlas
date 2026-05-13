@@ -205,7 +205,9 @@ def test_is_model_allowed_for_scope_rejects_ovarian_model_for_lung_scope():
     scope = asyncio.run(
         resolve_project_model_scope(
             "lung-stage",
-            project_registry=_FakeRegistry({"lung-stage": _FakeProject(classification_models=["lung_stage"])}),
+            project_registry=_FakeRegistry(
+                {"lung-stage": _FakeProject(classification_models=["lung_stage"])}
+            ),
             get_project_models=lambda _pid: _db_models_factory({}, _pid),
         )
     )

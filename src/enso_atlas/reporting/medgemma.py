@@ -7,18 +7,16 @@ Uses MedGemma 1.5 to generate:
 - Safety-aware, grounded interpretations
 """
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Dict, Optional, Any
-import logging
+import inspect
 import json
+import logging
+import os
 import re
 import threading
 import time
-import inspect
-import os
-
-import numpy as np
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +31,7 @@ Histological sections of both ovaries show a poorly differentiated carcinoma con
 
 def _resolve_medgemma_model_path(model_hint: str) -> str:
     """Resolve a usable MedGemma model path/id with local-first fallback."""
+
     def _has_model_weights(path: Path) -> bool:
         # Common single-file formats
         if (path / "model.safetensors").exists():
@@ -47,7 +46,9 @@ def _resolve_medgemma_model_path(model_hint: str) -> str:
                 with index_path.open("r", encoding="utf-8") as f:
                     payload = json.load(f)
                 weight_map = payload.get("weight_map", {})
-                shard_names = sorted(set(weight_map.values())) if isinstance(weight_map, dict) else []
+                shard_names = (
+                    sorted(set(weight_map.values())) if isinstance(weight_map, dict) else []
+                )
                 if not shard_names:
                     return False
                 missing = [name for name in shard_names if not (path / name).exists()]
@@ -90,12 +91,12 @@ def _resolve_medgemma_model_path(model_hint: str) -> str:
 
 def _patch_torch_autocast():
     """Patch torch.is_autocast_enabled for transformers 5.0+ compatibility.
-    
+
     Newer transformers calls torch.is_autocast_enabled() with no arguments,
     but some PyTorch versions have a different signature. This patches it to work.
     """
     import torch
-    
+
     original_is_autocast_enabled = getattr(torch, "is_autocast_enabled", None)
 
     def _autocast_fallback() -> bool:
@@ -107,7 +108,7 @@ def _patch_torch_autocast():
             return cpu_enabled or cuda_enabled
         except Exception:
             return False
-    
+
     def patched_is_autocast_enabled(*args, **kwargs):
         # Try the original function first (with provided args), then no-arg form.
         if callable(original_is_autocast_enabled):
@@ -122,7 +123,7 @@ def _patch_torch_autocast():
                 pass
         # Fallback for older/partially patched torch builds.
         return _autocast_fallback()
-    
+
     torch.is_autocast_enabled = patched_is_autocast_enabled
     logger.info("Patched torch.is_autocast_enabled for transformers compatibility")
 
@@ -137,6 +138,7 @@ except Exception as e:
 @dataclass
 class ReportingConfig:
     """MedGemma reporting configuration."""
+
     # Use local path in container, fallback to HuggingFace ID
     model: str = "/app/models/medgemma-4b-it"
     hf_cache_dir: str = os.environ.get(
@@ -147,7 +149,9 @@ class ReportingConfig:
     max_similar_cases: int = 2  # Include minimal cohort context without blowing up prompt size
     max_input_tokens: int = 1024  # Allow structured prompt with per-patch details
     max_output_tokens: int = 1024  # Avoid truncated JSON; prioritize complete narrative fields
-    max_generation_time_s: float = 300.0  # CPU inference on Blackwell (no CUDA sm_121) needs ~120-180s
+    max_generation_time_s: float = (
+        300.0  # CPU inference on Blackwell (no CUDA sm_121) needs ~120-180s
+    )
     temperature: float = 0.0  # Deterministic output to improve JSON compliance
     top_p: float = 0.9
 
@@ -168,8 +172,8 @@ REPORT_SCHEMA = {
             "properties": {
                 "label": {"type": "string"},
                 "probability": {"type": "number"},
-                "calibration_note": {"type": "string"}
-            }
+                "calibration_note": {"type": "string"},
+            },
         },
         "evidence": {
             "type": "array",
@@ -178,15 +182,15 @@ REPORT_SCHEMA = {
                 "properties": {
                     "patch_id": {"type": "string"},
                     "morphology_description": {"type": "string"},
-                    "significance": {"type": "string"}
-                }
-            }
+                    "significance": {"type": "string"},
+                },
+            },
         },
         "similar_examples": {"type": "array"},
         "limitations": {"type": "array", "items": {"type": "string"}},
         "suggested_next_steps": {"type": "array", "items": {"type": "string"}},
-        "safety_statement": {"type": "string"}
-    }
+        "safety_statement": {"type": "string"},
+    },
 }
 
 
@@ -220,18 +224,24 @@ class MedGemmaReporter:
 
         with self._load_lock:
             # If model is present but tokenizer state is invalid, reset and reload.
-            if self._model is not None and (self._tokenizer is None or not callable(self._tokenizer)):
+            if self._model is not None and (
+                self._tokenizer is None or not callable(self._tokenizer)
+            ):
                 logger.warning(
                     "MedGemma in-memory state is inconsistent (model loaded, tokenizer invalid). "
                     "Resetting runtime and reloading."
                 )
                 self._reset_runtime()
 
-            if self._model is not None and self._tokenizer is not None and callable(self._tokenizer):
+            if (
+                self._model is not None
+                and self._tokenizer is not None
+                and callable(self._tokenizer)
+            ):
                 return
 
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor
+            from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
 
             # Determine device
             # Blackwell GPU (sm_121) is not officially supported by PyTorch but
@@ -254,7 +264,7 @@ class MedGemmaReporter:
                 or os.environ.get("HUGGINGFACE_HUB_TOKEN")
             )
             cache_dir = str(Path(self.config.hf_cache_dir).expanduser())
-            common_hf_kwargs: Dict[str, Any] = {"cache_dir": cache_dir}
+            common_hf_kwargs: dict[str, Any] = {"cache_dir": cache_dir}
             if hf_token:
                 common_hf_kwargs["token"] = hf_token
 
@@ -315,7 +325,9 @@ class MedGemmaReporter:
                     **model_kwargs,
                 )
             except (TypeError, RuntimeError) as load_err:
-                logger.warning(f"Model load with bfloat16 failed ({load_err}), retrying with float32")
+                logger.warning(
+                    f"Model load with bfloat16 failed ({load_err}), retrying with float32"
+                )
                 model_kwargs["torch_dtype"] = torch.float32
                 model_kwargs.pop("low_cpu_mem_usage", None)
                 self._model = AutoModelForCausalLM.from_pretrained(
@@ -368,7 +380,6 @@ class MedGemmaReporter:
             self._reset_runtime()
         self._load_model()
 
-
     def _warmup_inference(self) -> None:
         """Run a test inference to warm up CUDA kernels."""
         if self._warmup_done:
@@ -410,7 +421,7 @@ class MedGemmaReporter:
             finally:
                 self._warmup_done = True
 
-    def _format_patient_context(self, patient_context: Optional[Dict]) -> str:
+    def _format_patient_context(self, patient_context: dict | None) -> str:
         """Format patient context into a clinical description."""
         if not patient_context:
             return "No patient demographics available."
@@ -419,7 +430,13 @@ class MedGemmaReporter:
         if patient_context.get("age"):
             parts.append(f"{patient_context['age']}-year-old")
         if patient_context.get("sex"):
-            sex_full = "female" if patient_context["sex"].upper() == "F" else "male" if patient_context["sex"].upper() == "M" else patient_context["sex"]
+            sex_full = (
+                "female"
+                if patient_context["sex"].upper() == "F"
+                else "male"
+                if patient_context["sex"].upper() == "M"
+                else patient_context["sex"]
+            )
             parts.append(sex_full)
 
         desc = " ".join(parts) if parts else "Patient"
@@ -446,7 +463,7 @@ class MedGemmaReporter:
     # Tissue categories mapped from patch index (matches API classify_tissue_type)
     TISSUE_TYPES = ["tumor", "stroma", "necrosis", "inflammatory", "normal", "artifact"]
 
-    def _classify_patch(self, patch: Dict) -> str:
+    def _classify_patch(self, patch: dict) -> str:
         """Derive tissue category for a patch, matching the API's classify_tissue_type logic."""
         # Use explicit category/tissue_type if present
         cat = patch.get("category") or patch.get("tissue_type")
@@ -456,7 +473,7 @@ class MedGemmaReporter:
         idx = patch.get("patch_index", 0)
         return self.TISSUE_TYPES[idx % len(self.TISSUE_TYPES)]
 
-    def _position_from_patch(self, patch: Dict) -> str:
+    def _position_from_patch(self, patch: dict) -> str:
         """Resolve a human-readable spatial position label for a patch/region."""
         explicit = str(patch.get("position_label", "") or "").strip()
         if explicit:
@@ -552,8 +569,8 @@ class MedGemmaReporter:
             cleaned += "."
         return cleaned
 
-    def _build_overview_from_evidence(self, evidence_patches: List[Dict], label: str) -> str:
-        tissue_counts: Dict[str, int] = {}
+    def _build_overview_from_evidence(self, evidence_patches: list[dict], label: str) -> str:
+        tissue_counts: dict[str, int] = {}
         for patch in evidence_patches:
             dominant = patch.get("dominant_tissues")
             if isinstance(dominant, list) and dominant:
@@ -606,14 +623,14 @@ class MedGemmaReporter:
 
     def _build_region_fallback_narrative(
         self,
-        patch: Dict,
+        patch: dict,
         *,
         tissue_title: str,
         position_label: str,
         label: str,
     ) -> str:
         dominant = patch.get("dominant_tissues", [])
-        dominant_clean: List[str] = []
+        dominant_clean: list[str] = []
         if isinstance(dominant, list):
             for t in dominant[:3]:
                 s = str(t).replace("_", " ").strip().lower()
@@ -637,13 +654,17 @@ class MedGemmaReporter:
             if cov < 5.0:
                 coverage_txt = f"This is a focal component (about {cov:.1f}% of analyzed patches)."
             elif cov < 15.0:
-                coverage_txt = f"This represents a limited component (about {cov:.1f}% of analyzed patches)."
+                coverage_txt = (
+                    f"This represents a limited component (about {cov:.1f}% of analyzed patches)."
+                )
             elif cov < 35.0:
                 coverage_txt = f"This represents a substantial regional component (about {cov:.1f}% of analyzed patches)."
             else:
-                coverage_txt = f"This is a dominant component (about {cov:.1f}% of analyzed patches)."
+                coverage_txt = (
+                    f"This is a dominant component (about {cov:.1f}% of analyzed patches)."
+                )
 
-        tissue_specific: Dict[str, str] = {
+        tissue_specific: dict[str, str] = {
             "tumor": "This region is enriched for viable tumor morphology with atypical epithelial architecture.",
             "stroma": "This region is stroma-rich and shows tumor-associated stromal remodeling patterns.",
             "necrosis": "This region shows necrotic and degenerative morphology consistent with non-viable tissue burden.",
@@ -651,12 +672,12 @@ class MedGemmaReporter:
             "artifact": "This region contains prominent slide artifact and mixed tissue context, which reduces interpretability confidence.",
             "normal": "This region is closer to non-neoplastic background morphology than overt malignant architecture.",
         }
-        opener = tissue_specific.get(primary, f"This region is morphologically dominated by {dom_phrase} patterns.")
+        opener = tissue_specific.get(
+            primary, f"This region is morphologically dominated by {dom_phrase} patterns."
+        )
 
         if len(dominant_clean) >= 3:
-            heterogeneity_txt = (
-                f" It also contains {dominant_clean[1]} and {dominant_clean[2]} components, indicating marked intraregional heterogeneity."
-            )
+            heterogeneity_txt = f" It also contains {dominant_clean[1]} and {dominant_clean[2]} components, indicating marked intraregional heterogeneity."
         elif len(dominant_clean) == 2:
             heterogeneity_txt = (
                 f" It also includes {dominant_clean[1]} morphology, indicating mixed composition."
@@ -665,9 +686,7 @@ class MedGemmaReporter:
             heterogeneity_txt = " Morphology in this cluster is relatively homogeneous."
 
         label_txt = str(label).lower()
-        contribution_txt = (
-            f" In aggregate with other macroregions, this pattern contributes to the model's {label_txt} output."
-        )
+        contribution_txt = f" In aggregate with other macroregions, this pattern contributes to the model's {label_txt} output."
 
         parts = [opener, heterogeneity_txt]
         if coverage_txt:
@@ -676,7 +695,7 @@ class MedGemmaReporter:
         return "".join(parts).strip()
 
     @staticmethod
-    def _region_narrative_conflicts_tissue(text: str, tissue_title: str, patch: Dict) -> bool:
+    def _region_narrative_conflicts_tissue(text: str, tissue_title: str, patch: dict) -> bool:
         if not text:
             return True
         allowed = {str(tissue_title).strip().lower()}
@@ -698,12 +717,12 @@ class MedGemmaReporter:
 
     def _build_prompt(
         self,
-        evidence_patches: List[Dict],
+        evidence_patches: list[dict],
         score: float,
         label: str,
-        similar_cases: List[Dict],
+        similar_cases: list[dict],
         case_id: str = "unknown",
-        patient_context: Optional[Dict] = None,
+        patient_context: dict | None = None,
         cancer_type: str = "Cancer",
     ) -> str:
         """Build a rich but bounded prompt that requests structured MedGemma narrative fields."""
@@ -733,10 +752,18 @@ class MedGemmaReporter:
                 else "unknown"
             )
             region_prefix = f"region={region_name}, " if region_name else ""
-            dominant_part = f", dominant_tissues={', '.join(dominant_tissues)}" if dominant_tissues else ""
-            coverage_part = f", coverage={float(coverage):.1f}%" if isinstance(coverage, (int, float)) else ""
+            dominant_part = (
+                f", dominant_tissues={', '.join(dominant_tissues)}" if dominant_tissues else ""
+            )
+            coverage_part = (
+                f", coverage={float(coverage):.1f}%" if isinstance(coverage, (int, float)) else ""
+            )
             n_part = f", n_patches={int(n_patches)}" if isinstance(n_patches, (int, float)) else ""
-            peak_part = f", attention_peak={float(attn_peak):.4f}" if isinstance(attn_peak, (int, float)) else ""
+            peak_part = (
+                f", attention_peak={float(attn_peak):.4f}"
+                if isinstance(attn_peak, (int, float))
+                else ""
+            )
             evidence_lines.append(
                 f"- {patch_id}: {region_prefix}tissue={tissue}, attention_mean={attn:.4f}{peak_part}, "
                 f"coordinates={coord_str}{coverage_part}{n_part}{dominant_part}"
@@ -852,9 +879,9 @@ EXPECTED JSON SCHEMA:
         case_id: str = "unknown",
         score: float = 0.0,
         label: str = "unknown",
-        evidence_patches: Optional[List[Dict]] = None,
+        evidence_patches: list[dict] | None = None,
         cancer_type: str = "Cancer",
-    ) -> Dict:
+    ) -> dict:
         """Extract and parse JSON from model response, mapping simplified output to full report structure.
 
         Evidence entries are ALWAYS built from the real evidence_patches (with attention
@@ -869,20 +896,20 @@ EXPECTED JSON SCHEMA:
         # --- Extract JSON from the model response ---------------------------
         # Extract the FIRST JSON object from markdown code blocks
         # Model sometimes repeats the JSON multiple times in fences
-        code_block_match = re.search(r'```(?:json)?\s*(\{[^`]*\})\s*```', response)
+        code_block_match = re.search(r"```(?:json)?\s*(\{[^`]*\})\s*```", response)
         if code_block_match:
             json_str = code_block_match.group(1).strip()
         else:
             # Fallback: find first JSON object directly
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response)
+            json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", response)
             json_str = json_match.group() if json_match else None
 
         # Legacy fallback for any JSON
         if not json_str:
             cleaned = response.strip()
-            cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
-            cleaned = re.sub(r'\s*```$', '', cleaned)
-            json_match = re.search(r'\{[\s\S]*?\}', cleaned)
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$", "", cleaned)
+            json_match = re.search(r"\{[\s\S]*?\}", cleaned)
             json_str = json_match.group() if json_match else None
 
         parsed = None
@@ -894,11 +921,11 @@ EXPECTED JSON SCHEMA:
             except json.JSONDecodeError:
                 # Try to repair truncated JSON with increasingly aggressive fixes
                 repair_suffixes = [
-                    '"}',        # truncated string value
-                    '"]',        # truncated array
-                    '"]}',       # truncated array in object
-                    '"}]}',      # truncated string in array in object
-                    '"]}}}',     # deeply nested
+                    '"}',  # truncated string value
+                    '"]',  # truncated array
+                    '"]}',  # truncated array in object
+                    '"}]}',  # truncated string in array in object
+                    '"]}}}',  # deeply nested
                     '..."}],"clinical_significance":"See key findings","recommendation":"Correlate with clinical context"}',
                 ]
                 for fix in repair_suffixes:
@@ -924,7 +951,11 @@ EXPECTED JSON SCHEMA:
                         if m:
                             parsed[field] = m.group(1)
                     # Extract list-like fields
-                    for list_field in ["key_findings", "patch_significance", "suggested_next_steps"]:
+                    for list_field in [
+                        "key_findings",
+                        "patch_significance",
+                        "suggested_next_steps",
+                    ]:
                         lf_match = re.search(rf'"{list_field}"\s*:\s*\[(.*)', json_str)
                         if lf_match:
                             entries = re.findall(r'"([^"]+)"', lf_match.group(1))
@@ -938,7 +969,7 @@ EXPECTED JSON SCHEMA:
         if parsed is None:
             parsed = {}
 
-        def _coerce_string_list(value: Any) -> List[str]:
+        def _coerce_string_list(value: Any) -> list[str]:
             if isinstance(value, list):
                 out = []
                 for item in value:
@@ -951,7 +982,7 @@ EXPECTED JSON SCHEMA:
                 return [c.strip(" -\t") for c in chunks if c and c.strip(" -\t")]
             return []
 
-        def _extract_labeled_field(text: str, labels: List[str]) -> str:
+        def _extract_labeled_field(text: str, labels: list[str]) -> str:
             if not text:
                 return ""
             for lbl in labels:
@@ -967,8 +998,8 @@ EXPECTED JSON SCHEMA:
                         return candidate
             return ""
 
-        def _clean_text_list(items: List[str]) -> List[str]:
-            cleaned_items: List[str] = []
+        def _clean_text_list(items: list[str]) -> list[str]:
+            cleaned_items: list[str] = []
             for item in items:
                 s = self._sanitize_region_narrative(item)
                 low = s.lower()
@@ -985,9 +1016,12 @@ EXPECTED JSON SCHEMA:
 
         # --- Extract MedGemma enrichment fields ------------------------------
         key_findings = _clean_text_list(_coerce_string_list(parsed.get("key_findings", [])))
-        patch_significance = _clean_text_list(_coerce_string_list(parsed.get("patch_significance", [])))
+        patch_significance = _clean_text_list(
+            _coerce_string_list(parsed.get("patch_significance", []))
+        )
         next_steps = _coerce_string_list(parsed.get("suggested_next_steps", []))
         recommendation = str(parsed.get("recommendation", "") or "").strip()
+
         # Accept both legacy and current morphology fields.
         # Some model outputs use camelCase or relaxed labels.
         def _first_nonempty(*vals: Any) -> str:
@@ -997,15 +1031,13 @@ EXPECTED JSON SCHEMA:
                     return s
             return ""
 
-        morphology_desc = (
-            _first_nonempty(
-                parsed.get("morphology_overview"),
-                parsed.get("morphologyOverview"),
-                parsed.get("morphology_description"),
-                parsed.get("morphologyDescription"),
-                parsed.get("morphology"),
-                parsed.get("overview"),
-            )
+        morphology_desc = _first_nonempty(
+            parsed.get("morphology_overview"),
+            parsed.get("morphologyOverview"),
+            parsed.get("morphology_description"),
+            parsed.get("morphologyDescription"),
+            parsed.get("morphology"),
+            parsed.get("overview"),
         )
         clinical_sig = _first_nonempty(
             parsed.get("clinical_significance"),
@@ -1017,12 +1049,22 @@ EXPECTED JSON SCHEMA:
         if not morphology_desc:
             morphology_desc = _extract_labeled_field(
                 raw_response_text,
-                ["morphology_overview", "morphology overview", "morphology description", "morphology"],
+                [
+                    "morphology_overview",
+                    "morphology overview",
+                    "morphology description",
+                    "morphology",
+                ],
             )
         if not clinical_sig:
             clinical_sig = _extract_labeled_field(
                 raw_response_text,
-                ["clinical_significance", "clinical significance", "clinical interpretation", "interpretation"],
+                [
+                    "clinical_significance",
+                    "clinical significance",
+                    "clinical interpretation",
+                    "interpretation",
+                ],
             )
         if self._is_non_informative_text(morphology_desc):
             morphology_desc = ""
@@ -1039,7 +1081,9 @@ EXPECTED JSON SCHEMA:
         if not morphology_desc:
             morphology_desc = self._build_overview_from_evidence(evidence_patches, label)
         if not clinical_sig:
-            clinical_sig = self._build_clinical_significance_from_prediction(label, parsed_confidence)
+            clinical_sig = self._build_clinical_significance_from_prediction(
+                label, parsed_confidence
+            )
 
         next_steps_final = list(next_steps)
         if recommendation and recommendation not in next_steps_final:
@@ -1050,8 +1094,8 @@ EXPECTED JSON SCHEMA:
                 "Review with multidisciplinary pathology and oncology teams before treatment decisions.",
             ]
 
-        def _normalize_guideline_references(value: Any) -> List[Dict[str, str]]:
-            refs: List[Dict[str, str]] = []
+        def _normalize_guideline_references(value: Any) -> list[dict[str, str]]:
+            refs: list[dict[str, str]] = []
             if isinstance(value, list):
                 for item in value:
                     if isinstance(item, dict):
@@ -1060,10 +1104,11 @@ EXPECTED JSON SCHEMA:
                         rec = str(item.get("recommendation", "")).strip()
                         url = str(item.get("url", "")).strip()
                         if source or section or rec:
-                            entry: Dict[str, str] = {
+                            entry: dict[str, str] = {
                                 "source": source or "Clinical guideline",
                                 "section": section or "General",
-                                "recommendation": rec or "Correlate with multidisciplinary evaluation.",
+                                "recommendation": rec
+                                or "Correlate with multidisciplinary evaluation.",
                             }
                             if url:
                                 entry["url"] = url
@@ -1075,11 +1120,11 @@ EXPECTED JSON SCHEMA:
             *,
             fallback_confidence_score: float,
             fallback_primary_recommendation: str,
-            fallback_rationale: List[str],
-            fallback_workup: List[str],
+            fallback_rationale: list[str],
+            fallback_workup: list[str],
             fallback_interpretation: str,
             fallback_caveat: str,
-        ) -> Optional[Dict[str, Any]]:
+        ) -> dict[str, Any] | None:
             raw_ds = raw if isinstance(raw, dict) else {}
             if not raw_ds and not fallback_primary_recommendation:
                 return None
@@ -1096,9 +1141,11 @@ EXPECTED JSON SCHEMA:
             confidence_score_val = max(0.0, min(1.0, confidence_score_val))
 
             confidence_level_default = (
-                "high" if confidence_score_val >= 0.70 else
-                "moderate" if confidence_score_val >= 0.35 else
-                "low"
+                "high"
+                if confidence_score_val >= 0.70
+                else "moderate"
+                if confidence_score_val >= 0.35
+                else "low"
             )
             confidence_level = _norm_level(
                 raw_ds.get("confidence_level"),
@@ -1107,9 +1154,11 @@ EXPECTED JSON SCHEMA:
             )
 
             risk_level_default = (
-                "high_confidence" if confidence_score_val >= 0.70 else
-                "moderate_confidence" if confidence_score_val >= 0.45 else
-                "low_confidence"
+                "high_confidence"
+                if confidence_score_val >= 0.70
+                else "moderate_confidence"
+                if confidence_score_val >= 0.45
+                else "low_confidence"
             )
             risk_level = _norm_level(
                 raw_ds.get("risk_level"),
@@ -1122,9 +1171,9 @@ EXPECTED JSON SCHEMA:
             ).strip()
             if not primary_recommendation:
                 return None
-            supporting_rationale = _coerce_string_list(
-                raw_ds.get("supporting_rationale", [])
-            ) or fallback_rationale
+            supporting_rationale = (
+                _coerce_string_list(raw_ds.get("supporting_rationale", [])) or fallback_rationale
+            )
             alternative_considerations = _coerce_string_list(
                 raw_ds.get("alternative_considerations", [])
             )
@@ -1138,7 +1187,9 @@ EXPECTED JSON SCHEMA:
                     f"{fallback_interpretation}"
                 )
             quality_warnings = _coerce_string_list(raw_ds.get("quality_warnings", []))
-            suggested_workup = _coerce_string_list(raw_ds.get("suggested_workup", [])) or fallback_workup
+            suggested_workup = (
+                _coerce_string_list(raw_ds.get("suggested_workup", [])) or fallback_workup
+            )
             interpretation_note = str(
                 raw_ds.get("interpretation_note") or fallback_interpretation
             ).strip()
@@ -1165,9 +1216,7 @@ EXPECTED JSON SCHEMA:
         fallback_rationale = key_findings[:3]
         fallback_workup = next_steps_final[:4]
         fallback_interpretation = clinical_sig
-        fallback_caveat = (
-            "Research-use output; not a standalone diagnostic recommendation."
-        )
+        fallback_caveat = "Research-use output; not a standalone diagnostic recommendation."
         decision_support_payload = _normalize_decision_support(
             parsed.get("decision_support"),
             fallback_confidence_score=confidence_score_for_decision,
@@ -1179,7 +1228,11 @@ EXPECTED JSON SCHEMA:
         )
 
         parsed_label_raw = str(parsed.get("prediction", "") or "").strip()
-        parsed_label = parsed_label_raw if parsed_label_raw and not self._is_non_informative_text(parsed_label_raw) else str(label)
+        parsed_label = (
+            parsed_label_raw
+            if parsed_label_raw and not self._is_non_informative_text(parsed_label_raw)
+            else str(label)
+        )
 
         # --- Build evidence from REAL patches, enriched by MedGemma ----------
         # UI requirement: morphology_description should be a concise region title,
@@ -1226,16 +1279,18 @@ EXPECTED JSON SCHEMA:
                 except Exception:
                     coords_out = [0, 0]
 
-            evidence_entries.append({
-                "patch_id": patch_id,
-                "coordinates": coords_out,
-                "macro_region": macro_region,
-                "position_label": position_label,
-                "morphology_description": patch_morphology,
-                "significance": patch_sig,
-            })
+            evidence_entries.append(
+                {
+                    "patch_id": patch_id,
+                    "coordinates": coords_out,
+                    "macro_region": macro_region,
+                    "position_label": position_label,
+                    "morphology_description": patch_morphology,
+                    "significance": patch_sig,
+                }
+            )
 
-        report_payload: Dict[str, Any] = {
+        report_payload: dict[str, Any] = {
             "case_id": case_id,
             "task": f"{cancer_type} treatment response prediction from H&E histopathology",
             "model_output": {
@@ -1258,11 +1313,15 @@ EXPECTED JSON SCHEMA:
             report_payload["decision_support"] = decision_support_payload
         return report_payload
 
-    def _validate_report(self, report: Dict) -> bool:
+    def _validate_report(self, report: dict) -> bool:
         """Validate report against schema."""
         required_fields = [
-            "case_id", "task", "model_output", "evidence",
-            "limitations", "safety_statement"
+            "case_id",
+            "task",
+            "model_output",
+            "evidence",
+            "limitations",
+            "safety_statement",
         ]
 
         for field in required_fields:
@@ -1290,15 +1349,15 @@ EXPECTED JSON SCHEMA:
 
     def generate(
         self,
-        evidence_patches: List[Dict],
+        evidence_patches: list[dict],
         score: float,
         label: str,
-        similar_cases: List[Dict],
+        similar_cases: list[dict],
         case_id: str = "unknown",
         max_retries: int = 2,
-        patient_context: Optional[Dict] = None,
+        patient_context: dict | None = None,
         cancer_type: str = "Cancer",
-    ) -> Dict:
+    ) -> dict:
         """
         Generate a structured report.
 
@@ -1498,10 +1557,7 @@ EXPECTED JSON SCHEMA:
                     gen_elapsed = time.monotonic() - gen_start
                     output_ids = outputs[0]
                     new_tokens = int(output_ids.shape[0] - input_len)
-                    hit_time_limit = (
-                        max_time is not None
-                        and gen_elapsed >= max_time - 0.5
-                    )
+                    hit_time_limit = max_time is not None and gen_elapsed >= max_time - 0.5
                     if hit_time_limit:
                         logger.warning("MedGemma generation reached time limit (%.1fs)", max_time)
                     if new_tokens >= max_new_tokens:
@@ -1518,7 +1574,7 @@ EXPECTED JSON SCHEMA:
 
                 # Decode
                 decode_start = time.monotonic()
-                decode_ids = output_ids[inputs["input_ids"].shape[1]:]
+                decode_ids = output_ids[inputs["input_ids"].shape[1] :]
                 decode_fn = getattr(self._tokenizer, "decode", None)
                 if callable(decode_fn):
                     response = decode_fn(
@@ -1590,7 +1646,7 @@ EXPECTED JSON SCHEMA:
         case_id: str,
         score: float,
         label: str,
-    ) -> Dict:
+    ) -> dict:
         """Create a fallback report when generation fails."""
         return {
             "case_id": case_id,
@@ -1598,27 +1654,26 @@ EXPECTED JSON SCHEMA:
             "model_output": {
                 "label": label,
                 "probability": score,
-                "calibration_note": "Automated report generation failed. Manual interpretation required."
+                "calibration_note": "Automated report generation failed. Manual interpretation required.",
             },
             "evidence": [],
             "limitations": [
                 "Automated report generation failed",
                 "Evidence interpretation not available",
-                "Manual pathology review required"
+                "Manual pathology review required",
             ],
             "suggested_next_steps": [
                 "Manual review of evidence patches",
-                "Consultation with pathology team"
+                "Consultation with pathology team",
             ],
-            "safety_statement": "This is a research tool. Report generation encountered errors. All findings require manual validation by qualified pathologists."
+            "safety_statement": "This is a research tool. Report generation encountered errors. All findings require manual validation by qualified pathologists.",
         }
 
     @staticmethod
-    def _is_fallback_report_payload(report: Dict[str, Any]) -> bool:
+    def _is_fallback_report_payload(report: dict[str, Any]) -> bool:
         """Detect internal fallback payloads emitted after generation failure."""
         note = (
-            report.get("model_output", {})
-            .get("calibration_note", "")
+            report.get("model_output", {}).get("calibration_note", "")
             if isinstance(report, dict)
             else ""
         )
@@ -1626,14 +1681,14 @@ EXPECTED JSON SCHEMA:
 
     def generate_report(
         self,
-        evidence_patches: List[Dict],
+        evidence_patches: list[dict],
         score: float,
         label: str,
-        similar_cases: List[Dict],
+        similar_cases: list[dict],
         case_id: str = "unknown",
-        patient_context: Optional[Dict] = None,
+        patient_context: dict | None = None,
         cancer_type: str = "Cancer",
-    ) -> Dict:
+    ) -> dict:
         """
         Generate a complete report with structured data and summary.
 
@@ -1672,7 +1727,7 @@ EXPECTED JSON SCHEMA:
             "summary": summary,
         }
 
-    def generate_summary(self, report: Dict) -> str:
+    def generate_summary(self, report: dict) -> str:
         """
         Generate a human-readable summary from structured report.
 
@@ -1715,8 +1770,4 @@ EXPECTED JSON SCHEMA:
             )
             clinical_sig = self._as_sentence(clinical_sig)
 
-        return (
-            "MEDGEMMA SUMMARY:\n"
-            f"{overview}\n\n"
-            f"{clinical_sig}"
-        )
+        return f"MEDGEMMA SUMMARY:\n{overview}\n\n{clinical_sig}"

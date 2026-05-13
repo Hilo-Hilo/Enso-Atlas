@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -25,5 +24,5 @@ def test_issue112_wsi_overlay_titles_and_zoom_use_high_contrast_text():
 def test_issue112_slider_label_and_value_support_dark_mode_contrast():
     src = _read("frontend/src/components/ui/Slider.tsx")
 
-    assert 'text-sm font-medium text-gray-800 dark:text-gray-100' in src
-    assert 'text-sm text-gray-600 dark:text-gray-200 font-mono' in src
+    assert "text-sm font-medium text-gray-800 dark:text-gray-100" in src
+    assert "text-sm text-gray-600 dark:text-gray-200 font-mono" in src

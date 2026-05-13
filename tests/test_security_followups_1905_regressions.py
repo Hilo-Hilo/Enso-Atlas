@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -19,10 +18,12 @@ def test_project_upload_route_has_filename_path_and_size_guardrails():
     assert "os.replace(tmp_path, dest_path)" in src
 
 
-def test_project_slide_legacy_fallback_no_longer_leaks_null_project_rows():
+def test_project_slides_use_explicit_assignments_only():
     src = _read("src/enso_atlas/api/project_routes.py")
 
-    assert "WHERE s.project_id = $1\n" in src
+    assert "slide_ids = await db.get_project_slides(project_id)" in src
+    assert "WHERE s.slide_id = ANY($1::text[])" in src
+    assert "WHERE s.project_id = $1" not in src
     assert "WHERE s.project_id = $1 OR s.project_id IS NULL" not in src
 
 
@@ -34,21 +35,24 @@ def test_project_model_assignment_validates_project_compatible_model_ids():
 
 
 def test_visual_search_is_project_scoped_and_filters_candidates():
-    src = _read("src/enso_atlas/api/main.py")
+    schema_src = _read("src/enso_atlas/api/schemas.py")
+    src = _read("src/enso_atlas/api/visual_search_routes.py")
 
-    assert "project_id: Optional[str] = Field(default=None, description=\"Project ID to scope visual search candidates\")" in src
-    assert "allowed_slide_ids = await _project_slide_ids(request.project_id)" in src
+    assert "project_id: str | None = Field(" in schema_src or "project_id: Optional[str] = Field(" in schema_src
+    assert 'description="Project ID to scope visual search candidates"' in schema_src
+    assert "allowed_slide_ids = await project_slide_ids(request.project_id)" in src
     assert "if allowed_slide_ids is not None and result_slide_id not in allowed_slide_ids:" in src
     assert '"project_id": request.project_id' in src
 
 
 def test_cached_result_and_embedding_status_endpoints_accept_project_scope():
-    src = _read("src/enso_atlas/api/main.py")
+    src = _read("src/enso_atlas/api/slide_status_routes.py")
 
-    assert "@app.get(\"/api/slides/{slide_id}/embedding-status\")" in src
-    assert "project_id: Optional[str] = Query(default=None, description=\"Optional project scope for model cache visibility\")" in src
-    assert "allowed_model_ids = await _resolve_project_model_ids(project_id)" in src
-    assert "@app.get(\"/api/slides/{slide_id}/cached-results\")" in src
+    assert '@router.get("/api/slides/{slide_id}/embedding-status")' in src
+    assert "project_id: str | None = Query(" in src or "project_id: Optional[str] = Query(" in src
+    assert 'description="Optional project scope for model cache visibility"' in src
+    assert "allowed_model_ids = await resolve_project_model_ids(project_id)" in src
+    assert '@router.get("/api/slides/{slide_id}/cached-results")' in src
     assert "detail=f\"Slide {slide_id} is not available in project '{project_id}'\"" in src
 
 

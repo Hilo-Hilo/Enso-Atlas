@@ -29,18 +29,14 @@ class TestPathologistRightSidebarTabsDarkMode:
 
     def test_active_tab_has_dark_text_and_bg(self):
         src = _read_page()
-        assert "dark:text-clinical-300" in src, (
-            "Active right tab must have dark:text-clinical-300"
-        )
+        assert "dark:text-clinical-300" in src, "Active right tab must have dark:text-clinical-300"
         assert "dark:bg-clinical-900/40" in src, (
             "Active right tab must have dark:bg-clinical-900/40"
         )
 
     def test_inactive_tab_has_dark_idle_and_hover_states(self):
         src = _read_page()
-        assert "dark:text-gray-500" in src, (
-            "Inactive right tab must have dark:text-gray-500"
-        )
+        assert "dark:text-gray-500" in src, "Inactive right tab must have dark:text-gray-500"
         assert "dark:hover:text-gray-200" in src, (
             "Inactive right tab hover text must have dark override"
         )
@@ -71,7 +67,7 @@ class TestPathologistShellDarkMode:
         marker = "Select a slide to open Pathologist Workspace."
         idx = src.find(marker)
         assert idx >= 0, "Pathologist fallback message text must exist"
-        nearby = src[max(0, idx - 220): idx + 80]
+        nearby = src[max(0, idx - 220) : idx + 80]
 
         assert "dark:border-violet-800/70" in nearby, (
             "Pathologist fallback card must have dark border"
@@ -79,9 +75,7 @@ class TestPathologistShellDarkMode:
         assert "dark:bg-violet-950/40" in nearby, (
             "Pathologist fallback card must have dark background"
         )
-        assert "dark:text-violet-200" in nearby, (
-            "Pathologist fallback card must have dark text"
-        )
+        assert "dark:text-violet-200" in nearby, "Pathologist fallback card must have dark text"
 
 
 class TestPathologistShellLightModeUnchanged:
@@ -102,7 +96,7 @@ class TestPathologistShellLightModeUnchanged:
         marker = "Select a slide to open Pathologist Workspace."
         idx = src.find(marker)
         assert idx >= 0, "Pathologist fallback message text must exist"
-        nearby = src[max(0, idx - 220): idx + 80]
+        nearby = src[max(0, idx - 220) : idx + 80]
 
         assert "border-violet-200" in nearby, "Fallback light border must remain"
         assert "bg-violet-50" in nearby, "Fallback light bg must remain"

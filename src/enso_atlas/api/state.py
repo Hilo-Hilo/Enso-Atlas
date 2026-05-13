@@ -1,171 +1,88 @@
-"""
-Application state management for Enso Atlas API.
+"""Runtime state containers for the Enso Atlas FastAPI backend.
 
-This module manages shared resources like the MIL classifier,
-embedder, evidence generator, and MedGemma reporter.
+The app factory historically kept most shared resources in ``create_app``
+closure variables. This module provides explicit containers for the same
+resource categories so route modules can be split without growing another
+implicit monolith.
 """
 
 from __future__ import annotations
 
-import logging
-import os
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Dict, List
-
-import numpy as np
-
-logger = logging.getLogger(__name__)
+from threading import Lock
+from typing import Any
 
 
-class AppState:
-    """
-    Shared application state for the API.
+@dataclass
+class TimedCache:
+    """Small TTL cache used for path/model/metadata lookups.
 
-    Manages lazy-loaded resources to minimize startup time
-    while ensuring efficient reuse across requests.
+    It intentionally stores plain values and does not perform background
+    eviction; callers decide the cache key and TTL that fit their domain.
     """
 
-    def __init__(self):
-        self._classifier = None
-        self._embedder = None
-        self._evidence_gen = None
-        self._reporter = None
-        self._initialized = False
+    ttl_seconds: float
+    values: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-        # Paths from environment
-        self.embeddings_dir = Path(
-            os.environ.get("EMBEDDINGS_DIR", "data/embeddings")
-        )
-        self.model_path = Path(
-            os.environ.get("MODEL_PATH", "models/demo_clam.pt")
-        )
+    def get(self, key: str) -> dict[str, Any] | None:
+        record = self.values.get(key)
+        if not record:
+            return None
+        if time.time() - float(record.get("ts", 0.0)) >= self.ttl_seconds:
+            self.values.pop(key, None)
+            return None
+        return record
 
-        # Cache for slide data
-        self._slide_cache: Dict[str, Dict] = {}
-        self._available_slides: List[str] = []
+    def set(self, key: str, **fields: Any) -> dict[str, Any]:
+        record = {"ts": time.time(), **fields}
+        self.values[key] = record
+        return record
 
-    async def initialize(self) -> None:
-        """Initialize shared resources."""
-        if self._initialized:
-            return
+    def clear(self) -> None:
+        self.values.clear()
 
-        # Discover available slides
-        await self._discover_slides()
 
-        # Build FAISS index for similarity search
-        await self._build_faiss_index()
+@dataclass
+class ApiRuntimeState:
+    """Shared mutable resources owned by one FastAPI application instance."""
 
-        self._initialized = True
-        logger.info("AppState initialized successfully")
+    embeddings_dir: Path
+    model_path: Path
+    data_root: Path = Path("data")
+    slides_dir: Path = Path("data/slides")
 
-    async def _discover_slides(self) -> None:
-        """Discover available slides from embeddings directory."""
-        self._available_slides = []
+    classifier: Any = None
+    evidence_generator: Any = None
+    embedder: Any = None
+    medsiglip_embedder: Any = None
+    reporter: Any = None
+    decision_support: Any = None
+    multi_model_inference: Any = None
+    project_registry: Any = None
 
-        if self.embeddings_dir.exists():
-            for f in sorted(self.embeddings_dir.glob("*.npy")):
-                if not f.name.endswith("_coords.npy"):
-                    slide_id = f.stem
-                    self._available_slides.append(slide_id)
+    db_available: bool = False
+    available_slides: list[str] = field(default_factory=list)
+    slide_labels: dict[str, str] = field(default_factory=dict)
+    slide_siglip_embeddings: dict[str, Any] = field(default_factory=dict)
+    model_checkpoint_signatures: dict[str, str] = field(default_factory=dict)
 
-        logger.info(f"Discovered {len(self._available_slides)} slides")
+    slide_mean_index: Any = None
+    slide_mean_ids: list[str] = field(default_factory=list)
+    slide_mean_meta: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    async def _build_faiss_index(self) -> None:
-        """Build FAISS index for similarity search."""
-        if not self._available_slides:
-            logger.warning("No slides available for FAISS index")
-            return
+    project_model_scope_cache: TimedCache = field(default_factory=lambda: TimedCache(15.0))
+    labels_slide_ids_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
+    slide_dims_cache: TimedCache = field(default_factory=lambda: TimedCache(300.0))
+    cpu_heatmap_model_cache: dict[str, Any] = field(
+        default_factory=lambda: {"signature": None, "model": None}
+    )
+    cpu_heatmap_model_lock: Lock = field(default_factory=Lock)
 
-        evidence_gen = self.evidence_generator
+    def reset_request_caches(self) -> None:
+        """Clear short-lived lookup caches after config or assignment changes."""
 
-        all_embeddings = []
-        all_metadata = []
-
-        for slide_id in self._available_slides:
-            emb_path = self.embeddings_dir / f"{slide_id}.npy"
-            if emb_path.exists():
-                embs = np.load(emb_path)
-                all_embeddings.append(embs)
-                all_metadata.append({
-                    "slide_id": slide_id,
-                    "n_patches": len(embs),
-                })
-
-        if all_embeddings:
-            evidence_gen.build_reference_index(all_embeddings, all_metadata)
-            logger.info(f"Built FAISS index with {len(all_embeddings)} slides")
-
-    @property
-    def classifier(self):
-        """Lazy-load the MIL classifier."""
-        if self._classifier is None:
-            from enso_atlas.config import MILConfig
-            from enso_atlas.mil.clam import CLAMClassifier
-
-            config = MILConfig(input_dim=384, hidden_dim=128)
-            self._classifier = CLAMClassifier(config)
-
-            if self.model_path.exists():
-                self._classifier.load(self.model_path)
-                logger.info(f"Loaded CLAM model from {self.model_path}")
-            else:
-                logger.warning(f"Model not found at {self.model_path}, using random weights")
-
-        return self._classifier
-
-    @property
-    def embedder(self):
-        """Lazy-load the Path Foundation embedder."""
-        if self._embedder is None:
-            from enso_atlas.config import EmbeddingConfig
-            from enso_atlas.embedding.embedder import PathFoundationEmbedder
-
-            config = EmbeddingConfig()
-            self._embedder = PathFoundationEmbedder(config)
-            logger.info("Initialized Path Foundation embedder")
-
-        return self._embedder
-
-    @property
-    def evidence_generator(self):
-        """Lazy-load the evidence generator."""
-        if self._evidence_gen is None:
-            from enso_atlas.config import EvidenceConfig
-            from enso_atlas.evidence.generator import EvidenceGenerator
-
-            config = EvidenceConfig()
-            self._evidence_gen = EvidenceGenerator(config)
-            logger.info("Initialized evidence generator")
-
-        return self._evidence_gen
-
-    @property
-    def reporter(self):
-        """Lazy-load the MedGemma reporter."""
-        if self._reporter is None:
-            from enso_atlas.reporting.medgemma import MedGemmaReporter, ReportingConfig
-
-            config = ReportingConfig()
-            self._reporter = MedGemmaReporter(config)
-            logger.info("Initialized MedGemma reporter")
-
-        return self._reporter
-
-    @property
-    def available_slides(self) -> List[str]:
-        """Get list of available slide IDs."""
-        return self._available_slides
-
-    def get_slide_embeddings(self, slide_id: str) -> Optional[np.ndarray]:
-        """Load embeddings for a slide."""
-        emb_path = self.embeddings_dir / f"{slide_id}.npy"
-        if emb_path.exists():
-            return np.load(emb_path)
-        return None
-
-    def get_slide_coords(self, slide_id: str) -> Optional[np.ndarray]:
-        """Load coordinates for a slide."""
-        coord_path = self.embeddings_dir / f"{slide_id}_coords.npy"
-        if coord_path.exists():
-            return np.load(coord_path)
-        return None
+        self.project_model_scope_cache.clear()
+        self.labels_slide_ids_cache.clear()
+        self.slide_dims_cache.clear()

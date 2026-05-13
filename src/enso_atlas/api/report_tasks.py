@@ -4,13 +4,13 @@ Background report generation task management.
 Provides async MedGemma report generation with status polling for slow operations.
 """
 
+import logging
 import threading
 import time
-import logging
-from typing import Optional, Dict, Any
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-import uuid
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,21 +29,22 @@ class ReportTask:
     ``project_id`` is stored so active-task lookup and deduplication can be
     scoped to ``(slide_id, project_id)``.
     """
+
     task_id: str
     slide_id: str
-    project_id: Optional[str] = None
+    project_id: str | None = None
     status: ReportTaskStatus = ReportTaskStatus.PENDING
     progress: float = 0.0  # 0-100
     message: str = "Waiting to start..."
     stage: str = "initializing"  # initializing, analyzing, generating, formatting, complete
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
     created_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
-        result = {
+    started_at: float | None = None
+    completed_at: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "task_id": self.task_id,
             "slide_id": self.slide_id,
             "project_id": self.project_id,
@@ -61,13 +62,13 @@ class ReportTask:
 
 class ReportTaskManager:
     """Manages background report tasks with project-scoped deduplication."""
-    
+
     def __init__(self, max_concurrent: int = 2):
-        self.tasks: Dict[str, ReportTask] = {}
+        self.tasks: dict[str, ReportTask] = {}
         self.lock = threading.Lock()
         self.max_concurrent = max_concurrent
-        
-    def create_task(self, slide_id: str, project_id: Optional[str] = None) -> ReportTask:
+
+    def create_task(self, slide_id: str, project_id: str | None = None) -> ReportTask:
         """Create a new report task."""
         task_id = f"report_{slide_id}_{uuid.uuid4().hex[:8]}"
         task = ReportTask(
@@ -78,8 +79,8 @@ class ReportTaskManager:
         with self.lock:
             self.tasks[task_id] = task
         return task
-    
-    def get_task(self, task_id: str) -> Optional[ReportTask]:
+
+    def get_task(self, task_id: str) -> ReportTask | None:
         """Get task by ID. Auto-expires stale tasks (>5 min running) with template fallback."""
         stale_cutoff = time.time() - 300  # 5 minutes max
         with self.lock:
@@ -87,7 +88,9 @@ class ReportTaskManager:
             if task and task.status in [ReportTaskStatus.PENDING, ReportTaskStatus.RUNNING]:
                 if task.created_at < stale_cutoff:
                     age = time.time() - task.created_at
-                    logger.warning(f"Auto-expiring stale report task {task.task_id} (age={age:.0f}s)")
+                    logger.warning(
+                        f"Auto-expiring stale report task {task.task_id} (age={age:.0f}s)"
+                    )
                     # Complete with a template fallback rather than failing
                     task.status = ReportTaskStatus.COMPLETED
                     task.progress = 100
@@ -99,7 +102,7 @@ class ReportTaskManager:
                         task.result = self._create_stale_fallback_result(task.slide_id)
             return task
 
-    def _create_stale_fallback_result(self, slide_id: str) -> Dict[str, Any]:
+    def _create_stale_fallback_result(self, slide_id: str) -> dict[str, Any]:
         """Create a minimal template report for a stale/timed-out task."""
         return {
             "slide_id": slide_id,
@@ -126,8 +129,8 @@ class ReportTaskManager:
             },
             "summary_text": f"CASE ANALYSIS SUMMARY\nCase ID: {slide_id}\n\nReport generation timed out. This is a template fallback.\nPlease retry or review analysis results manually.\n\nDISCLAIMER: This is a research tool.",
         }
-    
-    def get_task_by_slide(self, slide_id: str, project_id: Optional[str] = None) -> Optional[ReportTask]:
+
+    def get_task_by_slide(self, slide_id: str, project_id: str | None = None) -> ReportTask | None:
         """Get active task for a slide within the same project scope.
 
         Returns None if task is stale (>5 min).
@@ -149,8 +152,8 @@ class ReportTaskManager:
                         continue
                     return task
         return None
-    
-    def update_task(self, task_id: str, **updates) -> Optional[ReportTask]:
+
+    def update_task(self, task_id: str, **updates) -> ReportTask | None:
         """Update task fields."""
         with self.lock:
             task = self.tasks.get(task_id)
@@ -159,13 +162,14 @@ class ReportTaskManager:
                     if hasattr(task, key):
                         setattr(task, key, value)
         return task
-    
+
     def cleanup_old_tasks(self, max_age_seconds: int = 1800):
         """Remove completed tasks older than max_age_seconds (30 min default)."""
         cutoff = time.time() - max_age_seconds
         with self.lock:
             to_remove = [
-                tid for tid, task in self.tasks.items()
+                tid
+                for tid, task in self.tasks.items()
                 if task.status in [ReportTaskStatus.COMPLETED, ReportTaskStatus.FAILED]
                 and task.created_at < cutoff
             ]

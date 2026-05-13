@@ -43,7 +43,7 @@ class TestHeaderThemeToggle:
         assert "const handleThemeToggle = () =>" in src, (
             "Header should include a quick theme toggle handler"
         )
-        assert "localStorage.setItem(\"atlas-theme\"" in src, (
+        assert 'localStorage.setItem("atlas-theme"' in src, (
             "Header theme toggle should persist atlas-theme preference"
         )
 
@@ -52,7 +52,7 @@ class TestHeaderThemeToggle:
         assert "Switch to light mode" in src and "Switch to dark mode" in src, (
             "Theme toggle button should expose accessible mode-switch labels"
         )
-        assert "<Sun className=\"h-4 w-4\" />" in src and "<Moon className=\"h-4 w-4\" />" in src, (
+        assert '<Sun className="h-4 w-4" />' in src and '<Moon className="h-4 w-4" />' in src, (
             "Theme toggle button should render sun/moon icons"
         )
 
@@ -72,6 +72,6 @@ class TestSemanticSearchPreconditionCopy:
         assert "Run analysis to enable search" in src, (
             "Semantic search should explicitly ask user to run analysis once a slide is selected"
         )
-        assert "Run analysis on this slide to enable MedSigLIP semantic search by description." in src, (
-            "Semantic search should include clear post-selection guidance"
-        )
+        assert (
+            "Run analysis on this slide to enable MedSigLIP semantic search by description." in src
+        ), "Semantic search should include clear post-selection guidance"

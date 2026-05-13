@@ -4,13 +4,13 @@ Background batch analysis task management.
 Provides async batch analysis with status polling and cancellation support.
 """
 
+import logging
 import threading
 import time
-import logging
-from typing import Optional, Dict, Any, List
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-import uuid
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ class BatchTaskStatus(Enum):
 @dataclass
 class BatchModelResult:
     """Result for a single model prediction on a slide."""
+
     model_id: str
     model_name: str
     prediction: str = ""
@@ -33,12 +34,13 @@ class BatchModelResult:
     confidence: float = 0.0
     positive_label: str = "Positive"
     negative_label: str = "Negative"
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class BatchSlideResult:
     """Result for a single slide in batch analysis."""
+
     slide_id: str
     prediction: str = ""
     score: float = 0.0
@@ -46,8 +48,8 @@ class BatchSlideResult:
     patches_analyzed: int = 0
     requires_review: bool = False
     uncertainty_level: str = "unknown"
-    error: Optional[str] = None
-    model_results: Optional[List[BatchModelResult]] = None
+    error: str | None = None
+    model_results: list[BatchModelResult] | None = None
 
 
 @dataclass
@@ -57,38 +59,39 @@ class BatchTask:
     Stores project-resolved positive/negative labels so summaries use the same
     label vocabulary as the project that started the task.
     """
+
     task_id: str
-    slide_ids: List[str]
+    slide_ids: list[str]
     status: BatchTaskStatus = BatchTaskStatus.PENDING
     progress: float = 0.0  # 0-100
     current_slide_index: int = 0
     current_slide_id: str = ""
     message: str = "Waiting to start..."
-    results: List[BatchSlideResult] = field(default_factory=list)
+    results: list[BatchSlideResult] = field(default_factory=list)
     positive_label: str = "RESPONDER"
     negative_label: str = "NON-RESPONDER"
-    error: Optional[str] = None
+    error: str | None = None
     created_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
+    started_at: float | None = None
+    completed_at: float | None = None
     cancel_requested: bool = False
-    
+
     @property
     def total_slides(self) -> int:
         return len(self.slide_ids)
-    
+
     @property
     def completed_slides(self) -> int:
         return len(self.results)
-    
+
     @property
     def elapsed_seconds(self) -> float:
         if self.started_at:
             end_time = self.completed_at or time.time()
             return end_time - self.started_at
         return 0.0
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "status": self.status.value,
@@ -105,8 +108,8 @@ class BatchTask:
             "positive_label": self.positive_label,
             "negative_label": self.negative_label,
         }
-    
-    def to_full_dict(self) -> Dict[str, Any]:
+
+    def to_full_dict(self) -> dict[str, Any]:
         """Include full results for final response."""
         data = self.to_dict()
         data["results"] = [
@@ -131,7 +134,9 @@ class BatchTask:
                         "error": mr.error,
                     }
                     for mr in (r.model_results or [])
-                ] if r.model_results else None,
+                ]
+                if r.model_results
+                else None,
             }
             for r in self.results
         ]
@@ -141,10 +146,7 @@ class BatchTask:
         responders = [r for r in completed if r.prediction == self.positive_label]
         non_responders = [r for r in completed if r.prediction == self.negative_label]
         uncertain = [r for r in completed if r.requires_review]
-        avg_confidence = (
-            sum(r.confidence for r in completed) / len(completed)
-            if completed else 0.0
-        )
+        avg_confidence = sum(r.confidence for r in completed) / len(completed) if completed else 0.0
         data["summary"] = {
             "total": len(self.results),
             "completed": len(completed),
@@ -163,15 +165,15 @@ class BatchTask:
 
 class BatchTaskManager:
     """Manages background batch analysis tasks with thread safety."""
-    
+
     def __init__(self, max_concurrent: int = 2):
-        self.tasks: Dict[str, BatchTask] = {}
+        self.tasks: dict[str, BatchTask] = {}
         self.lock = threading.Lock()
         self.max_concurrent = max_concurrent
-        
+
     def create_task(
         self,
-        slide_ids: List[str],
+        slide_ids: list[str],
         *,
         positive_label: str = "RESPONDER",
         negative_label: str = "NON-RESPONDER",
@@ -187,13 +189,13 @@ class BatchTaskManager:
         with self.lock:
             self.tasks[task_id] = task
         return task
-    
-    def get_task(self, task_id: str) -> Optional[BatchTask]:
+
+    def get_task(self, task_id: str) -> BatchTask | None:
         """Get task by ID."""
         with self.lock:
             return self.tasks.get(task_id)
-    
-    def update_task(self, task_id: str, **updates) -> Optional[BatchTask]:
+
+    def update_task(self, task_id: str, **updates) -> BatchTask | None:
         """Update task fields."""
         with self.lock:
             task = self.tasks.get(task_id)
@@ -202,15 +204,15 @@ class BatchTaskManager:
                     if hasattr(task, key):
                         setattr(task, key, value)
         return task
-    
-    def add_result(self, task_id: str, result: BatchSlideResult) -> Optional[BatchTask]:
+
+    def add_result(self, task_id: str, result: BatchSlideResult) -> BatchTask | None:
         """Add a slide result to the task."""
         with self.lock:
             task = self.tasks.get(task_id)
             if task:
                 task.results.append(result)
         return task
-    
+
     def request_cancel(self, task_id: str) -> bool:
         """Request cancellation of a task."""
         with self.lock:
@@ -219,28 +221,30 @@ class BatchTaskManager:
                 task.cancel_requested = True
                 return True
         return False
-    
+
     def is_cancelled(self, task_id: str) -> bool:
         """Check if cancellation was requested."""
         with self.lock:
             task = self.tasks.get(task_id)
             return task.cancel_requested if task else False
-    
-    def list_tasks(self, status: Optional[BatchTaskStatus] = None) -> List[Dict[str, Any]]:
+
+    def list_tasks(self, status: BatchTaskStatus | None = None) -> list[dict[str, Any]]:
         """List all tasks, optionally filtered by status."""
         with self.lock:
             tasks = list(self.tasks.values())
             if status:
                 tasks = [t for t in tasks if t.status == status]
             return [t.to_dict() for t in sorted(tasks, key=lambda t: t.created_at, reverse=True)]
-    
+
     def cleanup_old_tasks(self, max_age_seconds: int = 3600):
         """Remove completed tasks older than max_age_seconds."""
         cutoff = time.time() - max_age_seconds
         with self.lock:
             to_remove = [
-                tid for tid, task in self.tasks.items()
-                if task.status in [BatchTaskStatus.COMPLETED, BatchTaskStatus.FAILED, BatchTaskStatus.CANCELLED]
+                tid
+                for tid, task in self.tasks.items()
+                if task.status
+                in [BatchTaskStatus.COMPLETED, BatchTaskStatus.FAILED, BatchTaskStatus.CANCELLED]
                 and task.created_at < cutoff
             ]
             for tid in to_remove:

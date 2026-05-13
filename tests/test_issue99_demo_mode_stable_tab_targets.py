@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -26,4 +25,4 @@ def test_issue99_demo_steps_target_stable_right_sidebar_tabs():
 def test_issue99_right_sidebar_tabs_expose_demo_hooks_for_each_panel_button():
     src = _read("frontend/src/app/page.tsx")
 
-    assert 'data-demo={`right-tab-${opt.value}`}' in src
+    assert "data-demo={`right-tab-${opt.value}`}" in src

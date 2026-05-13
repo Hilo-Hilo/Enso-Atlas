@@ -7,13 +7,12 @@ This module handles:
 - Patch sampling (grid-based + adaptive refinement)
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple, List, Optional
-import logging
+from typing import Any
 
 import numpy as np
-from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WSIConfig:
     """WSI processing configuration."""
+
     patch_size: int = 224
     magnification: int = 20
     tissue_threshold: float = 0.5
@@ -39,12 +39,13 @@ class WSIProcessor:
 
     def __init__(self, config: WSIConfig):
         self.config = config
-        self._slide = None
-        self._current_path = None
+        self._slide: Any | None = None
+        self._current_path: Path | None = None
 
         # Lazy import OpenSlide
         try:
             import openslide
+
             self._openslide = openslide
         except ImportError:
             logger.warning("OpenSlide not installed. WSI support limited.")
@@ -63,22 +64,23 @@ class WSIProcessor:
         self._current_path = path
         logger.info(f"Loaded slide: {path.name} ({self._slide.dimensions})")
 
-    def get_slide_dimensions(self, path: Optional[str | Path] = None) -> Tuple[int, int]:
+    def get_slide_dimensions(self, path: str | Path | None = None) -> tuple[int, int]:
         """Get slide dimensions at level 0."""
         if path is not None:
             self.load_slide(path)
         if self._slide is None:
             raise RuntimeError("No slide loaded")
-        return self._slide.dimensions
+        return tuple(self._slide.dimensions)
 
-    def get_thumbnail(self, size: Tuple[int, int] = (1024, 1024)) -> np.ndarray:
+    def get_thumbnail(self, size: tuple[int, int] = (1024, 1024)) -> np.ndarray:
         """Get a thumbnail of the slide."""
         if self._slide is None:
             raise RuntimeError("No slide loaded")
         thumb = self._slide.get_thumbnail(size)
-        return np.array(thumb)
+        thumb_array: np.ndarray = np.asarray(thumb)
+        return thumb_array
 
-    def detect_tissue(self, thumbnail: Optional[np.ndarray] = None) -> np.ndarray:
+    def detect_tissue(self, thumbnail: np.ndarray | None = None) -> np.ndarray:
         """
         Detect tissue regions using Otsu thresholding.
 
@@ -108,7 +110,7 @@ class WSIProcessor:
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
 
         # Convert to 0-1 mask
-        mask = (binary > 0).astype(np.uint8)
+        mask: np.ndarray = (binary > 0).astype(np.uint8)
 
         tissue_ratio = np.sum(mask) / mask.size
         logger.info(f"Tissue detection: {tissue_ratio:.1%} coverage")
@@ -119,8 +121,8 @@ class WSIProcessor:
         self,
         tissue_mask: np.ndarray,
         max_patches: int,
-        attention_weights: Optional[np.ndarray] = None,
-    ) -> List[Tuple[int, int]]:
+        attention_weights: np.ndarray | None = None,
+    ) -> list[tuple[int, int]]:
         """
         Sample patch coordinates from tissue regions.
 
@@ -158,8 +160,8 @@ class WSIProcessor:
                     # Check tissue coverage in this region
                     region_size = max(1, int(step // scale_x))
                     region = tissue_mask[
-                        y_int:min(y_int + region_size, mask_h),
-                        x_int:min(x_int + region_size, mask_w)
+                        y_int : min(y_int + region_size, mask_h),
+                        x_int : min(x_int + region_size, mask_w),
                     ]
                     if region.size > 0 and np.mean(region) > self.config.tissue_threshold:
                         # Convert to slide coordinates
@@ -179,9 +181,7 @@ class WSIProcessor:
                 )
             else:
                 # Random sampling
-                indices = np.random.choice(
-                    len(valid_coords), size=max_patches, replace=False
-                )
+                indices = np.random.choice(len(valid_coords), size=max_patches, replace=False)
             valid_coords = [valid_coords[i] for i in indices]
 
         return valid_coords
@@ -195,15 +195,15 @@ class WSIProcessor:
         region = self._slide.read_region((x, y), level, (patch_size, patch_size))
 
         # Convert RGBA to RGB
-        patch = np.array(region.convert("RGB"))
+        patch: np.ndarray = np.array(region.convert("RGB"))
         return patch
 
     def extract_patches(
         self,
         path: str | Path,
         refine_with_attention: bool = False,
-        attention_weights: Optional[np.ndarray] = None,
-    ) -> Tuple[List[np.ndarray], List[Tuple[int, int]]]:
+        attention_weights: np.ndarray | None = None,
+    ) -> tuple[list[np.ndarray], list[tuple[int, int]]]:
         """
         Extract all patches from a slide.
 

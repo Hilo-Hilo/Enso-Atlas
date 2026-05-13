@@ -12,11 +12,11 @@ Key Features:
 - Structured report generation
 """
 
-from pathlib import Path
-from typing import Optional, List
-import logging
-import numpy as np
 import json
+import logging
+from pathlib import Path
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +28,17 @@ def create_demo_app(
     """
     Create a demo Gradio interface using pre-computed embeddings.
     """
+    import sys
+
+    import cv2
     import gradio as gr
     from PIL import Image
-    import cv2
 
-    import sys
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-    from enso_atlas.config import MILConfig, EvidenceConfig
-    from enso_atlas.mil.clam import CLAMClassifier
+    from enso_atlas.config import EvidenceConfig, MILConfig
     from enso_atlas.evidence.generator import EvidenceGenerator
+    from enso_atlas.mil.clam import CLAMClassifier
 
     # Load model
     config = MILConfig(input_dim=384, hidden_dim=128)
@@ -65,10 +66,7 @@ def create_demo_app(
                 available_slides.append(slide_id)
                 embs = np.load(f)
                 all_embeddings.append(embs)
-                all_metadata.append({
-                    "slide_id": slide_id,
-                    "n_patches": len(embs)
-                })
+                all_metadata.append({"slide_id": slide_id, "n_patches": len(embs)})
 
     # Build FAISS index for similarity search
     if all_embeddings:
@@ -86,10 +84,10 @@ def create_demo_app(
 
         # Add some tissue-like regions
         for _ in range(np.random.randint(3, 8)):
-            cx, cy = np.random.randint(50, size[0]-50, 2)
+            cx, cy = np.random.randint(50, size[0] - 50, 2)
             r = np.random.randint(30, 100)
-            y, x = np.ogrid[:size[0], :size[1]]
-            mask = (x - cx)**2 + (y - cy)**2 < r**2
+            y, x = np.ogrid[: size[0], : size[1]]
+            mask = (x - cx) ** 2 + (y - cy) ** 2 < r**2
             color = np.random.randint(150, 200, 3, dtype=np.uint8)
             arr[mask] = color
 
@@ -145,7 +143,9 @@ def create_demo_app(
         heatmap_rgb = cv2.resize(heatmap_rgb, (512, 512))
         heatmap_alpha = cv2.resize(heatmap_alpha, (512, 512))[:, :, np.newaxis]
 
-        blended = (thumbnail_arr * (1 - heatmap_alpha * 0.7) + heatmap_rgb * heatmap_alpha * 0.7).astype(np.uint8)
+        blended = (
+            thumbnail_arr * (1 - heatmap_alpha * 0.7) + heatmap_rgb * heatmap_alpha * 0.7
+        ).astype(np.uint8)
 
         # Results text
         result_text = f"""## Prediction Results
@@ -171,9 +171,9 @@ def create_demo_app(
 
         patch_images = []
         for i, idx in enumerate(top_indices):
-            evidence_text += f"**Patch {i+1}** (attention: {attention[idx]:.4f})\n"
+            evidence_text += f"**Patch {i + 1}** (attention: {attention[idx]:.4f})\n"
             evidence_text += f"- Location: ({coords[idx][0]}, {coords[idx][1]})\n\n"
-            patch_images.append(create_patch_image(seed=seed+idx))
+            patch_images.append(create_patch_image(seed=seed + idx))
 
         # Similar cases from reference cohort
         similar_cases = evidence_gen.find_similar(embeddings, attention, k=5, top_patches=3)
@@ -184,8 +184,8 @@ def create_demo_app(
         if similar_cases:
             seen_slides = set()
             for s in similar_cases[:10]:
-                meta = s.get('metadata', {})
-                sid = meta.get('slide_id', 'unknown')
+                meta = s.get("metadata", {})
+                sid = meta.get("slide_id", "unknown")
                 if sid not in seen_slides and sid != slide_name:
                     seen_slides.add(sid)
                     similar_text += f"- **{sid}** (distance: {s['distance']:.3f})\n"
@@ -197,9 +197,9 @@ def create_demo_app(
         # Similar patch images
         similar_images = []
         for i, s in enumerate(similar_cases[:6]):
-            meta = s.get('metadata', {})
-            sid = meta.get('slide_id', 'unknown')
-            similar_images.append(create_patch_image(seed=hash(sid+str(i)) % 10000))
+            meta = s.get("metadata", {})
+            sid = meta.get("slide_id", "unknown")
+            similar_images.append(create_patch_image(seed=hash(sid + str(i)) % 10000))
 
         return (
             Image.fromarray(blended),
@@ -207,7 +207,7 @@ def create_demo_app(
             evidence_text,
             patch_images,
             similar_text,
-            similar_images
+            similar_images,
         )
 
     def generate_report(slide_name: str):
@@ -229,22 +229,22 @@ def create_demo_app(
             "model_output": {
                 "label": label,
                 "probability": float(score),
-                "calibration_note": "Model probability. Requires external validation."
+                "calibration_note": "Model probability. Requires external validation.",
             },
             "evidence": [
                 {
                     "patch_id": f"patch_{i}",
                     "attention_weight": float(attention[idx]),
-                    "significance": "High attention region"
+                    "significance": "High attention region",
                 }
                 for i, idx in enumerate(np.argsort(attention)[-5:][::-1])
             ],
             "limitations": [
                 "Demo mode with synthetic data",
                 "Not clinically validated",
-                "Requires pathologist review"
+                "Requires pathologist review",
             ],
-            "safety_statement": "This is a research tool. All findings require validation by qualified pathologists."
+            "safety_statement": "This is a research tool. All findings require validation by qualified pathologists.",
         }
 
         return f"""## Structured Report
@@ -278,7 +278,6 @@ This tool is for research purposes only. Do not use for clinical decision-making
     with gr.Blocks(
         title="Enso Atlas - Pathology Evidence Engine",
     ) as app:
-
         gr.Markdown("""
 # Enso Atlas
 

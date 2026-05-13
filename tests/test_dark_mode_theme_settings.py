@@ -11,8 +11,8 @@ These tests verify:
 6. System preference detection is implemented
 """
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SRC = REPO_ROOT / "frontend" / "src"
@@ -47,12 +47,8 @@ class TestThemeInitialization:
     def test_theme_script_reads_localstorage(self):
         """ThemeScript should read atlas-theme from localStorage."""
         src = _read("frontend/src/components/ThemeScript.tsx")
-        assert "atlas-theme" in src, (
-            "ThemeScript should read 'atlas-theme' from localStorage"
-        )
-        assert "localStorage.getItem" in src, (
-            "ThemeScript should use localStorage.getItem"
-        )
+        assert "atlas-theme" in src, "ThemeScript should read 'atlas-theme' from localStorage"
+        assert "localStorage.getItem" in src, "ThemeScript should use localStorage.getItem"
 
     def test_theme_script_checks_system_preference(self):
         """ThemeScript should check prefers-color-scheme media query."""
@@ -67,19 +63,13 @@ class TestThemeInitialization:
         assert "classList.add" in src or "classList.remove" in src, (
             "ThemeScript should manipulate classList for dark mode"
         )
-        assert "'dark'" in src or '"dark"' in src, (
-            "ThemeScript should reference the 'dark' class"
-        )
+        assert "'dark'" in src or '"dark"' in src, "ThemeScript should reference the 'dark' class"
 
     def test_layout_includes_theme_script(self):
         """Layout should include ThemeScript for FOUC prevention."""
         layout = _read("frontend/src/app/layout.tsx")
-        assert "ThemeScript" in layout, (
-            "layout.tsx should import and use ThemeScript component"
-        )
-        assert "<ThemeScript" in layout, (
-            "layout.tsx should render ThemeScript in head"
-        )
+        assert "ThemeScript" in layout, "layout.tsx should import and use ThemeScript component"
+        assert "<ThemeScript" in layout, "layout.tsx should render ThemeScript in head"
 
 
 class TestSettingsModalThemeBehavior:
@@ -95,12 +85,8 @@ class TestSettingsModalThemeBehavior:
     def test_settings_modal_persists_to_localstorage(self):
         """Theme selection should be saved to localStorage."""
         src = _read("frontend/src/components/modals/SettingsModal.tsx")
-        assert "localStorage.setItem" in src, (
-            "SettingsModal should persist theme to localStorage"
-        )
-        assert "atlas-theme" in src, (
-            "SettingsModal should use 'atlas-theme' localStorage key"
-        )
+        assert "localStorage.setItem" in src, "SettingsModal should persist theme to localStorage"
+        assert "atlas-theme" in src, "SettingsModal should use 'atlas-theme' localStorage key"
 
     def test_settings_modal_applies_dark_class(self):
         """Selecting dark theme should add 'dark' class to document."""
@@ -140,9 +126,7 @@ class TestAppShellDarkModeStyles:
     def test_globals_css_dark_mode_variables(self):
         """globals.css should define CSS variables for dark mode."""
         css = _read("frontend/src/app/globals.css")
-        assert ".dark {" in css, (
-            "globals.css should have .dark selector with CSS variables"
-        )
+        assert ".dark {" in css, "globals.css should have .dark selector with CSS variables"
         assert "--surface-primary" in css and "--surface-secondary" in css, (
             "globals.css should define surface color variables for theming"
         )
@@ -150,9 +134,7 @@ class TestAppShellDarkModeStyles:
     def test_header_has_dark_mode_styles(self):
         """Header component should have dark: variant classes."""
         src = _read("frontend/src/components/layout/Header.tsx")
-        assert "dark:" in src, (
-            "Header.tsx should have dark: Tailwind variants"
-        )
+        assert "dark:" in src, "Header.tsx should have dark: Tailwind variants"
         assert "dark:bg-navy" in src or "dark:border-navy" in src, (
             "Header should use navy colors for dark mode background/borders"
         )
@@ -160,9 +142,7 @@ class TestAppShellDarkModeStyles:
     def test_footer_has_dark_mode_styles(self):
         """Footer component should have dark: variant classes."""
         src = _read("frontend/src/components/layout/Footer.tsx")
-        assert "dark:" in src, (
-            "Footer.tsx should have dark: Tailwind variants"
-        )
+        assert "dark:" in src, "Footer.tsx should have dark: Tailwind variants"
 
     def test_clinical_card_has_dark_mode_in_css(self):
         """Clinical card component class should have dark mode styles."""
@@ -192,10 +172,10 @@ class TestThemePersistence:
         """Theme values should be 'light', 'dark', or 'system'."""
         src = _read("frontend/src/components/modals/SettingsModal.tsx")
         # Check ThemeMode type definition
-        assert 'ThemeMode = "light" | "dark" | "system"' in src or \
-               "ThemeMode = 'light' | 'dark' | 'system'" in src, (
-            "ThemeMode type should be defined as light | dark | system"
-        )
+        assert (
+            'ThemeMode = "light" | "dark" | "system"' in src
+            or "ThemeMode = 'light' | 'dark' | 'system'" in src
+        ), "ThemeMode type should be defined as light | dark | system"
 
 
 class TestDarkModeAppShellVisibility:
@@ -276,7 +256,7 @@ class TestSettingsOpenHeaderFade:
         # Find the JSX return section which includes the banner wrapper
         banner_usage_start = src.find("{/* Disconnection Banner */}")
         assert banner_usage_start != -1, "Header should have Disconnection Banner comment marker"
-        banner_section = src[banner_usage_start:banner_usage_start + 500]
+        banner_section = src[banner_usage_start : banner_usage_start + 500]
         assert "settingsOpen" in banner_section, (
             "DisconnectionBanner wrapper should reference settingsOpen for fade effect"
         )

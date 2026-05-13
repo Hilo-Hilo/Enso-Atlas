@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -33,7 +32,10 @@ def test_api_client_uses_project_scoped_models_endpoint_and_heatmap_query_param(
     assert "getHeatmapUrl" in src
     # lightweight UI uses normalizeProjectId() -> scopedProjectId
     assert "scopedProjectId" in src
-    assert "params.set('project_id', scopedProjectId)" in src or 'params.set("project_id", scopedProjectId)' in src
+    assert (
+        "params.set('project_id', scopedProjectId)" in src
+        or 'params.set("project_id", scopedProjectId)' in src
+    )
 
 
 def test_api_client_heatmap_url_includes_project_scoping():

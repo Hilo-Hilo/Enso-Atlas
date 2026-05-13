@@ -1,8 +1,8 @@
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
 import subprocess
 import sys
 import textwrap
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = REPO_ROOT / "src"
@@ -28,14 +28,18 @@ ProjectConfig = projects_module.ProjectConfig
 ProjectRegistry = projects_module.ProjectRegistry
 
 
-def _run_validator(config_path: Path, *, skip_code_scan: bool = False) -> subprocess.CompletedProcess:
+def _run_validator(
+    config_path: Path, *, skip_code_scan: bool = False
+) -> subprocess.CompletedProcess:
     cmd = [sys.executable, str(VALIDATOR_PATH), "--config", str(config_path)]
     if skip_code_scan:
         cmd.append("--skip-code-scan")
     return subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=REPO_ROOT)
 
 
-def _write_project_config(tmp_path: Path, *, slides_dir: str, embeddings_dir: str, labels_file: str) -> Path:
+def _write_project_config(
+    tmp_path: Path, *, slides_dir: str, embeddings_dir: str, labels_file: str
+) -> Path:
     cfg = tmp_path / "projects.yaml"
     cfg.write_text(
         textwrap.dedent(
@@ -112,7 +116,10 @@ def test_modularity_validation_fails_for_paths_outside_project_root(tmp_path: Pa
     output = result.stdout + "\n" + result.stderr
 
     assert result.returncode != 0
-    assert "dataset.slides_dir='data/slides' is outside expected 'data/projects/demo-proj/..." in output
+    assert (
+        "dataset.slides_dir='data/slides' is outside expected 'data/projects/demo-proj/..."
+        in output
+    )
 
 
 def test_modularity_validation_fails_for_inconsistent_dataset_relationships(tmp_path: Path):
@@ -153,13 +160,14 @@ def test_validate_project_paths_requires_prediction_target_in_project_classifica
 
     errors = validator_module.validate_project_paths(cfg)
     assert any(
-        "prediction_target 'lung_stage' must be listed in project.classification_models"
-        in err
+        "prediction_target 'lung_stage' must be listed in project.classification_models" in err
         for err in errors
     )
 
 
-def test_validate_project_paths_flags_prediction_target_missing_from_top_level_catalog(tmp_path: Path):
+def test_validate_project_paths_flags_prediction_target_missing_from_top_level_catalog(
+    tmp_path: Path,
+):
     cfg = _write_config_text(
         tmp_path,
         """
@@ -181,8 +189,7 @@ def test_validate_project_paths_flags_prediction_target_missing_from_top_level_c
 
     errors = validator_module.validate_project_paths(cfg)
     assert any(
-        "prediction_target 'lung_stage' not found in top-level classification_models catalog"
-        in err
+        "prediction_target 'lung_stage' not found in top-level classification_models catalog" in err
         for err in errors
     )
 
@@ -215,8 +222,7 @@ def test_validate_project_paths_flags_unknown_project_classification_model_in_to
     errors = validator_module.validate_project_paths(cfg)
     assert any(
         "project.classification_models includes 'tumor_grade' not found in top-level "
-        "classification_models catalog"
-        in err
+        "classification_models catalog" in err
         for err in errors
     )
 
@@ -242,4 +248,6 @@ def test_legacy_pattern_scan_detects_forbidden_snippets(tmp_path: Path):
     )
 
     errors = validator_module.validate_code_patterns(tmp_path)
-    assert any("Legacy path pattern found in src/enso_atlas/api/project_routes.py" in e for e in errors)
+    assert any(
+        "Legacy path pattern found in src/enso_atlas/api/project_routes.py" in e for e in errors
+    )

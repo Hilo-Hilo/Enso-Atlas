@@ -21,7 +21,9 @@ def _project_routes_source() -> str:
 
 def _projects_page_source() -> str:
     """Read the frontend projects page source file."""
-    path = Path(__file__).resolve().parents[1] / "frontend" / "src" / "app" / "projects" / "page.tsx"
+    path = (
+        Path(__file__).resolve().parents[1] / "frontend" / "src" / "app" / "projects" / "page.tsx"
+    )
     return path.read_text()
 
 
@@ -59,8 +61,8 @@ def test_frontend_no_new_project_button():
     """Frontend must not have a 'New Project' button."""
     src = _projects_page_source()
     # The "New Project" button should be removed/commented out
-    assert 'onClick={() => setShowCreate(true)}' not in src
-    assert '>New Project<' not in src
+    assert "onClick={() => setShowCreate(true)}" not in src
+    assert ">New Project<" not in src
     # Should have a comment indicating it's disabled
     assert "Project creation disabled" in src or "projects must be configured" in src.lower()
 
@@ -76,7 +78,9 @@ def test_frontend_no_create_project_modal():
     src = _projects_page_source()
     # The showCreate modal rendering should be removed
     assert "{showCreate && (" not in src
-    assert 'mode="create"' not in src or 'ProjectFormModal' not in src.split('mode="create"')[0][-200:]
+    assert (
+        'mode="create"' not in src or "ProjectFormModal" not in src.split('mode="create"')[0][-200:]
+    )
 
 
 def test_frontend_empty_state_mentions_backend_config():

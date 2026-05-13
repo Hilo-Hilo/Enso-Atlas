@@ -5,13 +5,13 @@ Provides async batch re-embedding of all slides with progress tracking.
 Used for "Force Re-Embed" across all slides and overnight batch runs.
 """
 
+import logging
 import threading
 import time
-import logging
-from typing import Optional, Dict, Any, List
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-import uuid
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +27,21 @@ class BatchEmbedStatus(Enum):
 @dataclass
 class BatchEmbedSlideResult:
     """Result for a single slide in batch embedding."""
+
     slide_id: str
     status: str = "pending"  # pending, running, completed, failed, skipped
     num_patches: int = 0
     processing_time_seconds: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class BatchEmbedTask:
     """Represents a background batch embedding task."""
+
     task_id: str
-    slide_ids: List[str]
-    project_id: Optional[str] = None
+    slide_ids: list[str]
+    project_id: str | None = None
     level: int = 0
     force: bool = True
     concurrency: int = 1
@@ -48,11 +50,11 @@ class BatchEmbedTask:
     current_slide_index: int = 0
     current_slide_id: str = ""
     message: str = "Waiting to start..."
-    results: List[BatchEmbedSlideResult] = field(default_factory=list)
-    error: Optional[str] = None
+    results: list[BatchEmbedSlideResult] = field(default_factory=list)
+    error: str | None = None
     created_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
+    started_at: float | None = None
+    completed_at: float | None = None
     cancel_requested: bool = False
 
     @property
@@ -70,7 +72,7 @@ class BatchEmbedTask:
             return end_time - self.started_at
         return 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "status": self.status.value,
@@ -89,7 +91,7 @@ class BatchEmbedTask:
             "cancel_requested": self.cancel_requested,
         }
 
-    def to_full_dict(self) -> Dict[str, Any]:
+    def to_full_dict(self) -> dict[str, Any]:
         """Include per-slide results."""
         data = self.to_dict()
         data["results"] = [
@@ -121,16 +123,16 @@ class BatchEmbedTaskManager:
     """Manages background batch embedding tasks with thread safety."""
 
     def __init__(self):
-        self.tasks: Dict[str, BatchEmbedTask] = {}
+        self.tasks: dict[str, BatchEmbedTask] = {}
         self.lock = threading.Lock()
 
     def create_task(
         self,
-        slide_ids: List[str],
+        slide_ids: list[str],
         level: int = 0,
         force: bool = True,
         concurrency: int = 1,
-        project_id: Optional[str] = None,
+        project_id: str | None = None,
     ) -> BatchEmbedTask:
         """Create a new batch embedding task."""
         task_id = f"batch_embed_{uuid.uuid4().hex[:12]}"
@@ -146,11 +148,11 @@ class BatchEmbedTaskManager:
             self.tasks[task_id] = task
         return task
 
-    def get_task(self, task_id: str) -> Optional[BatchEmbedTask]:
+    def get_task(self, task_id: str) -> BatchEmbedTask | None:
         with self.lock:
             return self.tasks.get(task_id)
 
-    def update_task(self, task_id: str, **updates) -> Optional[BatchEmbedTask]:
+    def update_task(self, task_id: str, **updates) -> BatchEmbedTask | None:
         with self.lock:
             task = self.tasks.get(task_id)
             if task:
@@ -178,7 +180,7 @@ class BatchEmbedTaskManager:
             task = self.tasks.get(task_id)
             return task.cancel_requested if task else False
 
-    def get_active_task(self) -> Optional[BatchEmbedTask]:
+    def get_active_task(self) -> BatchEmbedTask | None:
         """Get the currently running batch embed task, if any."""
         with self.lock:
             for task in self.tasks.values():
@@ -186,7 +188,7 @@ class BatchEmbedTaskManager:
                     return task
         return None
 
-    def list_tasks(self) -> List[Dict[str, Any]]:
+    def list_tasks(self) -> list[dict[str, Any]]:
         with self.lock:
             return [
                 t.to_dict()

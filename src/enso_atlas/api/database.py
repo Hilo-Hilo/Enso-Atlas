@@ -14,13 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import hashlib
 import logging
 import os
 import time
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +169,7 @@ async def get_pool():
     global _pool
     if _pool is None:
         import asyncpg
+
         # Retry connection a few times (DB might still be starting)
         for attempt in range(10):
             try:
@@ -184,7 +183,9 @@ async def get_pool():
                 break
             except Exception as e:
                 if attempt < 9:
-                    logger.warning(f"DB connection attempt {attempt+1}/10 failed: {e}, retrying in 2s...")
+                    logger.warning(
+                        f"DB connection attempt {attempt + 1}/10 failed: {e}, retrying in 2s..."
+                    )
                     await asyncio.sleep(2)
                 else:
                     raise
@@ -232,9 +233,7 @@ async def _migrate_project_columns():
             )
             logger.info("Added project_id column to slides table")
         # Mark migration
-        await conn.execute(
-            "INSERT INTO schema_version (version) VALUES (2) ON CONFLICT DO NOTHING"
-        )
+        await conn.execute("INSERT INTO schema_version (version) VALUES (2) ON CONFLICT DO NOTHING")
 
 
 async def _migrate_project_scoped_tables():
@@ -246,9 +245,7 @@ async def _migrate_project_scoped_tables():
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Check if v3 migration already applied
-        v3_done = await conn.fetchval(
-            "SELECT COUNT(*) FROM schema_version WHERE version = 3"
-        )
+        v3_done = await conn.fetchval("SELECT COUNT(*) FROM schema_version WHERE version = 3")
         if v3_done:
             return
 
@@ -311,9 +308,7 @@ async def _migrate_project_scoped_tables():
             logger.info("Seeded project_models with 5 models for ovarian-platinum")
 
         # Mark migration complete
-        await conn.execute(
-            "INSERT INTO schema_version (version) VALUES (3) ON CONFLICT DO NOTHING"
-        )
+        await conn.execute("INSERT INTO schema_version (version) VALUES (3) ON CONFLICT DO NOTHING")
         logger.info("v3 migration complete: project_models and project_slides tables ready")
 
 
@@ -321,9 +316,7 @@ async def _migrate_display_name():
     """v4 migration: add display_name column to slides table."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        v4_done = await conn.fetchval(
-            "SELECT COUNT(*) FROM schema_version WHERE version = 4"
-        )
+        v4_done = await conn.fetchval("SELECT COUNT(*) FROM schema_version WHERE version = 4")
         if v4_done:
             return
         col_exists = await conn.fetchval(
@@ -333,13 +326,9 @@ async def _migrate_display_name():
             """
         )
         if not col_exists:
-            await conn.execute(
-                "ALTER TABLE slides ADD COLUMN display_name TEXT"
-            )
+            await conn.execute("ALTER TABLE slides ADD COLUMN display_name TEXT")
             logger.info("Added display_name column to slides table")
-        await conn.execute(
-            "INSERT INTO schema_version (version) VALUES (4) ON CONFLICT DO NOTHING"
-        )
+        await conn.execute("INSERT INTO schema_version (version) VALUES (4) ON CONFLICT DO NOTHING")
         logger.info("v4 migration complete: display_name column added")
 
 
@@ -347,9 +336,7 @@ async def _migrate_annotations_table():
     """v5 migration: create annotations table for pathologist review."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        v5_done = await conn.fetchval(
-            "SELECT COUNT(*) FROM schema_version WHERE version = 5"
-        )
+        v5_done = await conn.fetchval("SELECT COUNT(*) FROM schema_version WHERE version = 5")
         if v5_done:
             return
         await conn.execute("""
@@ -369,9 +356,7 @@ async def _migrate_annotations_table():
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_annotations_slide ON annotations(slide_id)"
         )
-        await conn.execute(
-            "INSERT INTO schema_version (version) VALUES (5) ON CONFLICT DO NOTHING"
-        )
+        await conn.execute("INSERT INTO schema_version (version) VALUES (5) ON CONFLICT DO NOTHING")
         logger.info("v5 migration complete: annotations table created")
 
 
@@ -392,6 +377,7 @@ async def create_annotation(
 ) -> dict:
     """Insert a new annotation and return it."""
     import json as _json
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -400,11 +386,18 @@ async def create_annotation(
             VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8)
             RETURNING id, slide_id, type, coordinates, label, notes, color, category, created_at, updated_at
             """,
-            annotation_id, slide_id, ann_type, _json.dumps(coordinates),
-            label, notes, color, category,
+            annotation_id,
+            slide_id,
+            ann_type,
+            _json.dumps(coordinates),
+            label,
+            notes,
+            color,
+            category,
         )
     result = dict(row)
     import json
+
     if isinstance(result["coordinates"], str):
         result["coordinates"] = json.loads(result["coordinates"])
     return result
@@ -413,6 +406,7 @@ async def create_annotation(
 async def get_annotations(slide_id: str) -> list[dict]:
     """Get all annotations for a slide."""
     import json
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -441,6 +435,7 @@ async def update_annotation(
 ) -> dict | None:
     """Update an annotation's label/notes. Returns updated row or None."""
     import json
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -454,7 +449,11 @@ async def update_annotation(
             WHERE id = $1
             RETURNING id, slide_id, type, coordinates, label, notes, color, category, created_at, updated_at
             """,
-            annotation_id, label, notes, color, category,
+            annotation_id,
+            label,
+            notes,
+            color,
+            category,
         )
     if not row:
         return None
@@ -468,10 +467,8 @@ async def delete_annotation(annotation_id: str) -> bool:
     """Delete an annotation. Returns True if deleted."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        result = await conn.execute(
-            "DELETE FROM annotations WHERE id = $1", annotation_id
-        )
-    return result != "DELETE 0"
+        result = await conn.execute("DELETE FROM annotations WHERE id = $1", annotation_id)
+    return bool(result != "DELETE 0")
 
 
 async def update_slide_display_name(slide_id: str, display_name: str | None) -> bool:
@@ -483,9 +480,10 @@ async def update_slide_display_name(slide_id: str, display_name: str | None) -> 
             UPDATE slides SET display_name = $2, updated_at = now()
             WHERE slide_id = $1
             """,
-            slide_id, display_name,
+            slide_id,
+            display_name,
         )
-        return result != "UPDATE 0"
+        return bool(result != "UPDATE 0")
 
 
 async def get_slide_embedding_status(slide_id: str) -> dict:
@@ -522,7 +520,9 @@ async def get_slide_embedding_status(slide_id: str) -> dict:
             "has_level0_embeddings": slide["has_level0_embeddings"],
             "has_level1_embeddings": slide["has_embeddings"],
             "num_patches": slide["num_patches"],
-            "embedding_date": slide["embedding_date"].isoformat() if slide["embedding_date"] else None,
+            "embedding_date": slide["embedding_date"].isoformat()
+            if slide["embedding_date"]
+            else None,
             "cached_model_ids": [r["model_id"] for r in cached_models],
         }
 
@@ -535,6 +535,7 @@ async def populate_projects_from_registry(registry) -> None:
     """
     pool = await get_pool()
     import json as _json
+
     async with pool.acquire() as conn:
         for pid, proj in registry.list_projects().items():
             config_json = _json.dumps(proj.to_dict())
@@ -549,7 +550,11 @@ async def populate_projects_from_registry(registry) -> None:
                     config_json = EXCLUDED.config_json,
                     updated_at = now()
                 """,
-                pid, proj.name, proj.cancer_type, proj.prediction_target, config_json,
+                pid,
+                proj.name,
+                proj.cancer_type,
+                proj.prediction_target,
+                config_json,
             )
     logger.info(f"Synced {len(registry.list_projects())} project(s) to database")
 
@@ -562,7 +567,7 @@ async def populate_projects_from_registry(registry) -> None:
 async def populate_from_flat_files(
     data_root: Path,
     embeddings_dir: Path,
-    slide_dirs: List[Path] | None = None,
+    slide_dirs: list[Path] | None = None,
 ):
     """
     One-time population of the database from existing flat-file data.
@@ -584,15 +589,15 @@ async def populate_from_flat_files(
         data_root / "tcga_full" / "labels.csv",
     ]
 
-    patients_data: Dict[str, Dict[str, Any]] = {}
-    slides_data: Dict[str, Dict[str, Any]] = {}
+    patients_data: dict[str, dict[str, Any]] = {}
+    slides_data: dict[str, dict[str, Any]] = {}
 
     for labels_path in label_files:
         if not labels_path.exists():
             continue
         logger.info(f"Parsing labels from {labels_path}")
-        with open(labels_path) as f:
-            reader = csv.DictReader(f)
+        with open(labels_path) as labels_file:
+            reader = csv.DictReader(labels_file)
             for row in reader:
                 # Format 1: data/labels.csv (patient_id, slide_file, treatment_response, age, sex, ...)
                 if "slide_file" in row:
@@ -600,7 +605,13 @@ async def populate_from_flat_files(
                     slide_file = row.get("slide_file", "")
                     slide_id = slide_file.replace(".svs", "").replace(".SVS", "")
                     response = row.get("treatment_response", "")
-                    label = "1" if response == "responder" else "0" if response == "non-responder" else ""
+                    label = (
+                        "1"
+                        if response == "responder"
+                        else "0"
+                        if response == "non-responder"
+                        else ""
+                    )
 
                     if patient_id:
                         patients_data[patient_id] = {
@@ -633,12 +644,22 @@ async def populate_from_flat_files(
 
                     # Normalize label
                     if not label and platinum:
-                        label = "1" if platinum == "sensitive" else "0" if platinum == "resistant" else ""
+                        label = (
+                            "1"
+                            if platinum == "sensitive"
+                            else "0"
+                            if platinum == "resistant"
+                            else ""
+                        )
 
                     if patient_id and patient_id not in patients_data:
                         patients_data[patient_id] = {
                             "patient_id": patient_id,
-                            "treatment_response": "responder" if label == "1" else "non-responder" if label == "0" else None,
+                            "treatment_response": "responder"
+                            if label == "1"
+                            else "non-responder"
+                            if label == "0"
+                            else None,
                         }
 
                     if slide_id:
@@ -658,14 +679,15 @@ async def populate_from_flat_files(
     level0_slides = set()
 
     if embeddings_dir.exists():
-        for f in sorted(embeddings_dir.glob("*.npy")):
-            if f.name.endswith("_coords.npy"):
+        for embedding_path in sorted(embeddings_dir.glob("*.npy")):
+            if embedding_path.name.endswith("_coords.npy"):
                 continue
-            sid = f.stem
+            sid = embedding_path.stem
             embedding_slides.add(sid)
             try:
                 import numpy as np
-                emb = np.load(f)
+
+                emb = np.load(embedding_path)
                 num_patches = len(emb)
             except Exception:
                 num_patches = None
@@ -691,7 +713,9 @@ async def populate_from_flat_files(
             if sid in slides_data:
                 slides_data[sid]["has_level0_embeddings"] = True
 
-    logger.info(f"Found {len(embedding_slides)} slides with embeddings, {len(level0_slides)} with level0")
+    logger.info(
+        f"Found {len(embedding_slides)} slides with embeddings, {len(level0_slides)} with level0"
+    )
 
     # ------ Step 3: Read SVS dimensions (the slow part — only on first run) ------
     # Build candidate slide directories
@@ -705,20 +729,17 @@ async def populate_from_flat_files(
 
     # Check which slides already have dimensions in DB
     async with pool.acquire() as conn:
-        existing = await conn.fetch(
-            "SELECT slide_id, width FROM slides WHERE width > 0"
-        )
+        existing = await conn.fetch("SELECT slide_id, width FROM slides WHERE width > 0")
     existing_dims = {r["slide_id"] for r in existing}
 
-    slides_needing_dims = {
-        sid for sid in slides_data if sid not in existing_dims
-    }
+    slides_needing_dims = {sid for sid in slides_data if sid not in existing_dims}
 
     if slides_needing_dims:
         logger.info(f"Reading dimensions from SVS files for {len(slides_needing_dims)} slides...")
         try:
             import openslide
-            exts = {'.svs', '.tiff', '.tif', '.ndpi', '.mrxs', '.vms', '.scn'}
+
+            exts = {".svs", ".tiff", ".tif", ".ndpi", ".mrxs", ".vms", ".scn"}
             dims_read = 0
             for slide_dir in slide_dirs:
                 if not slide_dir.exists():
@@ -838,8 +859,9 @@ async def populate_from_flat_files(
     if metadata_json_path.exists():
         try:
             import json
-            with open(metadata_json_path) as f:
-                meta_store = json.load(f)
+
+            with open(metadata_json_path) as metadata_file:
+                meta_store = json.load(metadata_file)
             slide_metas = meta_store.get("slides", {})
             groups = meta_store.get("groups", {})
 
@@ -882,7 +904,7 @@ async def populate_from_flat_files(
 # ---------------------------------------------------------------------------
 
 
-async def get_all_slides() -> List[Dict[str, Any]]:
+async def get_all_slides() -> list[dict[str, Any]]:
     """
     Get all slides with patient context — the fast replacement for the old
     /api/slides endpoint. Should return in <100ms instead of 30-60s.
@@ -921,7 +943,7 @@ async def get_all_slides() -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-async def get_slide(slide_id: str) -> Optional[Dict[str, Any]]:
+async def get_slide(slide_id: str) -> dict[str, Any] | None:
     """Get a single slide with patient context."""
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -939,7 +961,7 @@ async def get_slide(slide_id: str) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
-async def get_slide_labels() -> Dict[str, str]:
+async def get_slide_labels() -> dict[str, str]:
     """Get slide_id -> label mapping for all slides. Used by FAISS index etc."""
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -958,7 +980,7 @@ async def get_slide_labels() -> Dict[str, str]:
     return result
 
 
-async def get_slide_metadata_kv(slide_id: str) -> Dict[str, List[str]]:
+async def get_slide_metadata_kv(slide_id: str) -> dict[str, list[str]]:
     """Get all key-value metadata for a slide, grouped by key."""
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -966,7 +988,7 @@ async def get_slide_metadata_kv(slide_id: str) -> Dict[str, List[str]]:
             "SELECT key, value FROM slide_metadata WHERE slide_id = $1",
             slide_id,
         )
-    result: Dict[str, List[str]] = {}
+    result: dict[str, list[str]] = {}
     for r in rows:
         result.setdefault(r["key"], []).append(r["value"])
     return result
@@ -982,23 +1004,28 @@ async def set_slide_metadata(slide_id: str, key: str, value: str):
             VALUES ($1, $2, $3)
             ON CONFLICT (slide_id, key, value) DO UPDATE SET updated_at = now()
             """,
-            slide_id, key, value,
+            slide_id,
+            key,
+            value,
         )
 
 
-async def delete_slide_metadata(slide_id: str, key: str, value: Optional[str] = None):
+async def delete_slide_metadata(slide_id: str, key: str, value: str | None = None):
     """Delete metadata. If value is None, delete all entries for that key."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         if value is not None:
             await conn.execute(
                 "DELETE FROM slide_metadata WHERE slide_id = $1 AND key = $2 AND value = $3",
-                slide_id, key, value,
+                slide_id,
+                key,
+                value,
             )
         else:
             await conn.execute(
                 "DELETE FROM slide_metadata WHERE slide_id = $1 AND key = $2",
-                slide_id, key,
+                slide_id,
+                key,
             )
 
 
@@ -1041,7 +1068,13 @@ async def save_analysis_result(
             INSERT INTO analysis_results (slide_id, model_id, score, label, confidence, threshold, attention_hash)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
-            slide_id, model_id, score, label, confidence, threshold, attention_hash,
+            slide_id,
+            model_id,
+            score,
+            label,
+            confidence,
+            threshold,
+            attention_hash,
         )
 
 
@@ -1065,7 +1098,8 @@ async def get_cached_results(
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
-                slide_id, model_id,
+                slide_id,
+                model_id,
             )
         else:
             # Get latest result per model using DISTINCT ON
@@ -1098,7 +1132,8 @@ async def update_slide_embeddings(slide_id: str, num_patches: int, level: int = 
                        embedding_date = now(), updated_at = now()
                 WHERE slide_id = $1
                 """,
-                slide_id, num_patches,
+                slide_id,
+                num_patches,
             )
         else:
             await conn.execute(
@@ -1107,7 +1142,8 @@ async def update_slide_embeddings(slide_id: str, num_patches: int, level: int = 
                        embedding_date = now(), updated_at = now()
                 WHERE slide_id = $1
                 """,
-                slide_id, num_patches,
+                slide_id,
+                num_patches,
             )
 
 
@@ -1116,7 +1152,7 @@ async def is_populated() -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
         count = await conn.fetchval("SELECT COUNT(*) FROM slides")
-    return count > 0
+    return bool(count > 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1124,7 +1160,7 @@ async def is_populated() -> bool:
 # ---------------------------------------------------------------------------
 
 
-async def get_project_slides(project_id: str) -> List[str]:
+async def get_project_slides(project_id: str) -> list[str]:
     """Return slide_ids assigned to a project."""
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -1135,7 +1171,7 @@ async def get_project_slides(project_id: str) -> List[str]:
     return [r["slide_id"] for r in rows]
 
 
-async def assign_slides_to_project(project_id: str, slide_ids: List[str]) -> int:
+async def assign_slides_to_project(project_id: str, slide_ids: list[str]) -> int:
     """Assign slides to project. Returns count added."""
     if not slide_ids:
         return 0
@@ -1148,14 +1184,15 @@ async def assign_slides_to_project(project_id: str, slide_ids: List[str]) -> int
             SELECT $1, unnest($2::text[])
             ON CONFLICT DO NOTHING
             """,
-            project_id, slide_ids,
+            project_id,
+            slide_ids,
         )
         # result is like "INSERT 0 N"
         count = int(result.split()[-1])
     return count
 
 
-async def unassign_slides_from_project(project_id: str, slide_ids: List[str]) -> int:
+async def unassign_slides_from_project(project_id: str, slide_ids: list[str]) -> int:
     """Remove slide assignments. Returns count removed."""
     if not slide_ids:
         return 0
@@ -1166,13 +1203,14 @@ async def unassign_slides_from_project(project_id: str, slide_ids: List[str]) ->
             DELETE FROM project_slides
             WHERE project_id = $1 AND slide_id = ANY($2::text[])
             """,
-            project_id, slide_ids,
+            project_id,
+            slide_ids,
         )
         count = int(result.split()[-1])
     return count
 
 
-async def get_project_models(project_id: str) -> List[str]:
+async def get_project_models(project_id: str) -> list[str]:
     """Return model_ids assigned to a project."""
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -1183,7 +1221,7 @@ async def get_project_models(project_id: str) -> List[str]:
     return [r["model_id"] for r in rows]
 
 
-async def assign_models_to_project(project_id: str, model_ids: List[str]) -> int:
+async def assign_models_to_project(project_id: str, model_ids: list[str]) -> int:
     """Assign models to project. Returns count added."""
     if not model_ids:
         return 0
@@ -1195,13 +1233,14 @@ async def assign_models_to_project(project_id: str, model_ids: List[str]) -> int
             SELECT $1, unnest($2::text[])
             ON CONFLICT DO NOTHING
             """,
-            project_id, model_ids,
+            project_id,
+            model_ids,
         )
         count = int(result.split()[-1])
     return count
 
 
-async def unassign_models_from_project(project_id: str, model_ids: List[str]) -> int:
+async def unassign_models_from_project(project_id: str, model_ids: list[str]) -> int:
     """Remove model assignments. Returns count removed."""
     if not model_ids:
         return 0
@@ -1212,7 +1251,8 @@ async def unassign_models_from_project(project_id: str, model_ids: List[str]) ->
             DELETE FROM project_models
             WHERE project_id = $1 AND model_id = ANY($2::text[])
             """,
-            project_id, model_ids,
+            project_id,
+            model_ids,
         )
         count = int(result.split()[-1])
     return count
@@ -1223,7 +1263,7 @@ async def unassign_models_from_project(project_id: str, model_ids: List[str]) ->
 # ---------------------------------------------------------------------------
 
 
-def _safe_int(val) -> Optional[int]:
+def _safe_int(val) -> int | None:
     """Safely convert a value to int, returning None on failure."""
     if val is None or val == "":
         return None

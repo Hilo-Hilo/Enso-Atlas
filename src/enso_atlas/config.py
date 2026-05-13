@@ -6,12 +6,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
 class WSIConfig:
     """WSI processing configuration."""
+
     patch_size: int = 224
     magnification: int = 20
     tissue_threshold: float = 0.5
@@ -23,6 +23,7 @@ class WSIConfig:
 @dataclass
 class EmbeddingConfig:
     """Embedding model configuration."""
+
     model: str = "path-foundation"
     batch_size: int = 64
     precision: str = "fp16"
@@ -32,6 +33,7 @@ class EmbeddingConfig:
 @dataclass
 class MILConfig:
     """MIL head configuration."""
+
     architecture: str = "clam"
     input_dim: int = 384
     hidden_dim: int = 256
@@ -44,20 +46,21 @@ class MILConfig:
     # Decision threshold for binary classification.
     # When set to None the classifier falls back to 0.5.
     # Use scripts/optimize_threshold.py to compute the optimal value.
-    threshold: Optional[float] = None
+    threshold: float | None = None
     # Explicit path to a model checkpoint file.  When set, the classifier's
     # load() method will use this path.  Useful for pointing at TransMIL
     # weights (e.g. "models/transmil_best.pt").
-    model_path: Optional[str] = None
+    model_path: str | None = None
     # Path to a threshold_config.json produced by optimize_threshold.py.
     # If set and threshold is None, the recommended_threshold from the
     # config file is loaded automatically.
-    threshold_config_path: Optional[str] = None
+    threshold_config_path: str | None = None
 
 
 @dataclass
 class EvidenceConfig:
     """Evidence generation configuration."""
+
     top_k_patches: int = 12
     heatmap_alpha: float = 0.4
     similarity_k: int = 20
@@ -68,6 +71,7 @@ class EvidenceConfig:
 @dataclass
 class ReportingConfig:
     """MedGemma reporting configuration."""
+
     model: str = "google/medgemma-4b-it"
     max_evidence_patches: int = 8
     max_similar_cases: int = 5
@@ -81,6 +85,7 @@ class ReportingConfig:
 @dataclass
 class UIConfig:
     """UI configuration."""
+
     server_port: int = 7860
     share: bool = False
     theme: str = "soft"
@@ -89,6 +94,7 @@ class UIConfig:
 @dataclass
 class PathsConfig:
     """Path configuration."""
+
     data_dir: str = "data"
     cache_dir: str = "cache"
     output_dir: str = "outputs"
@@ -98,6 +104,7 @@ class PathsConfig:
 @dataclass
 class DeploymentConfig:
     """Deployment configuration."""
+
     offline_mode: bool = True
     log_level: str = "INFO"
     enable_telemetry: bool = False
@@ -106,6 +113,7 @@ class DeploymentConfig:
 @dataclass
 class AtlasConfig:
     """Master configuration for Enso Atlas."""
+
     wsi: WSIConfig = field(default_factory=WSIConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     mil: MILConfig = field(default_factory=MILConfig)
@@ -116,7 +124,7 @@ class AtlasConfig:
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "AtlasConfig":
+    def from_yaml(cls, path: str | Path) -> AtlasConfig:
         """Load configuration from YAML file."""
         import yaml
 

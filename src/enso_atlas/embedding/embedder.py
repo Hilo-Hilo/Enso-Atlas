@@ -6,11 +6,10 @@ Contains:
 - MedSigLIPEmbedder: Text-to-patch semantic search using SigLIP/MedSigLIP
 """
 
+import hashlib
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Union
-import logging
-import hashlib
 
 import numpy as np
 
@@ -43,7 +42,7 @@ class PathFoundationEmbedder:
 
     def _load_model(self) -> None:
         """Load the Path Foundation model.
-        
+
         Uses local_files_only=True when the model is already cached locally,
         preventing any network access to HuggingFace Hub.
         """
@@ -51,8 +50,9 @@ class PathFoundationEmbedder:
             return
 
         import os
+
         import torch
-        from transformers import AutoModel, AutoImageProcessor
+        from transformers import AutoImageProcessor, AutoModel
 
         # Determine device
         if torch.cuda.is_available():
@@ -71,21 +71,32 @@ class PathFoundationEmbedder:
         # Detect whether model is already cached locally.
         # Check HF_HOME / TRANSFORMERS_CACHE / default cache for the model directory.
         local_files_only = False
-        hf_home = os.environ.get("HF_HOME", os.environ.get(
-            "TRANSFORMERS_CACHE",
-            os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
-        ))
+        hf_home = os.environ.get(
+            "HF_HOME",
+            os.environ.get(
+                "TRANSFORMERS_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+            ),
+        )
         model_cache_dir = os.path.join(hf_home, "hub", f"models--{model_id.replace('/', '--')}")
         if os.path.isdir(model_cache_dir):
             local_files_only = True
-            logger.info(f"Path Foundation model cache found at {model_cache_dir}; loading with local_files_only=True (no network)")
+            logger.info(
+                f"Path Foundation model cache found at {model_cache_dir}; loading with local_files_only=True (no network)"
+            )
 
         # Also respect explicit offline env vars
-        if os.environ.get("TRANSFORMERS_OFFLINE", "0") == "1" or os.environ.get("HF_HUB_OFFLINE", "0") == "1":
+        if (
+            os.environ.get("TRANSFORMERS_OFFLINE", "0") == "1"
+            or os.environ.get("HF_HUB_OFFLINE", "0") == "1"
+        ):
             local_files_only = True
-            logger.info("Offline mode enabled via environment variable; loading with local_files_only=True")
+            logger.info(
+                "Offline mode enabled via environment variable; loading with local_files_only=True"
+            )
 
-        self._processor = AutoImageProcessor.from_pretrained(model_id, local_files_only=local_files_only)
+        self._processor = AutoImageProcessor.from_pretrained(
+            model_id, local_files_only=local_files_only
+        )
         self._model = AutoModel.from_pretrained(model_id, local_files_only=local_files_only)
 
         # Move to device and set precision
@@ -100,7 +111,7 @@ class PathFoundationEmbedder:
         """Generate a hash-based cache key."""
         return hashlib.md5(cache_key.encode()).hexdigest()
 
-    def _load_from_cache(self, cache_key: str) -> Optional[np.ndarray]:
+    def _load_from_cache(self, cache_key: str) -> np.ndarray | None:
         """Load embeddings from cache if available."""
         key = self._get_cache_key(cache_key)
         cache_path = self.cache_dir / f"{key}.npy"
@@ -154,8 +165,8 @@ class PathFoundationEmbedder:
 
     def embed(
         self,
-        patches: List[np.ndarray],
-        cache_key: Optional[str] = None,
+        patches: list[np.ndarray],
+        cache_key: str | None = None,
         show_progress: bool = True,
     ) -> np.ndarray:
         """
@@ -190,7 +201,7 @@ class PathFoundationEmbedder:
             iterator = tqdm(iterator, desc="Embedding patches")
 
         for i in iterator:
-            batch = patches[i:i + batch_size]
+            batch = patches[i : i + batch_size]
 
             # Convert to PIL Images
             pil_images = [Image.fromarray(p) if isinstance(p, np.ndarray) else p for p in batch]
@@ -227,6 +238,7 @@ class PathFoundationEmbedder:
 @dataclass
 class MedSigLIPConfig:
     """MedSigLIP configuration."""
+
     model_id: str = "google/siglip-so400m-patch14-384"  # Base SigLIP model
     batch_size: int = 32
     precision: str = "fp16"
@@ -248,7 +260,7 @@ class MedSigLIPEmbedder:
     EMBEDDING_DIM = 1152  # SigLIP SO400M dimension
     INPUT_SIZE = 384
 
-    def __init__(self, config: Optional[MedSigLIPConfig] = None):
+    def __init__(self, config: MedSigLIPConfig | None = None):
         self.config = config or MedSigLIPConfig()
         self._model = None
         self._processor = None
@@ -262,13 +274,14 @@ class MedSigLIPEmbedder:
 
     def _load_model(self) -> None:
         """Load the SigLIP/MedSigLIP model.
-        
+
         Uses local_files_only=True when the model is already cached locally.
         """
         if self._model is not None:
             return
 
         import os
+
         import torch
         from transformers import AutoModel, AutoProcessor
 
@@ -286,15 +299,22 @@ class MedSigLIPEmbedder:
 
         # Check if model is cached locally
         local_files_only = False
-        hf_home = os.environ.get("HF_HOME", os.environ.get(
-            "TRANSFORMERS_CACHE",
-            os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
-        ))
+        hf_home = os.environ.get(
+            "HF_HOME",
+            os.environ.get(
+                "TRANSFORMERS_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+            ),
+        )
         model_cache_dir = os.path.join(hf_home, "hub", f"models--{model_id.replace('/', '--')}")
         if os.path.isdir(model_cache_dir):
             local_files_only = True
-            logger.info(f"MedSigLIP model cache found at {model_cache_dir}; loading with local_files_only=True")
-        if os.environ.get("TRANSFORMERS_OFFLINE", "0") == "1" or os.environ.get("HF_HUB_OFFLINE", "0") == "1":
+            logger.info(
+                f"MedSigLIP model cache found at {model_cache_dir}; loading with local_files_only=True"
+            )
+        if (
+            os.environ.get("TRANSFORMERS_OFFLINE", "0") == "1"
+            or os.environ.get("HF_HUB_OFFLINE", "0") == "1"
+        ):
             local_files_only = True
 
         self._processor = AutoProcessor.from_pretrained(model_id, local_files_only=local_files_only)
@@ -334,17 +354,25 @@ class MedSigLIPEmbedder:
 
         with torch.no_grad():
             outputs = self._model.get_image_features(**inputs)
-            
+
             # Handle case where model returns BaseModelOutputWithPooling instead of tensor
-            if hasattr(outputs, "pooler_output") and isinstance(outputs.pooler_output, torch.Tensor):
+            if hasattr(outputs, "pooler_output") and isinstance(
+                outputs.pooler_output, torch.Tensor
+            ):
                 embedding = outputs.pooler_output
-            elif hasattr(outputs, "last_hidden_state") and isinstance(outputs.last_hidden_state, torch.Tensor):
+            elif hasattr(outputs, "last_hidden_state") and isinstance(
+                outputs.last_hidden_state, torch.Tensor
+            ):
                 embedding = outputs.last_hidden_state[:, 0, :]
             else:
                 embedding = outputs
-                if isinstance(embedding, (tuple, list)) and embedding and isinstance(embedding[0], torch.Tensor):
+                if (
+                    isinstance(embedding, (tuple, list))
+                    and embedding
+                    and isinstance(embedding[0], torch.Tensor)
+                ):
                     embedding = embedding[0]
-            
+
             # Normalize for cosine similarity
             embedding = embedding / embedding.norm(dim=-1, keepdim=True)
 
@@ -369,17 +397,25 @@ class MedSigLIPEmbedder:
 
         with torch.no_grad():
             outputs = self._model.get_text_features(**inputs)
-            
+
             # Handle case where model returns BaseModelOutputWithPooling instead of tensor
-            if hasattr(outputs, "pooler_output") and isinstance(outputs.pooler_output, torch.Tensor):
+            if hasattr(outputs, "pooler_output") and isinstance(
+                outputs.pooler_output, torch.Tensor
+            ):
                 embedding = outputs.pooler_output
-            elif hasattr(outputs, "last_hidden_state") and isinstance(outputs.last_hidden_state, torch.Tensor):
+            elif hasattr(outputs, "last_hidden_state") and isinstance(
+                outputs.last_hidden_state, torch.Tensor
+            ):
                 embedding = outputs.last_hidden_state[:, 0, :]
             else:
                 embedding = outputs
-                if isinstance(embedding, (tuple, list)) and embedding and isinstance(embedding[0], torch.Tensor):
+                if (
+                    isinstance(embedding, (tuple, list))
+                    and embedding
+                    and isinstance(embedding[0], torch.Tensor)
+                ):
                     embedding = embedding[0]
-            
+
             # Normalize for cosine similarity
             embedding = embedding / embedding.norm(dim=-1, keepdim=True)
 
@@ -387,8 +423,8 @@ class MedSigLIPEmbedder:
 
     def embed_patches(
         self,
-        patches: List[np.ndarray],
-        cache_key: Optional[str] = None,
+        patches: list[np.ndarray],
+        cache_key: str | None = None,
         show_progress: bool = True,
     ) -> np.ndarray:
         """
@@ -404,7 +440,9 @@ class MedSigLIPEmbedder:
         """
         # Try loading from cache first
         if cache_key is not None:
-            cache_path = self.cache_dir / f"{hashlib.md5(cache_key.encode()).hexdigest()}_siglip.npy"
+            cache_path = (
+                self.cache_dir / f"{hashlib.md5(cache_key.encode()).hexdigest()}_siglip.npy"
+            )
             if cache_path.exists():
                 logger.info(f"Loading MedSigLIP embeddings from cache: {cache_path}")
                 return np.load(cache_path)
@@ -424,7 +462,7 @@ class MedSigLIPEmbedder:
             iterator = tqdm(iterator, desc="MedSigLIP embedding patches")
 
         for i in iterator:
-            batch = patches[i:i + batch_size]
+            batch = patches[i : i + batch_size]
 
             # Convert to PIL Images
             pil_images = [Image.fromarray(p) if isinstance(p, np.ndarray) else p for p in batch]
@@ -439,17 +477,25 @@ class MedSigLIPEmbedder:
             # Forward pass
             with torch.no_grad():
                 outputs = self._model.get_image_features(**inputs)
-                
+
                 # Handle case where model returns BaseModelOutputWithPooling instead of tensor
-                if hasattr(outputs, "pooler_output") and isinstance(outputs.pooler_output, torch.Tensor):
+                if hasattr(outputs, "pooler_output") and isinstance(
+                    outputs.pooler_output, torch.Tensor
+                ):
                     embeddings = outputs.pooler_output
-                elif hasattr(outputs, "last_hidden_state") and isinstance(outputs.last_hidden_state, torch.Tensor):
+                elif hasattr(outputs, "last_hidden_state") and isinstance(
+                    outputs.last_hidden_state, torch.Tensor
+                ):
                     embeddings = outputs.last_hidden_state[:, 0, :]
                 else:
                     embeddings = outputs
-                    if isinstance(embeddings, (tuple, list)) and embeddings and isinstance(embeddings[0], torch.Tensor):
+                    if (
+                        isinstance(embeddings, (tuple, list))
+                        and embeddings
+                        and isinstance(embeddings[0], torch.Tensor)
+                    ):
                         embeddings = embeddings[0]
-                
+
                 # Normalize for cosine similarity
                 embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
 
@@ -473,7 +519,7 @@ class MedSigLIPEmbedder:
     def build_search_index(
         self,
         embeddings: np.ndarray,
-        metadata: Optional[List[dict]] = None,
+        metadata: list[dict] | None = None,
     ) -> None:
         """
         Build an in-memory search index from patch embeddings.
@@ -490,9 +536,9 @@ class MedSigLIPEmbedder:
         self,
         query: str,
         top_k: int = 10,
-        embeddings: Optional[np.ndarray] = None,
-        metadata: Optional[List[dict]] = None,
-    ) -> List[dict]:
+        embeddings: np.ndarray | None = None,
+        metadata: list[dict] | None = None,
+    ) -> list[dict]:
         """
         Search for patches matching a text query using cosine similarity.
 
@@ -513,7 +559,9 @@ class MedSigLIPEmbedder:
             search_embeddings = self._patch_embeddings
             search_metadata = self._patch_metadata
         else:
-            raise ValueError("No embeddings available. Call build_search_index() first or provide embeddings.")
+            raise ValueError(
+                "No embeddings available. Call build_search_index() first or provide embeddings."
+            )
 
         # Get text embedding
         query_embedding = self.embed_text(query).astype(np.float32)
@@ -543,9 +591,9 @@ class MedSigLIPEmbedder:
         self,
         query: str,
         faiss_index,
-        metadata: List[dict],
+        metadata: list[dict],
         top_k: int = 10,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         Search using a pre-built FAISS index for large-scale retrieval.
 
@@ -558,7 +606,6 @@ class MedSigLIPEmbedder:
         Returns:
             List of search results with similarity scores
         """
-        import faiss
 
         # Get text embedding
         query_embedding = self.embed_text(query).astype(np.float32)

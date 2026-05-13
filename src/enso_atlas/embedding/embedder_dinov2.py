@@ -3,10 +3,11 @@ DINOv2 Embedder - Alternative to Path Foundation for histopathology.
 Uses facebook/dinov2-small which produces 384-dim embeddings.
 """
 
-from pathlib import Path
-from typing import List, Optional
-import logging
 import hashlib
+import logging
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -18,21 +19,23 @@ class DINOv2Embedder:
     EMBEDDING_DIM = 384
     INPUT_SIZE = 224
 
-    def __init__(self, cache_dir: str = "data/embeddings", batch_size: int = 64, precision: str = "fp16"):
+    def __init__(
+        self, cache_dir: str = "data/embeddings", batch_size: int = 64, precision: str = "fp16"
+    ):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.batch_size = batch_size
         self.precision = precision
-        self._model = None
-        self._processor = None
-        self._device = None
+        self._model: Any | None = None
+        self._processor: Any | None = None
+        self._device: Any | None = None
 
     def _load_model(self) -> None:
         if self._model is not None:
             return
 
         import torch
-        from transformers import AutoModel, AutoImageProcessor
+        from transformers import AutoImageProcessor, AutoModel
 
         if torch.cuda.is_available():
             self._device = torch.device("cuda")
@@ -44,6 +47,8 @@ class DINOv2Embedder:
         model_id = "facebook/dinov2-small"
         self._processor = AutoImageProcessor.from_pretrained(model_id)
         self._model = AutoModel.from_pretrained(model_id)
+        if self._model is None or self._processor is None:
+            raise RuntimeError("Failed to load DINOv2 model")
         self._model = self._model.to(self._device)
 
         if self.precision == "fp16" and self._device.type == "cuda":
@@ -57,11 +62,13 @@ class DINOv2Embedder:
 
     def embed(
         self,
-        patches: List[np.ndarray],
-        cache_key: Optional[str] = None,
+        patches: list[np.ndarray],
+        cache_key: str | None = None,
         show_progress: bool = True,
     ) -> np.ndarray:
         self._load_model()
+        if self._model is None or self._processor is None or self._device is None:
+            raise RuntimeError("DINOv2 model is not initialized")
 
         import torch
         from PIL import Image
@@ -74,7 +81,7 @@ class DINOv2Embedder:
             iterator = tqdm(iterator, desc="Embedding patches")
 
         for i in iterator:
-            batch = patches[i:i + self.batch_size]
+            batch = patches[i : i + self.batch_size]
             pil_images = [Image.fromarray(p) if isinstance(p, np.ndarray) else p for p in batch]
 
             inputs = self._processor(images=pil_images, return_tensors="pt")
@@ -85,14 +92,14 @@ class DINOv2Embedder:
 
             with torch.no_grad():
                 outputs = self._model(**inputs)
-                embeddings = outputs.last_hidden_state[:, 0, :]
+                batch_embeddings = outputs.last_hidden_state[:, 0, :]
 
-            all_embeddings.append(embeddings.cpu().numpy())
+            all_embeddings.append(batch_embeddings.cpu().numpy())
 
-        embeddings = np.concatenate(all_embeddings, axis=0)
+        concatenated_embeddings: np.ndarray = np.concatenate(all_embeddings, axis=0)
 
         if self.precision == "fp16":
-            embeddings = embeddings.astype(np.float16)
+            concatenated_embeddings = concatenated_embeddings.astype(np.float16)
 
-        logger.info(f"Generated embeddings: {embeddings.shape}")
-        return embeddings
+        logger.info(f"Generated embeddings: {concatenated_embeddings.shape}")
+        return concatenated_embeddings

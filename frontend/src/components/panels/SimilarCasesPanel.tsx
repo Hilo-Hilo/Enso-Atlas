@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import NextImage from "next/image";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -502,11 +503,14 @@ function SimilarCaseItem({
                   <Database className="h-5 w-5 text-gray-300 dark:text-gray-500" />
                 </div>
               )}
-              <img
+              <NextImage
                 src={case_.thumbnailUrl}
                 alt={`Similar case ${rank}`}
+                fill
+                sizes="48px"
+                unoptimized
                 className={cn(
-                  "w-full h-full object-cover transition-opacity",
+                  "object-cover transition-opacity",
                   thumbnailLoading ? "opacity-0" : "opacity-100"
                 )}
                 onLoad={() => setThumbnailLoading(false)}

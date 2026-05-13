@@ -8,10 +8,10 @@ Enso Atlas valuable for clinical decision support:
 - FAISS-based similarity search
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
-import logging
+from typing import Any
 
 import numpy as np
 
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EvidenceConfig:
     """Evidence generation configuration."""
+
     top_k_patches: int = 12
     heatmap_alpha: float = 0.6  # Increased for better visibility
     similarity_k: int = 20
@@ -40,15 +41,15 @@ class EvidenceGenerator:
 
     def __init__(self, config: EvidenceConfig):
         self.config = config
-        self._faiss_index = None
-        self._reference_metadata = []  # Store metadata for indexed embeddings
+        self._faiss_index: Any | None = None
+        self._reference_metadata: list[dict[str, Any]] = []
 
     def create_heatmap(
         self,
         attention_weights: np.ndarray,
-        coordinates: List[Tuple[int, int]],
-        slide_dimensions: Tuple[int, int],
-        thumbnail_size: Tuple[int, int] = (1024, 1024),
+        coordinates: list[tuple[int, int]],
+        slide_dimensions: tuple[int, int],
+        thumbnail_size: tuple[int, int] = (1024, 1024),
         smooth: bool = True,
         blur_kernel: int = 31,
         alpha_power: float = 0.7,
@@ -126,9 +127,10 @@ class EvidenceGenerator:
         # Apply colormap
         heatmap_colored = self._apply_colormap(heatmap, alpha_power=alpha_power)
 
-        logger.info(f"Created heatmap: {heatmap_colored.shape}, smooth={smooth}, alpha_power={alpha_power}")
+        logger.info(
+            f"Created heatmap: {heatmap_colored.shape}, smooth={smooth}, alpha_power={alpha_power}"
+        )
         return heatmap_colored
-
 
     def _apply_colormap(self, heatmap: np.ndarray, alpha_power: float = 0.7) -> np.ndarray:
         """Apply colormap to grayscale heatmap.
@@ -149,17 +151,17 @@ class EvidenceGenerator:
         # Add alpha channel - stronger alpha where attention is higher
         alpha = np.power(x, alpha_power) * 255.0 * float(self.config.heatmap_alpha)
         alpha = alpha.astype(np.uint8)
-        heatmap_rgba = np.dstack([rgb, alpha])
+        heatmap_rgba: np.ndarray = np.dstack([rgb, alpha])
 
         return heatmap_rgba
 
     def select_top_patches(
         self,
-        patches: List[np.ndarray],
-        coordinates: List[Tuple[int, int]],
+        patches: list[np.ndarray],
+        coordinates: list[tuple[int, int]],
         attention_weights: np.ndarray,
-        k: Optional[int] = None,
-    ) -> List[Dict]:
+        k: int | None = None,
+    ) -> list[dict]:
         """
         Select top-K patches based on attention weights.
 
@@ -179,21 +181,23 @@ class EvidenceGenerator:
 
         evidence_patches = []
         for rank, idx in enumerate(top_indices):
-            evidence_patches.append({
-                "rank": rank + 1,
-                "index": int(idx),
-                "coordinates": coordinates[idx],
-                "attention_weight": float(attention_weights[idx]),
-                "patch": patches[idx] if idx < len(patches) else None,
-            })
+            evidence_patches.append(
+                {
+                    "rank": rank + 1,
+                    "index": int(idx),
+                    "coordinates": coordinates[idx],
+                    "attention_weight": float(attention_weights[idx]),
+                    "patch": patches[idx] if idx < len(patches) else None,
+                }
+            )
 
         logger.info(f"Selected top {len(evidence_patches)} evidence patches")
         return evidence_patches
 
     def build_reference_index(
         self,
-        embeddings_list: List[np.ndarray],
-        metadata_list: List[Dict],
+        embeddings_list: list[np.ndarray],
+        metadata_list: list[dict],
     ) -> None:
         """
         Build FAISS index for similarity search.
@@ -205,7 +209,7 @@ class EvidenceGenerator:
         import faiss
 
         # Concatenate all embeddings using numpy (much faster than python loop)
-        all_metadata = []
+        all_metadata: list[dict[str, Any]] = []
         arrays = []
         offset = 0
 
@@ -213,13 +217,17 @@ class EvidenceGenerator:
             n = len(embeddings)
             arrays.append(np.asarray(embeddings, dtype=np.float32))
             for i in range(n):
-                all_metadata.append({
-                    **metadata,
-                    "patch_index": i,
-                })
+                all_metadata.append(
+                    {
+                        **metadata,
+                        "patch_index": i,
+                    }
+                )
             offset += n
 
-        all_embeddings = np.concatenate(arrays, axis=0) if arrays else np.empty((0, 384), dtype=np.float32)
+        all_embeddings = (
+            np.concatenate(arrays, axis=0) if arrays else np.empty((0, 384), dtype=np.float32)
+        )
         total = len(all_embeddings)
 
         logger.info(f"Concatenated {total} patch embeddings from {len(embeddings_list)} slides")
@@ -231,6 +239,8 @@ class EvidenceGenerator:
         # to avoid expensive IVF training.  Flat index handles ~2M vectors fine on
         # 128GB RAM and search is still <100ms for top-k queries.
         self._faiss_index = faiss.IndexFlatL2(dim)
+        if self._faiss_index is None:
+            raise RuntimeError("Failed to initialize FAISS index")
         self._faiss_index.add(all_embeddings)
         self._reference_metadata = all_metadata
 
@@ -240,9 +250,9 @@ class EvidenceGenerator:
         self,
         embeddings: np.ndarray,
         attention_weights: np.ndarray,
-        k: Optional[int] = None,
+        k: int | None = None,
         top_patches: int = 5,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Find similar patches/cases from reference cohort.
 
@@ -273,13 +283,15 @@ class EvidenceGenerator:
         for i, (query_idx, dists, idxs) in enumerate(zip(top_indices, distances, indices)):
             for dist, ref_idx in zip(dists, idxs):
                 if ref_idx >= 0 and ref_idx < len(self._reference_metadata):
-                    similar_cases.append({
-                        "query_patch_index": int(query_idx),
-                        "query_attention": float(attention_weights[query_idx]),
-                        "reference_index": int(ref_idx),
-                        "distance": float(dist),
-                        "metadata": self._reference_metadata[ref_idx],
-                    })
+                    similar_cases.append(
+                        {
+                            "query_patch_index": int(query_idx),
+                            "query_attention": float(attention_weights[query_idx]),
+                            "reference_index": int(ref_idx),
+                            "distance": float(dist),
+                            "metadata": self._reference_metadata[ref_idx],
+                        }
+                    )
 
         # Sort by distance and deduplicate by reference slide
         similar_cases.sort(key=lambda x: x["distance"])
@@ -289,8 +301,9 @@ class EvidenceGenerator:
 
     def save_index(self, path: str | Path) -> None:
         """Save FAISS index to disk."""
-        import faiss
         import pickle
+
+        import faiss
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -303,8 +316,9 @@ class EvidenceGenerator:
 
     def load_index(self, path: str | Path) -> None:
         """Load FAISS index from disk."""
-        import faiss
         import pickle
+
+        import faiss
 
         path = Path(path)
         faiss_path = path.with_suffix(".faiss")
@@ -351,4 +365,5 @@ def create_overlay_image(
     # Composite
     composite = Image.alpha_composite(thumb_pil, heat_pil)
 
-    return np.array(composite.convert("RGB"))
+    composite_array: np.ndarray = np.array(composite.convert("RGB"))
+    return composite_array

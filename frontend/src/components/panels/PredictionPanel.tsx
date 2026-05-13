@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -57,6 +57,7 @@ export function PredictionPanel({
 }: PredictionPanelProps) {
   // Project-aware labels (must be before any returns per Rules of Hooks)
   const { currentProject } = useProject();
+  const [cacheAgeNowMs, setCacheAgeNowMs] = useState<number | null>(null);
   const positiveLabel = currentProject.positive_class || currentProject.classes?.[1] || "Positive";
   const negativeLabel = currentProject.classes?.find(c => c !== currentProject.positive_class) || currentProject.classes?.[0] || "Negative";
   const predictionTargetLabel = humanizeIdentifier(currentProject.prediction_target);
@@ -72,6 +73,36 @@ export function PredictionPanel({
     : "Model predicts likelihood of sensitivity to platinum therapy.";
   const projectDisclaimer =
     "This prediction is for decision support and to enhance interpretability by the physician. Clinical decisions should integrate multiple factors including patient history, other biomarkers, and clinician expertise.";
+
+  useEffect(() => {
+    if (!isCached || !cachedAt) {
+      setCacheAgeNowMs(null);
+      return;
+    }
+
+    setCacheAgeNowMs(Date.now());
+    const interval = setInterval(() => {
+      setCacheAgeNowMs(Date.now());
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [cachedAt, isCached]);
+
+  const cachedAgeLabel = (() => {
+    if (!isCached || !cachedAt || cacheAgeNowMs === null) return "";
+    try {
+      const diffMs = cacheAgeNowMs - new Date(cachedAt).getTime();
+      const min = Math.floor(diffMs / 60000);
+      if (min < 1) return "just now";
+      if (min < 60) return `${min} min ago`;
+      const hr = Math.floor(min / 60);
+      if (hr < 24) return `${hr}h ago`;
+      return `${Math.floor(hr / 24)}d ago`;
+    } catch (err) {
+      console.warn("Date parse error:", err);
+      return "";
+    }
+  })();
 
   const isEarlyStageLabel = (label: string): boolean => {
     const lower = String(label || "").toLowerCase();
@@ -226,17 +257,7 @@ export function PredictionPanel({
           <div className="flex items-center gap-2">
             {isCached && cachedAt && (
               <span className="text-2xs text-gray-400 dark:text-gray-500">
-                {(() => {
-                  try {
-                    const diffMs = Date.now() - new Date(cachedAt).getTime();
-                    const min = Math.floor(diffMs / 60000);
-                    if (min < 1) return "just now";
-                    if (min < 60) return `${min} min ago`;
-                    const hr = Math.floor(min / 60);
-                    if (hr < 24) return `${hr}h ago`;
-                    return `${Math.floor(hr / 24)}d ago`;
-                  } catch (err) { console.warn("Date parse error:", err); return ""; }
-                })()}
+                {cachedAgeLabel}
               </span>
             )}
             {isCached && onReanalyze && (

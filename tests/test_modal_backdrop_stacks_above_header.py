@@ -9,7 +9,7 @@ def _read(path: str) -> str:
 
 def test_header_z_index_reference_is_explicit():
     src = _read("frontend/src/components/layout/Header.tsx")
-    assert 'z-[120]' in src, "Header should keep explicit z-index reference for stacking order"
+    assert "z-[120]" in src, "Header should keep explicit z-index reference for stacking order"
 
 
 def test_core_modals_stack_above_header_with_high_z_index():
@@ -24,12 +24,14 @@ def test_core_modals_stack_above_header_with_high_z_index():
 
     for file_path in modal_files:
         src = _read(file_path)
-        assert (
-            'fixed inset-0 z-[300] flex items-center justify-center' in src
-        ), f"{file_path} should use z-[300] so modal backdrop covers header"
+        assert "fixed inset-0 z-[300] flex items-center justify-center" in src, (
+            f"{file_path} should use z-[300] so modal backdrop covers header"
+        )
 
 
 def test_projects_page_popups_stack_above_header():
     src = _read("frontend/src/app/projects/page.tsx")
-    count = src.count('fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm')
+    count = src.count(
+        "fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+    )
     assert count >= 3, "Projects popups should all use z-[300] backdrop wrappers"

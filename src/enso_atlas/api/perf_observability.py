@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass
 import threading
-from typing import Any, Iterable
+from collections import deque
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -64,7 +65,7 @@ class InMemoryLatencyTracker:
             items = list(self._samples)
 
         durations = [s.duration_ms for s in items]
-        summary = {
+        summary: dict[str, Any] = {
             "window_samples": len(items),
             "p50_ms": round(percentile(durations, 50), 3),
             "p95_ms": round(percentile(durations, 95), 3),

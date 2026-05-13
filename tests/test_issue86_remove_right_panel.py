@@ -10,7 +10,6 @@ These tests verify the frontend source code meets the acceptance criteria:
 """
 
 import pathlib
-import re
 
 FRONTEND_SRC = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "src"
 PAGE_TSX = FRONTEND_SRC / "app" / "page.tsx"
@@ -69,8 +68,11 @@ class TestNoRightPanelLabel:
         source = _read_page()
         # Filter out comment lines — only check rendered strings
         non_comment_lines = [
-            line for line in source.split("\n")
-            if "Right panel" in line and not line.strip().startswith("//") and not line.strip().startswith("*")
+            line
+            for line in source.split("\n")
+            if "Right panel" in line
+            and not line.strip().startswith("//")
+            and not line.strip().startswith("*")
         ]
         assert len(non_comment_lines) == 0, (
             f"Found 'Right panel' in non-comment code: {non_comment_lines}"
@@ -97,23 +99,17 @@ class TestTabBasedNavigation:
     def test_right_sidebar_tabs_uses_role_tablist(self):
         """Tab bar should use proper ARIA role='tablist'."""
         source = _read_page()
-        assert 'role="tablist"' in source, (
-            "Tab bar missing role='tablist' — accessibility issue"
-        )
+        assert 'role="tablist"' in source, "Tab bar missing role='tablist' — accessibility issue"
 
     def test_right_sidebar_tabs_uses_role_tab(self):
         """Individual tabs should use role='tab'."""
         source = _read_page()
-        assert 'role="tab"' in source, (
-            "Individual tabs missing role='tab' — accessibility issue"
-        )
+        assert 'role="tab"' in source, "Individual tabs missing role='tab' — accessibility issue"
 
     def test_icon_mapping_exists(self):
         """RIGHT_PANEL_ICONS mapping should exist for all panel keys."""
         source = _read_page()
-        assert "RIGHT_PANEL_ICONS" in source, (
-            "RIGHT_PANEL_ICONS mapping not found"
-        )
+        assert "RIGHT_PANEL_ICONS" in source, "RIGHT_PANEL_ICONS mapping not found"
         # Check that all expected panel types have icons
         expected_panels = [
             "pathologist-workspace",
@@ -148,26 +144,22 @@ class TestRightPanelAlwaysVisible:
         # The old code had: collapsible collapsedSize="0%"
         # We need to check that the right panel specifically doesn't have these
         # Look for the pattern near "Right Sidebar - Desktop"
-        right_sidebar_section = source[source.find("Right Sidebar - Desktop"):]
+        right_sidebar_section = source[source.find("Right Sidebar - Desktop") :]
         if right_sidebar_section:
             # Get the next ~500 chars which should contain the Panel props
             panel_section = right_sidebar_section[:500]
-            assert "collapsible" not in panel_section, (
-                "Right panel still has 'collapsible' prop"
-            )
-            assert 'collapsedSize' not in panel_section, (
+            assert "collapsible" not in panel_section, "Right panel still has 'collapsible' prop"
+            assert "collapsedSize" not in panel_section, (
                 "Right panel still has 'collapsedSize' prop"
             )
 
     def test_right_panel_has_minimum_size(self):
         """Right panel should have a reasonable minSize to stay visible."""
         source = _read_page()
-        right_sidebar_section = source[source.find("Right Sidebar - Desktop"):]
+        right_sidebar_section = source[source.find("Right Sidebar - Desktop") :]
         if right_sidebar_section:
             panel_section = right_sidebar_section[:500]
-            assert 'minSize=' in panel_section, (
-                "Right panel missing minSize constraint"
-            )
+            assert "minSize=" in panel_section, "Right panel missing minSize constraint"
 
 
 class TestFunctionalParity:
@@ -201,10 +193,8 @@ class TestFunctionalParity:
     def test_left_panel_still_collapsible(self):
         """Left panel should remain collapsible (it's useful to hide slide list)."""
         source = _read_page()
-        left_section = source[source.find("Left Sidebar - Desktop"):source.find("Center - WSI")]
-        assert "collapsible" in left_section, (
-            "Left panel lost collapsible behavior"
-        )
+        left_section = source[source.find("Left Sidebar - Desktop") : source.find("Center - WSI")]
+        assert "collapsible" in left_section, "Left panel lost collapsible behavior"
 
 
 class TestNoChevronImports:
@@ -214,11 +204,7 @@ class TestNoChevronImports:
         """ChevronLeft/ChevronRight should not be imported (no longer needed)."""
         source = _read_page()
         # Check the import line specifically
-        import_lines = [line for line in source.split("\n") if "from \"lucide-react\"" in line]
+        import_lines = [line for line in source.split("\n") if 'from "lucide-react"' in line]
         for line in import_lines:
-            assert "ChevronLeft" not in line, (
-                "ChevronLeft still imported — unused icon"
-            )
-            assert "ChevronRight" not in line, (
-                "ChevronRight still imported — unused icon"
-            )
+            assert "ChevronLeft" not in line, "ChevronLeft still imported — unused icon"
+            assert "ChevronRight" not in line, "ChevronRight still imported — unused icon"

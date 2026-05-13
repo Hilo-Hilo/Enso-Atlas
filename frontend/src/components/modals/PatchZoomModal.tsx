@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useCallback } from "react";
+import NextImage from "next/image";
 import { cn, humanizeIdentifier } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -223,11 +224,14 @@ export function PatchZoomModal({
               className="w-full h-full flex items-center justify-center p-8 overflow-auto"
               style={{ cursor: zoomLevel > 1 ? "grab" : "default" }}
             >
-              <img
+              <NextImage
                 src={patch.thumbnailUrl}
                 alt={`Evidence patch ${currentRank}`}
+                width={768}
+                height={768}
+                unoptimized
                 className="max-w-full max-h-full object-contain rounded-lg shadow-xl transition-transform duration-200"
-                style={{ transform: `scale(${zoomLevel})` }}
+                style={{ transform: `scale(${zoomLevel})`, width: "auto", height: "auto" }}
               />
             </div>
 

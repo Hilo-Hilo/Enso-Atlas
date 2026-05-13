@@ -212,6 +212,7 @@ export function MultiModelPredictionPanel({
   onReanalyze,
 }: MultiModelPredictionPanelProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [cacheAgeNowMs, setCacheAgeNowMs] = useState<number | null>(null);
   const { currentProject } = useProject();
 
   const hasTrustedAvailableModels =
@@ -237,12 +238,25 @@ export function MultiModelPredictionPanel({
     return () => clearInterval(interval);
   }, [embeddingProgress?.startTime]);
 
+  useEffect(() => {
+    if (!isCached || !cachedAt) {
+      setCacheAgeNowMs(null);
+      return;
+    }
+
+    setCacheAgeNowMs(Date.now());
+    const interval = setInterval(() => {
+      setCacheAgeNowMs(Date.now());
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [cachedAt, isCached]);
+
   const formatCachedTime = (isoStr: string | null | undefined): string => {
-    if (!isoStr) return "";
+    if (!isoStr || cacheAgeNowMs === null) return "";
     try {
       const then = new Date(isoStr).getTime();
-      const now = Date.now();
-      const diffMs = now - then;
+      const diffMs = cacheAgeNowMs - then;
       const diffMin = Math.floor(diffMs / 60000);
       if (diffMin < 1) return "just now";
       if (diffMin < 60) return `${diffMin} min ago`;

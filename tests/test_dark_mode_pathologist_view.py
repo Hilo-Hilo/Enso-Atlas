@@ -42,7 +42,10 @@ class TestPathologistAnnotationAreaDarkMode:
 
     def test_note_input_dark_style(self):
         src = _src()
-        assert "dark:border-navy-600 dark:bg-navy-900 dark:text-gray-100 dark:placeholder:text-gray-400" in src
+        assert (
+            "dark:border-navy-600 dark:bg-navy-900 dark:text-gray-100 dark:placeholder:text-gray-400"
+            in src
+        )
 
     def test_annotation_list_dark_surface(self):
         src = _src()
@@ -89,7 +92,10 @@ class TestPathologistExportDarkMode:
 
     def test_secondary_action_buttons_dark_overrides(self):
         src = _src()
-        assert "const secondaryButtonDarkClass = \"dark:bg-navy-700 dark:text-gray-100 dark:border-navy-500 dark:hover:bg-navy-600" in src
+        assert (
+            'const secondaryButtonDarkClass = "dark:bg-navy-700 dark:text-gray-100 dark:border-navy-500 dark:hover:bg-navy-600'
+            in src
+        )
 
     def test_saved_state_icon_dark_green(self):
         src = _src()

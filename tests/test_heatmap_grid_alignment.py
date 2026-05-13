@@ -6,7 +6,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HEATMAP_GRID_PATH = REPO_ROOT / "src" / "enso_atlas" / "api" / "heatmap_grid.py"
 _spec = importlib.util.spec_from_file_location("heatmap_grid", HEATMAP_GRID_PATH)
@@ -55,13 +54,16 @@ def test_osd_overlay_width_scales_to_grid_coverage_ratio():
 def test_frontend_alignment_formula_present_in_viewer_regression_contract():
     src = _read("frontend/src/components/viewer/WSIViewer.tsx")
 
-    assert "const fallbackCoverageW = Math.ceil(contentSize.x / DEFAULT_PATCH_SIZE_PX) * DEFAULT_PATCH_SIZE_PX;" in src
+    assert (
+        "const fallbackCoverageW = Math.ceil(contentSize.x / DEFAULT_PATCH_SIZE_PX) * DEFAULT_PATCH_SIZE_PX;"
+        in src
+    )
     assert "const widthScale = bounds.width / contentSize.x;" in src
     assert "const heatmapWorldWidth = coverageW * widthScale;" in src
 
 
 def test_backend_model_heatmap_sets_coverage_headers_from_shared_helper():
-    src = _read("src/enso_atlas/api/main.py")
+    src = _read("src/enso_atlas/api/model_heatmap_routes.py")
 
     assert "from .heatmap_grid import compute_heatmap_grid_coverage" in src
     assert '"X-Coverage-Width": str(_coverage.coverage_width)' in src
@@ -69,7 +71,7 @@ def test_backend_model_heatmap_sets_coverage_headers_from_shared_helper():
 
 
 def test_backend_model_heatmap_supports_refresh_nonce_and_bypasses_disk_cache():
-    src = _read("src/enso_atlas/api/main.py")
+    src = _read("src/enso_atlas/api/model_heatmap_routes.py")
 
     assert "analysis_run_id" in src
     assert "force_refresh = bool(refresh or (analysis_run_id and analysis_run_id.strip()))" in src
@@ -77,26 +79,29 @@ def test_backend_model_heatmap_supports_refresh_nonce_and_bypasses_disk_cache():
 
 
 def test_backend_model_heatmap_cache_key_tracks_model_checkpoint_signature():
-    src = _read("src/enso_atlas/api/main.py")
+    src = _read("src/enso_atlas/api/model_heatmap_routes.py")
 
     assert "checkpoint_signature" in src
     # Cache key must include checkpoint + data signatures and per-alpha variants.
-    assert "checkpoint_suffix = hashlib.sha1(checkpoint_signature.encode(\"utf-8\")).hexdigest()[:10]" in src
+    assert (
+        'checkpoint_suffix = hashlib.sha1(checkpoint_signature.encode("utf-8")).hexdigest()[:10]'
+        in src
+    )
     assert "data_signature" in src
-    assert "alpha_key = f\"{alpha_power:.2f}\"" in src
+    assert 'alpha_key = f"{alpha_power:.2f}"' in src
     assert "_a{alpha_key}_v7.png" in src
     assert "attn_v1.npy" in src
     assert "Detected checkpoint update" in src
 
 
 def test_backend_model_heatmap_disables_http_caching():
-    src = _read("src/enso_atlas/api/main.py")
+    src = _read("src/enso_atlas/api/model_heatmap_routes.py")
 
     assert '"Cache-Control": "no-store, max-age=0"' in src
     assert '"Pragma": "no-cache"' in src
 
 
 def test_pdf_heatmap_path_does_not_fabricate_synthetic_coords_when_missing():
-    src = _read("src/enso_atlas/api/main.py")
+    src = _read("src/enso_atlas/api/pdf_routes.py")
 
     assert "cannot generate truthful PDF heatmap" in src

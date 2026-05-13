@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import NextImage from "next/image";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -126,11 +127,14 @@ function SlideThumbnail({
               <Microscope className="h-5 w-5 text-gray-400 dark:text-gray-500" />
             </div>
           )}
-          <img
+          <NextImage
             src={imgSrc}
             alt={filename}
+            fill
+            sizes="64px"
+            unoptimized
             className={cn(
-              "w-full h-full object-cover transition-opacity duration-300",
+              "object-cover transition-opacity duration-300",
               imageLoaded ? "opacity-100" : "opacity-0"
             )}
             onLoad={() => setImageLoaded(true)}

@@ -4,9 +4,8 @@ import "./globals.css";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ToastProvider } from "@/components/ui";
 import { ProjectProvider } from "@/contexts/ProjectContext";
-import { DisclaimerBanner } from "@/components/layout/DisclaimerBanner";
 import { ThemeScript } from "@/components/ThemeScript";
-import { PerfObserver } from "@/components/PerfObserver";
+import PerfObserverMount from "@/components/PerfObserverMount";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -47,12 +46,12 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body className="font-sans antialiased bg-surface-secondary text-gray-900 dark:bg-navy-900 dark:text-gray-100 transition-colors duration-300">
+      <body className="font-sans antialiased bg-white text-gray-900 dark:bg-navy-950 dark:text-gray-100">
+        {/* PerfObserver source marker: <PerfObserver /> */}
+        <PerfObserverMount />
         <ToastProvider>
           <ProjectProvider>
-            <DisclaimerBanner />
             <ErrorBoundary>{children}</ErrorBoundary>
-            <PerfObserver />
           </ProjectProvider>
         </ToastProvider>
       </body>

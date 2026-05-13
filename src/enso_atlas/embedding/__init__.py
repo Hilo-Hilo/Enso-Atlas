@@ -1,11 +1,11 @@
 """Embedding modules for Enso Atlas."""
 
 from .embedder import PathFoundationEmbedder
-from .medsiglip import MedSigLIPEmbedder, MedSigLIPConfig, PATHOLOGY_QUERIES
+from .medsiglip import PATHOLOGY_QUERIES, MedSigLIPConfig, MedSigLIPEmbedder
 
 __all__ = [
     "PathFoundationEmbedder",
-    "MedSigLIPEmbedder", 
+    "MedSigLIPEmbedder",
     "MedSigLIPConfig",
     "PATHOLOGY_QUERIES",
 ]

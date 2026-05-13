@@ -9,18 +9,15 @@ Provides an interactive interface for:
 - Report generation and export
 """
 
-from pathlib import Path
-from typing import Optional, Tuple
-import logging
 import json
+import logging
 import tempfile
-
-import numpy as np
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(config_path: Optional[str] = None):
+def create_app(config_path: str | None = None):
     """
     Create the Gradio interface for Enso Atlas.
 
@@ -33,8 +30,8 @@ def create_app(config_path: Optional[str] = None):
     import gradio as gr
     from PIL import Image
 
-    from ..core import EnsoAtlas
     from ..config import AtlasConfig
+    from ..core import EnsoAtlas
     from ..evidence.generator import create_overlay_image
 
     # Load configuration
@@ -106,7 +103,7 @@ def create_app(config_path: Optional[str] = None):
                 pred_text,
                 evidence_text,
                 evidence_images[:12] if evidence_images else None,
-                None  # Report placeholder
+                None,  # Report placeholder
             )
 
         except Exception as e:
@@ -156,9 +153,8 @@ def create_app(config_path: Optional[str] = None):
         css="""
         .main-header { text-align: center; margin-bottom: 20px; }
         .evidence-gallery { max-height: 400px; overflow-y: auto; }
-        """
+        """,
     ) as app:
-
         gr.Markdown(
             """
             # Enso Atlas
@@ -166,7 +162,7 @@ def create_app(config_path: Optional[str] = None):
 
             Upload a whole-slide image (WSI) to analyze treatment response prediction with interpretable evidence.
             """,
-            elem_classes=["main-header"]
+            elem_classes=["main-header"],
         )
 
         with gr.Row():

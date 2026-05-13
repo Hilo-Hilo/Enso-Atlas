@@ -25,20 +25,17 @@ SRC_PATH = "frontend/src/components/panels/SemanticSearchPanel.tsx"
 
 # ─── 1. Search Input Dark Mode ──────────────────────────────────────────
 
+
 class TestSearchInputDarkMode:
     """The main text input must be readable on navy backgrounds."""
 
     def test_input_has_dark_bg(self):
         src = _read(SRC_PATH)
-        assert "dark:bg-navy-700" in src, (
-            "Search input must have dark:bg-navy-700 background"
-        )
+        assert "dark:bg-navy-700" in src, "Search input must have dark:bg-navy-700 background"
 
     def test_input_has_dark_border(self):
         src = _read(SRC_PATH)
-        assert "dark:border-navy-600" in src, (
-            "Search input must have dark:border-navy-600"
-        )
+        assert "dark:border-navy-600" in src, "Search input must have dark:border-navy-600"
 
     def test_input_has_dark_text(self):
         src = _read(SRC_PATH)
@@ -67,6 +64,7 @@ class TestSearchInputDarkMode:
 
 # ─── 2. Select (topK) Dropdown Dark Mode ────────────────────────────────
 
+
 class TestSelectDropdownDarkMode:
     """The results-count <select> must be styled for dark mode."""
 
@@ -74,51 +72,38 @@ class TestSelectDropdownDarkMode:
         src = _read(SRC_PATH)
         # The select element has the same dark:bg-navy-700
         count = src.count("dark:bg-navy-700")
-        assert count >= 2, (
-            f"Both input and select must have dark:bg-navy-700 (found {count})"
-        )
+        assert count >= 2, f"Both input and select must have dark:bg-navy-700 (found {count})"
 
     def test_select_label_has_dark_text(self):
         src = _read(SRC_PATH)
-        assert "dark:text-gray-400" in src, (
-            "Results label must have dark:text-gray-400"
-        )
+        assert "dark:text-gray-400" in src, "Results label must have dark:text-gray-400"
 
 
 # ─── 3. Example-Query Chips Dark Mode ───────────────────────────────────
+
 
 class TestExampleChipsDarkMode:
     """Example query chips must be visible on dark backgrounds."""
 
     def test_chips_have_dark_bg(self):
         src = _read(SRC_PATH)
-        assert "dark:bg-navy-700" in src, (
-            "Example chips must have dark background"
-        )
+        assert "dark:bg-navy-700" in src, "Example chips must have dark background"
 
     def test_chips_have_dark_border(self):
         src = _read(SRC_PATH)
-        assert "dark:border-navy-600" in src, (
-            "Example chips must have dark border"
-        )
+        assert "dark:border-navy-600" in src, "Example chips must have dark border"
 
     def test_chips_have_dark_text(self):
         src = _read(SRC_PATH)
-        assert "dark:text-gray-300" in src, (
-            "Example chips must have dark:text-gray-300"
-        )
+        assert "dark:text-gray-300" in src, "Example chips must have dark:text-gray-300"
 
     def test_chips_have_dark_hover_border(self):
         src = _read(SRC_PATH)
-        assert "dark:hover:border-clinical-500" in src, (
-            "Example chips must have dark hover border"
-        )
+        assert "dark:hover:border-clinical-500" in src, "Example chips must have dark hover border"
 
     def test_chips_have_dark_hover_bg(self):
         src = _read(SRC_PATH)
-        assert "dark:hover:bg-navy-600" in src, (
-            "Example chips must have dark hover background"
-        )
+        assert "dark:hover:bg-navy-600" in src, "Example chips must have dark hover background"
 
     def test_chips_have_dark_hover_text(self):
         src = _read(SRC_PATH)
@@ -129,21 +114,20 @@ class TestExampleChipsDarkMode:
     def test_try_label_has_dark_text(self):
         src = _read(SRC_PATH)
         # The "Try:" label next to the lightbulb icon
-        assert 'text-gray-500 dark:text-gray-400' in src, (
+        assert "text-gray-500 dark:text-gray-400" in src, (
             "'Try:' label must have dark:text-gray-400"
         )
 
 
 # ─── 4. Result Card Dark Mode ───────────────────────────────────────────
 
+
 class TestResultCardDarkMode:
     """Search result items must be styled for dark mode."""
 
     def test_card_default_has_dark_bg(self):
         src = _read(SRC_PATH)
-        assert "dark:bg-navy-800" in src, (
-            "Result card default state must have dark:bg-navy-800"
-        )
+        assert "dark:bg-navy-800" in src, "Result card default state must have dark:bg-navy-800"
 
     def test_card_default_has_dark_border(self):
         src = _read(SRC_PATH)
@@ -196,13 +180,11 @@ class TestResultCardDarkMode:
 
     def test_patch_name_has_dark_text(self):
         src = _read(SRC_PATH)
-        assert 'text-gray-900 dark:text-gray-100' in src, (
-            "Patch name must have dark:text-gray-100"
-        )
+        assert "text-gray-900 dark:text-gray-100" in src, "Patch name must have dark:text-gray-100"
 
     def test_coordinates_text_has_dark_variant(self):
         src = _read(SRC_PATH)
-        assert 'text-gray-500 dark:text-gray-400' in src, (
+        assert "text-gray-500 dark:text-gray-400" in src, (
             "Coordinates text must have dark:text-gray-400"
         )
 
@@ -214,7 +196,7 @@ class TestResultCardDarkMode:
 
     def test_zoom_icon_has_dark_color(self):
         src = _read(SRC_PATH)
-        assert 'text-clinical-600 dark:text-clinical-400' in src, (
+        assert "text-clinical-600 dark:text-clinical-400" in src, (
             "ZoomIn icon must have dark:text-clinical-400"
         )
 
@@ -226,6 +208,7 @@ class TestResultCardDarkMode:
 
 
 # ─── 5. Results Divider and Header ──────────────────────────────────────
+
 
 class TestResultsHeaderDarkMode:
     """The results section header/divider must be dark-styled."""
@@ -239,7 +222,7 @@ class TestResultsHeaderDarkMode:
     def test_results_header_text_has_dark_variant(self):
         src = _read(SRC_PATH)
         # "Matching Patches" and "Similarity Score" are in text-gray-500 dark:text-gray-400
-        assert 'text-gray-500 dark:text-gray-400' in src, (
+        assert "text-gray-500 dark:text-gray-400" in src, (
             "Results header text must have dark variant"
         )
 
@@ -252,53 +235,48 @@ class TestResultsHeaderDarkMode:
 
 # ─── 6. Error State Dark Mode ───────────────────────────────────────────
 
+
 class TestErrorStateDarkMode:
     """Error banner must be readable in dark mode."""
 
     def test_error_bg_has_dark_variant(self):
         src = _read(SRC_PATH)
-        assert "dark:bg-red-900/30" in src, (
-            "Error banner must have dark:bg-red-900/30"
-        )
+        assert "dark:bg-red-900/30" in src, "Error banner must have dark:bg-red-900/30"
 
     def test_error_border_has_dark_variant(self):
         src = _read(SRC_PATH)
-        assert "dark:border-red-800" in src, (
-            "Error banner must have dark:border-red-800"
-        )
+        assert "dark:border-red-800" in src, "Error banner must have dark:border-red-800"
 
     def test_error_text_has_dark_variant(self):
         src = _read(SRC_PATH)
-        assert "dark:text-red-300" in src, (
-            "Error text must have dark:text-red-300"
-        )
+        assert "dark:text-red-300" in src, "Error text must have dark:text-red-300"
 
 
 # ─── 7. Unavailable / Empty States Dark Mode ────────────────────────────
+
 
 class TestUnavailableStateDarkMode:
     """The 'search unavailable' state must not clash in dark mode."""
 
     def test_unavailable_icon_bg_has_dark_variant(self):
         src = _read(SRC_PATH)
-        assert "dark:bg-navy-700" in src, (
-            "Unavailable icon background must have dark variant"
-        )
+        assert "dark:bg-navy-700" in src, "Unavailable icon background must have dark variant"
 
     def test_unavailable_title_has_dark_text(self):
         src = _read(SRC_PATH)
-        assert 'text-gray-600 dark:text-gray-300' in src, (
+        assert "text-gray-600 dark:text-gray-300" in src, (
             "Unavailable title must have dark:text-gray-300"
         )
 
     def test_no_results_state_has_dark_text(self):
         src = _read(SRC_PATH)
-        assert 'text-gray-500 dark:text-gray-400' in src, (
+        assert "text-gray-500 dark:text-gray-400" in src, (
             "No-results state must have dark text variant"
         )
 
 
 # ─── 8. Clear Button Dark Mode ──────────────────────────────────────────
+
 
 class TestClearButtonDarkMode:
     """Clear (X) button must be visible in dark mode."""
@@ -312,59 +290,45 @@ class TestClearButtonDarkMode:
 
 # ─── 9. Light Mode Unchanged ────────────────────────────────────────────
 
+
 class TestLightModePreserved:
     """Verify light-mode classes are still present (no regressions)."""
 
     def test_input_still_has_light_border(self):
         src = _read(SRC_PATH)
-        assert "border-gray-300" in src, (
-            "Input must keep light border-gray-300"
-        )
+        assert "border-gray-300" in src, "Input must keep light border-gray-300"
 
     def test_input_still_has_light_focus(self):
         src = _read(SRC_PATH)
-        assert "focus:border-clinical-500" in src, (
-            "Input must keep light focus:border-clinical-500"
-        )
+        assert "focus:border-clinical-500" in src, "Input must keep light focus:border-clinical-500"
 
     def test_chips_still_have_light_bg(self):
         src = _read(SRC_PATH)
-        assert "bg-gray-50" in src, (
-            "Chips must keep light bg-gray-50"
-        )
+        assert "bg-gray-50" in src, "Chips must keep light bg-gray-50"
 
     def test_chips_still_have_light_hover(self):
         src = _read(SRC_PATH)
-        assert "hover:bg-clinical-50" in src, (
-            "Chips must keep light hover:bg-clinical-50"
-        )
+        assert "hover:bg-clinical-50" in src, "Chips must keep light hover:bg-clinical-50"
 
     def test_result_card_still_has_bg_white(self):
         src = _read(SRC_PATH)
-        assert "bg-white" in src, (
-            "Result cards must keep light bg-white"
-        )
+        assert "bg-white" in src, "Result cards must keep light bg-white"
 
     def test_error_still_has_light_bg(self):
         src = _read(SRC_PATH)
-        assert "bg-red-50" in src, (
-            "Error banner must keep light bg-red-50"
-        )
+        assert "bg-red-50" in src, "Error banner must keep light bg-red-50"
 
     def test_unavailable_still_has_light_bg(self):
         src = _read(SRC_PATH)
-        assert "bg-gray-100" in src, (
-            "Unavailable state must keep light bg-gray-100"
-        )
+        assert "bg-gray-100" in src, "Unavailable state must keep light bg-gray-100"
 
     def test_result_selected_still_has_light_bg(self):
         src = _read(SRC_PATH)
-        assert "bg-clinical-50" in src, (
-            "Selected result card must keep light bg-clinical-50"
-        )
+        assert "bg-clinical-50" in src, "Selected result card must keep light bg-clinical-50"
 
 
 # ─── 10. Title Icon Dark Mode ───────────────────────────────────────────
+
 
 class TestTitleIconDarkMode:
     """Panel title icon must have dark variant."""
